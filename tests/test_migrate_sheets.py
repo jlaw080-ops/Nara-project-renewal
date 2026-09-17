@@ -5,7 +5,7 @@ import pytest
 from nara.award import pending_award_bid_nos
 from nara.config import load_settings
 from nara.db import connect, migrate
-from nara.migrate_sheets import import_tab
+from nara.migrate_sheets import _to_float, import_tab
 from nara.runlog import RunCounters
 
 SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
@@ -26,6 +26,17 @@ HEADER = [
     "공고번호",
     "낙찰일(개찰일)",
     "ZEB 인증등급",
+    "연면적(㎡, jootek)",
+    "신재생 공급의무비율",
+    "기타 인증요건",
+    "지침서 명시 설비",
+    "전화번호",
+    "부서장",
+    "직위",
+    "공고일(예정일)",
+    "공고URL",
+    "공고종류",
+    "입찰마감일",
 ]
 
 
@@ -58,6 +69,17 @@ def test_import_tab_creates_notice_for_row_with_bid_number(conn):
                 "R26BK01418098",
                 "",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
             ]
         ]
     )
@@ -86,6 +108,17 @@ def test_import_tab_links_the_org_on_imported_notices(conn):
                 "R1",
                 "",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
             ]
         ]
     )
@@ -110,6 +143,17 @@ def test_import_tab_creates_manual_project_for_row_without_bid_number(conn):
                 "",
                 "",
                 "지열 수직밀폐형 1031.044kW",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 "",
                 "",
                 "",
@@ -145,6 +189,17 @@ def test_import_tab_splits_energy_plan_into_rows(conn):
                 "",
                 "",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
             ]
         ]
     )
@@ -175,6 +230,17 @@ def test_import_tab_records_status_as_imported(conn):
                 "R1",
                 "",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
             ]
         ]
     )
@@ -203,6 +269,17 @@ def test_import_tab_records_department_as_imported(conn):
                 "",
                 "",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
             ]
         ]
     )
@@ -213,7 +290,7 @@ def test_import_tab_records_department_as_imported(conn):
 
 
 def test_import_tab_skips_rows_without_org_or_title(conn):
-    text = _tsv([["", "", "", "", "", "", "", "", "", "", "", "", "", ""]])
+    text = _tsv([[""] * len(HEADER)])
     stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     assert stats.skipped == 1
     assert conn.execute("SELECT COUNT(*) FROM project").fetchone()[0] == 0
@@ -238,9 +315,46 @@ def test_import_tab_counts_every_row_for_reconciliation(conn):
                 "R1",
                 "",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
             ],
-            ["전북특별자치도 고창군", "수기 사업", "", "", "", "", "", "", "", "", "", "", "", ""],
-            ["", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+            [
+                "전북특별자치도 고창군",
+                "수기 사업",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ],
+            [""] * len(HEADER),
         ]
     )
     stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
@@ -265,6 +379,17 @@ def test_import_tab_reconciles_on_a_second_run(conn):
                 "",
                 "",
                 "R1",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 "",
                 "",
             ]
@@ -294,6 +419,17 @@ def test_import_tab_puts_sheet_budget_on_project_note_not_notice_budget_basis(co
                 "",
                 "",
                 "R1",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 "",
                 "",
             ]
@@ -353,6 +489,17 @@ def test_import_tab_is_idempotent(conn):
                 "R1",
                 "",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
             ]
         ]
     )
@@ -381,6 +528,17 @@ def test_import_tab_stores_open_date_for_award_lookup(conn):
                 "R1",
                 "2026.05.01",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
             ]
         ]
     )
@@ -400,6 +558,17 @@ def test_import_tab_reports_zero_new_projects_on_second_run(conn):
             [
                 "전북특별자치도 고창군",
                 "고창터미널",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 "",
                 "",
                 "",
@@ -440,8 +609,19 @@ def test_import_tab_flags_skipped_rows_that_have_data(conn):
                 "",
                 "",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
             ],
-            ["", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+            [""] * len(HEADER),
         ]
     )
     stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
@@ -469,11 +649,206 @@ def test_import_tab_advances_counters_processed_per_row(conn):
                 "R1",
                 "",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
             ],
-            ["", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+            [""] * len(HEADER),
         ]
     )
     counters = RunCounters()
     stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW, counters)
     assert counters.processed == 2
     assert stats.rows == 2
+
+
+def test_import_tab_maps_new_sheet_columns(conn):
+    """새로 매핑한 헤더가 각자의 목적지 테이블·칼럼에 정확히 들어가야 한다."""
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 완주군",
+                "완주 체육관 신축공사",
+                "",
+                "",
+                "",
+                "건설과",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "R1",
+                "",
+                "",
+                "12,345.67",
+                "20%",
+                "지열 인증 필요",
+                "냉난방기 3대",
+                "063-000-0000",
+                "홍길동",
+                "과장",
+                "2026.09.10",
+                "http://example.com/notice/1",
+                "일반공고",
+                "2026.09.30",
+            ]
+        ]
+    )
+    import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
+
+    project = conn.execute(
+        "SELECT floor_area, re_ratio, etc_cert, guide_equip FROM project "
+        "WHERE name = '완주 체육관 신축공사'"
+    ).fetchone()
+    assert project["floor_area"] == 12345.67
+    assert isinstance(project["floor_area"], float)
+    assert project["re_ratio"] == "20%"
+    assert project["etc_cert"] == "지열 인증 필요"
+    assert project["guide_equip"] == "냉난방기 3대"
+
+    notice = conn.execute(
+        "SELECT notice_date, close_date, url, kind FROM notice WHERE bid_no = 'R1'"
+    ).fetchone()
+    assert notice["notice_date"] == "2026-09-10"
+    assert notice["close_date"] == "2026-09-30"
+    assert notice["url"] == "http://example.com/notice/1"
+    assert notice["kind"] == "일반공고"
+
+    dept = conn.execute("SELECT head_tel, snippet FROM dept_check").fetchone()
+    assert dept["head_tel"] == "063-000-0000"
+    assert dept["snippet"] == "부서장 홍길동 과장"
+
+
+def test_import_tab_leaves_snippet_null_when_head_and_position_are_blank(conn):
+    """담당부서는 있어도 부서장·직위가 둘 다 비면 snippet은 NULL이어야 한다."""
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 고창군",
+                "고창갯벌 센터",
+                "",
+                "",
+                "",
+                "세계유산과",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ]
+        ]
+    )
+    import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
+    dept = conn.execute("SELECT head_tel, snippet FROM dept_check").fetchone()
+    assert dept["head_tel"] is None
+    assert dept["snippet"] is None
+
+
+def test_import_tab_does_not_clobber_existing_project_values_with_empty_cells(conn):
+    """빈 칸이 이미 채워진 project 값을 지우면 안 된다 — COALESCE 규칙은 새 칼럼에도 적용된다."""
+    first = _tsv(
+        [
+            [
+                "전북특별자치도 완주군",
+                "완주 체육관",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "100.5",
+                "10%",
+                "인증A",
+                "장비A",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ]
+        ]
+    )
+    second = _tsv(
+        [
+            [
+                "전북특별자치도 완주군",
+                "완주 체육관",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ]
+        ]
+    )
+    import_tab(conn, "전북특별자치도", first, SETTINGS, NOW)
+    import_tab(conn, "전북특별자치도", second, SETTINGS, NOW)
+    project = conn.execute(
+        "SELECT floor_area, re_ratio, etc_cert, guide_equip FROM project WHERE name = '완주 체육관'"
+    ).fetchone()
+    assert project["floor_area"] == 100.5
+    assert project["re_ratio"] == "10%"
+    assert project["etc_cert"] == "인증A"
+    assert project["guide_equip"] == "장비A"
+
+
+def test_to_float_returns_none_for_empty_string():
+    assert _to_float("") is None
+
+
+def test_to_float_returns_none_for_unparseable_text():
+    assert _to_float("면적 미상") is None
+
+
+def test_to_float_parses_thousands_separator():
+    assert _to_float("1,234.56") == 1234.56

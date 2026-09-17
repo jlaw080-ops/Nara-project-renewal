@@ -29,6 +29,17 @@ COLUMNS = {
     "bid_no": "공고번호",
     "open_date": "낙찰일(개찰일)",
     "zeb": "ZEB 인증등급",
+    "floor_area": "연면적(㎡, jootek)",
+    "re_ratio": "신재생 공급의무비율",
+    "etc_cert": "기타 인증요건",
+    "guide_equip": "지침서 명시 설비",
+    "head_tel": "전화번호",
+    "dept_head": "부서장",
+    "dept_position": "직위",
+    "notice_date": "공고일(예정일)",
+    "notice_url": "공고URL",
+    "notice_kind": "공고종류",
+    "close_date": "입찰마감일",
 }
 
 
@@ -46,6 +57,25 @@ class ImportStats:
     physical_lines: int = 0
     merges: int = 0
     truncations: int = 0
+
+
+def _to_float(value: str) -> float | None:
+    """'1,234.56' → 1234.56. 빈 값·해석 불가 문자열은 None(예외를 던지지 않는다)."""
+    s = (value or "").strip().replace(",", "")
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _dept_snippet(head: str, position: str) -> str | None:
+    """'부서장 <이름> <직위>' — 이름·직위 어느 한쪽이 비어도 있는 쪽만 붙인다."""
+    parts = [p for p in (head, position) if p]
+    if not parts:
+        return None
+    return " ".join(["부서장", *parts])
 
 
 def _split_status(text: str) -> tuple[str, str]:
@@ -117,12 +147,20 @@ def import_tab(
             "start_date = COALESCE(NULLIF(?, ''), start_date), "
             "end_date = COALESCE(NULLIF(?, ''), end_date), "
             "zeb_grade = COALESCE(NULLIF(?, ''), zeb_grade), "
+            "floor_area = COALESCE(?, floor_area), "
+            "re_ratio = COALESCE(NULLIF(?, ''), re_ratio), "
+            "etc_cert = COALESCE(NULLIF(?, ''), etc_cert), "
+            "guide_equip = COALESCE(NULLIF(?, ''), guide_equip), "
             "note = COALESCE(NULLIF(?, ''), note), updated_at = ? WHERE id = ?",
             (
                 cell(row, "address"),
                 to_iso_date(cell(row, "start_date")),
                 to_iso_date(cell(row, "end_date")),
                 cell(row, "zeb"),
+                _to_float(cell(row, "floor_area")),
+                cell(row, "re_ratio"),
+                cell(row, "etc_cert"),
+                cell(row, "guide_equip"),
                 note_value,
                 now,
                 project_id,
@@ -136,14 +174,19 @@ def import_tab(
                 # (open_date != '' AND open_date <= today)에 영영 들어오지 못한다.
                 conn.execute(
                     "INSERT INTO notice (bid_no, project_id, org_id, org_name, title, "
-                    "open_date, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "notice_date, open_date, close_date, url, kind, collected_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         bid_no,
                         project_id,
                         org_id,
                         org_name,
                         title,
+                        to_iso_date(cell(row, "notice_date")),
                         to_iso_date(cell(row, "open_date")),
+                        to_iso_date(cell(row, "close_date")),
+                        cell(row, "notice_url"),
+                        cell(row, "notice_kind"),
                         now,
                     ),
                 )
@@ -176,9 +219,16 @@ def import_tab(
             ).fetchone():
                 conn.execute(
                     "INSERT INTO dept_check "
-                    "(project_id, bid_no, exec_dept, decided_by, checked_at) "
-                    "VALUES (?, ?, ?, 'imported', ?)",
-                    (project_id, bid_no or None, dept, now),
+                    "(project_id, bid_no, exec_dept, head_tel, snippet, decided_by, checked_at) "
+                    "VALUES (?, ?, ?, ?, ?, 'imported', ?)",
+                    (
+                        project_id,
+                        bid_no or None,
+                        dept,
+                        cell(row, "head_tel") or None,
+                        _dept_snippet(cell(row, "dept_head"), cell(row, "dept_position")),
+                        now,
+                    ),
                 )
                 stats.dept += 1
 
