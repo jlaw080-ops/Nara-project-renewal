@@ -70,3 +70,16 @@ def read_signals(article: Article) -> frozenset[str]:
     if any(w in text for w in _PLANNED_WORDS):
         found.add(SIGNAL_PLANNED)
     return frozenset(found)
+
+
+_STRONG = (BUILDING, DONE)
+
+
+def demote_without_evidence(verdict: str, evidence_url: str | None) -> tuple[str, str | None]:
+    """근거 URL 없는 '시공 중'·'준공 완료'는 '착공 전'으로 내린다.
+
+    (판정, 강등 메모). 강등하지 않았으면 메모는 None이다.
+    """
+    if verdict in _STRONG and not (evidence_url or "").strip():
+        return BEFORE, f"근거 URL이 없어 '{verdict}' 주장을 착공 전으로 내림"
+    return verdict, None

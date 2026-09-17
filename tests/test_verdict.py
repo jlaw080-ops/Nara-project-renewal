@@ -1,5 +1,7 @@
 from nara.verdict import (
     BEFORE,
+    BUILDING,
+    DONE,
     SIGNAL_DEMOLITION,
     SIGNAL_DESIGN,
     SIGNAL_DONE,
@@ -8,6 +10,7 @@ from nara.verdict import (
     UNKNOWN,
     Article,
     Facts,
+    demote_without_evidence,
     read_signals,
     rule_verdict,
 )
@@ -84,3 +87,27 @@ def test_read_signals_finds_design_stage():
 
 def test_read_signals_returns_empty_for_unrelated_text():
     assert read_signals(_a(title="군수 신년사")) == frozenset()
+
+
+def test_demote_drops_completion_claim_without_url():
+    verdict, note = demote_without_evidence(DONE, "")
+    assert verdict == BEFORE
+    assert note and "근거" in note
+
+
+def test_demote_drops_construction_claim_without_url():
+    verdict, note = demote_without_evidence(BUILDING, None)
+    assert verdict == BEFORE
+    assert note
+
+
+def test_demote_keeps_strong_claim_when_url_present():
+    verdict, note = demote_without_evidence(DONE, "https://news.example.com/1")
+    assert verdict == DONE
+    assert note is None
+
+
+def test_demote_leaves_weak_verdicts_alone():
+    """'착공 전'·'미확인'은 강등할 것이 없다. 헛되이 건드리지 않는다."""
+    for weak in (BEFORE, UNKNOWN):
+        assert demote_without_evidence(weak, "") == (weak, None)
