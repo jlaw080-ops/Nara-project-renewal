@@ -62,7 +62,7 @@ def update_awards(
             continue
         if award is None:
             continue
-        conn.execute(
+        cursor = conn.execute(
             "INSERT OR IGNORE INTO award (bid_no, winner, award_date, raw_json, checked_at) "
             "VALUES (?, ?, ?, ?, ?)",
             (
@@ -74,6 +74,7 @@ def update_awards(
             ),
         )
         conn.commit()
-        updated += 1
-        counters.updated += 1
+        if cursor.rowcount == 1:
+            updated += 1
+            counters.updated += 1
     return updated

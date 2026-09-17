@@ -210,7 +210,9 @@ def test_update_awards_ignores_conflict_from_concurrent_run(conn, monkeypatch):
     with _client("나중기록") as client:
         updated = update_awards(conn, client, "KEY", TODAY, None, None, 100, RunCounters())
 
-    assert updated == 1  # IntegrityError 없이 흐름이 끝까지 진행됐다
+    # IntegrityError 없이 흐름은 끝까지 진행되지만, INSERT OR IGNORE가 실제로
+    # 무시했으므로 기록된 건수는 0이어야 한다 — 실제로 쓰지 않은 행을 썼다고 세면 안 된다.
+    assert updated == 0
     row = conn.execute("SELECT winner FROM award WHERE bid_no='R1'").fetchone()
     assert row["winner"] == "먼저기록"
 
