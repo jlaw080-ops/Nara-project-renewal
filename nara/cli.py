@@ -36,7 +36,7 @@ def version() -> None:
 
 @app.command()
 def collect(
-    days: int = typer.Option(3, help="오늘로부터 며칠 전까지 조회할지"),
+    days: int = typer.Option(3, min=1, help="오늘로부터 며칠 전까지 조회할지"),
     db: Path = typer.Option(DEFAULT_DB, help="SQLite 경로"),
     config: Path = typer.Option(DEFAULT_CONFIG),
 ) -> None:

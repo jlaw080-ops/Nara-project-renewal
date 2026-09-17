@@ -1,12 +1,15 @@
 import json
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
 import httpx
 import pytest
+from typer.testing import CliRunner
 
+from nara.cli import app
 from nara.collect import collect_range
-from nara.config import load_settings
+from nara.config import Secrets, load_settings
 from nara.db import connect, migrate
 from nara.runlog import RunCounters
 
@@ -123,3 +126,29 @@ def test_collect_range_keeps_raw_json(conn):
         collect_range(conn, client, "KEY", SETTINGS, BEGIN, END, RunCounters())
     raw = json.loads(conn.execute("SELECT raw_json FROM notice").fetchone()[0])
     assert raw["srvceDivNm"] == "기술용역"
+
+
+def test_collect_command_rejects_non_positive_days(monkeypatch):
+    # 이 환경엔 .env가 없어 API 키 부재로도 0이 아닌 종료 코드가 나올 수 있다.
+    # --days 검증만 따로 확인하기 위해 키가 있는 것처럼 만들고, 실제로 수집이
+    # 시작되면(=검증이 없으면) 어디서 멈추는지 calls로 잡아낸다.
+    import nara.cli as cli
+
+    calls: list[str] = []
+    monkeypatch.setattr(cli, "load_secrets", lambda path: Secrets("KEY", None, None, None))
+    monkeypatch.setattr(cli, "_open_db", lambda db: calls.append("open_db") or object())
+
+    @contextmanager
+    def fake_run_log(conn, command, args=""):
+        calls.append("run_log")
+        yield RunCounters()
+
+    monkeypatch.setattr(cli, "run_log", fake_run_log)
+    monkeypatch.setattr(
+        cli, "collect_range", lambda *a, **k: calls.append("collect_range") or 0
+    )
+
+    result = CliRunner().invoke(app, ["collect", "--days", "0"])
+
+    assert result.exit_code != 0
+    assert calls == []
