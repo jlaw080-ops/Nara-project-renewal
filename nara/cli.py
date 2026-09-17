@@ -1,10 +1,11 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import httpx
 import typer
 
 from nara import __version__
+from nara.award import update_awards
 from nara.collect import backfill as run_backfill
 from nara.collect import collect_range
 from nara.config import load_secrets, load_settings
@@ -81,6 +82,36 @@ def backfill(
             )
     state = "완료" if result.done else f"진행 중 — {result.cursor}까지"
     typer.echo(f"소급 수집 {state} / 신규 {result.added}건")
+
+
+enrich_app = typer.Typer(help="수집한 공고에 정보를 덧붙인다")
+app.add_typer(enrich_app, name="enrich")
+
+
+@enrich_app.command("award")
+def enrich_award(
+    tier: str = typer.Option("all", help="focus | rest | all"),
+    group: int | None = typer.Option(None, help="비관심 기관 요일 그룹 1~5"),
+    limit: int = typer.Option(300, min=1, help="한 번에 조회할 최대 건수"),
+    db: Path = typer.Option(DEFAULT_DB),
+) -> None:
+    """낙찰업체를 조회해 채운다."""
+    secrets = load_secrets(DEFAULT_ENV)
+    if not secrets.g2b_api_key:
+        typer.echo("G2B_API_KEY가 .env에 없습니다.", err=True)
+        raise typer.Exit(code=1)
+
+    conn = _open_db(db)
+    selected = None if tier == "all" else tier
+    with run_log(conn, "enrich award", f"--tier {tier}") as counters:
+        with httpx.Client() as client:
+            updated = update_awards(
+                conn, client, secrets.g2b_api_key, date.today().isoformat(),
+                selected, group, limit, counters,
+            )
+    typer.echo(
+        f"낙찰 조회 — 조회 {counters.processed}건 / 기록 {updated}건 / 실패 {counters.failed}건"
+    )
 
 
 if __name__ == "__main__":
