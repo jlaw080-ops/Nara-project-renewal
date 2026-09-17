@@ -1,4 +1,4 @@
-"""DB 읽기·쓰기. SQL은 이 파일에만 둔다."""
+"""수집한 공고·기관·사업을 DB에 쓰는 경로."""
 
 import json
 import sqlite3
