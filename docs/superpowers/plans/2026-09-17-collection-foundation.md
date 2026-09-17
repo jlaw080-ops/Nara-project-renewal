@@ -1852,7 +1852,7 @@ def _open_db(db: Path):
 
 @app.command()
 def collect(
-    days: int = typer.Option(3, help="오늘로부터 며칠 전까지 조회할지"),
+    days: int = typer.Option(3, min=1, help="오늘로부터 며칠 전까지 조회할지"),
     db: Path = typer.Option(DEFAULT_DB, help="SQLite 경로"),
     config: Path = typer.Option(DEFAULT_CONFIG),
 ) -> None:
@@ -2071,8 +2071,8 @@ from nara.collect import backfill as run_backfill
 
 @app.command()
 def backfill(
-    days: int = typer.Option(365, help="며칠 전까지 소급할지"),
-    chunk: int = typer.Option(3, help="한 번에 조회할 기간(일)"),
+    days: int = typer.Option(365, min=1, help="며칠 전까지 소급할지"),
+    chunk: int = typer.Option(3, min=1, help="한 번에 조회할 기간(일)"),
     db: Path = typer.Option(DEFAULT_DB),
     config: Path = typer.Option(DEFAULT_CONFIG),
 ) -> None:
@@ -2404,7 +2404,7 @@ app.add_typer(enrich_app, name="enrich")
 def enrich_award(
     tier: str = typer.Option("all", help="focus | rest | all"),
     group: int | None = typer.Option(None, help="비관심 기관 요일 그룹 1~5"),
-    limit: int = typer.Option(300, help="한 번에 조회할 최대 건수"),
+    limit: int = typer.Option(300, min=1, help="한 번에 조회할 최대 건수"),
     db: Path = typer.Option(DEFAULT_DB),
 ) -> None:
     """낙찰업체를 조회해 채운다."""
