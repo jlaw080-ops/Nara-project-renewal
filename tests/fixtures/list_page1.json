@@ -1,0 +1,29 @@
+{
+  "response": {
+    "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+    "body": {
+      "pageNo": 1, "numOfRows": 2, "totalCount": 3,
+      "items": [
+        {
+          "bidNtceNo": "R26BK01418098", "bidNtceOrd": "0",
+          "dminsttNm": "전북특별자치도 고창군",
+          "bidNtceNm": "고창군 유아친화형 국민체육센터 건립사업 기본 및 실시설계 설계공모",
+          "srvceDivNm": "기술용역", "ntceKindNm": "등록공고",
+          "bidNtceDt": "202603241000", "opengDt": "202605081100", "bidClseDt": "202605071800",
+          "bidNtceDtlUrl": "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01418098&bidPbancOrd=000",
+          "presmptPrce": "804280909", "asignBdgtAmt": "900000000",
+          "ntceInsttOfclNm": "홍길동", "ntceInsttOfclTelNo": "063-560-2000"
+        },
+        {
+          "bidNtceNo": "R26BK01462347", "bidNtceOrd": "0",
+          "dminsttNm": "경기도 용인시",
+          "bidNtceNm": "공공업무시설 신축사업(토목) 실시설계용역",
+          "srvceDivNm": "기술용역", "ntceKindNm": "등록공고",
+          "bidNtceDt": "20260414", "opengDt": "20260414", "bidClseDt": "",
+          "bidNtceUrl": "", "presmptPrce": "", "asignBdgtAmt": "",
+          "ntceInsttOfclNm": "", "ntceInsttOfclTelNo": ""
+        }
+      ]
+    }
+  }
+}
