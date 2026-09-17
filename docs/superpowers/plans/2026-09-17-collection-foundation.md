@@ -2511,12 +2511,11 @@ def test_read_tsv_keeps_blank_rows():
 
 def test_read_tsv_survives_a_blank_line_inside_a_cell():
     """셀 안에 문단 구분용 빈 줄이 있으면 그 물리 줄은 칸이 0개다."""
-    text = "
-".join([
-        "	".join(HEADER),
-        "전북특별자치도 진안군	진안고원	첫 줄",
+    text = "\n".join([
+        "\t".join(HEADER),
+        "전북특별자치도 진안군\t진안고원\t첫 줄",
         "",
-        "셋째 줄	2026.09.16",
+        "셋째 줄\t2026.09.16",
     ])
     _, rows = read_tsv(text)
     assert len(rows) == 1
@@ -2526,10 +2525,9 @@ def test_read_tsv_survives_a_blank_line_inside_a_cell():
 
 def test_read_tsv_truncates_a_row_wider_than_the_header():
     """칸이 남으면 자른다 — 헤더에 대응하는 열이 없어 읽을 수 없는 값이다."""
-    text = "
-".join([
-        "	".join(HEADER),
-        "전북특별자치도 완주군	완주 체육관	PV: 10kW	2026.09.16	여분",
+    text = "\n".join([
+        "\t".join(HEADER),
+        "전북특별자치도 완주군\t완주 체육관\tPV: 10kW\t2026.09.16\t여분",
     ])
     _, rows = read_tsv(text)
     assert len(rows[0]) == len(HEADER)
@@ -2775,7 +2773,7 @@ git commit -m "feat: 설치계획내용 파서와 예상가 계산"
 
 **Interfaces:**
 - Consumes: `read_tsv`, `parse_energy_plan`, `upsert_org`, `ensure_project`, `to_iso_date`
-- Produces: `COLUMNS`(논리 이름 → 시트 헤더 문자열), `ImportStats`(`rows`·`imported`·`notices`·`projects`·`energy`·`status`·`dept`·`skipped`), `import_tab(conn, tab_name, text, settings, now) -> ImportStats`
+- Produces: `COLUMNS`(논리 이름 → 시트 헤더 문자열), `ImportStats`(`rows`·`imported`·`notices`·`projects`·`energy`·`status`·`dept`·`skipped`·`skipped_with_data`), `import_tab(conn, tab_name, text, settings, now, counters=None) -> ImportStats`
 
 시트 한 탭의 TSV 본문을 받아 DB에 흩뿌린다. 시트를 직접 내려받는 부분은 계획 3의 Sheets API 작업에서 붙인다. 지금은 파일로 받은 TSV를 넣는다.
 
@@ -2911,6 +2909,57 @@ def test_import_tab_records_department_as_imported(conn):
     assert row["decided_by"] == "imported"
 
 
+def test_imported_notice_carries_the_opening_date(conn):
+    """open_date가 없으면 Task 10의 낙찰 대기 쿼리에 영영 들어오지 못한다."""
+    from nara.award import pending_award_bid_nos
+
+    text = _tsv([[
+        "전북특별자치도 완주군", "완주 체육관 실시설계용역", "", "", "", "",
+        "", "", "", "", "2026.09.10", "R1", "",
+    ]])
+    import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
+    got = conn.execute("SELECT open_date FROM notice WHERE bid_no='R1'").fetchone()[0]
+    assert got == "2026-09-10"
+    assert pending_award_bid_nos(conn, "2026-09-17", None, None, 100) == ["R1"]
+
+
+def test_import_tab_counts_only_manual_projects_it_created(conn):
+    """재이관에서 신규 수기사업은 0이어야 한다. 이미 있던 사업은 새것이 아니다."""
+    text = _tsv([[
+        "전북특별자치도 고창군", "고창터미널", "", "", "", "",
+        "", "", "", "", "", "", "",
+    ]])
+    assert import_tab(conn, "전북특별자치도", text, SETTINGS, NOW).projects == 1
+    assert import_tab(conn, "전북특별자치도", text, SETTINGS, NOW).projects == 0
+
+
+def test_import_tab_reports_skipped_rows_that_still_held_data(conn):
+    """공고명만 빈 행은 조용히 사라지면 안 된다. 대조는 통과해버리기 때문이다."""
+    text = _tsv([
+        ["", "", "전북특별자치도 고창군 고창읍 중앙로 191", "", "", "건설과",
+         "", "1,777억원", "", "지열 1031.044kW", "", "", ""],
+        ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ])
+    stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
+    assert stats.skipped == 2
+    assert len(stats.skipped_with_data) == 1
+    assert "고창읍 중앙로 191" in stats.skipped_with_data[0]
+
+
+def test_import_tab_advances_counters_row_by_row(conn):
+    """중간에 터져도 run_log가 어디까지 갔는지 알 수 있어야 한다."""
+    from nara.runlog import RunCounters
+
+    counters = RunCounters()
+    text = _tsv([
+        ["전북특별자치도 완주군", "A", "", "", "", "", "", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+        ["전북특별자치도 완주군", "B", "", "", "", "", "", "", "", "", "", "", ""],
+    ])
+    import_tab(conn, "전북특별자치도", text, SETTINGS, NOW, counters)
+    assert counters.processed == 3
+
+
 def test_import_tab_skips_rows_without_org_or_title(conn):
     text = _tsv([["", "", "", "", "", "", "", "", "", "", "", "", ""]])
     stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
@@ -2994,11 +3043,12 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'nara.migrate_sheets'`
 """기존 구글시트 탭을 DB로 옮긴다."""
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from nara.config import Settings
 from nara.dates import to_iso_date
 from nara.energy import parse_energy_plan
+from nara.runlog import RunCounters
 from nara.sheets_tsv import read_tsv
 from nara.store import ensure_project, upsert_org
 
@@ -3017,8 +3067,12 @@ COLUMNS = {
     "status": "진행현황",
     "energy": "설치계획내용",
     "bid_no": "공고번호",
+    "open_date": "낙찰일(개찰일)",
     "zeb": "ZEB 인증등급",
 }
+
+
+SKIPPED_PREVIEW_MAX = 10
 
 
 @dataclass
@@ -3031,6 +3085,7 @@ class ImportStats:
     status: int = 0
     dept: int = 0
     skipped: int = 0
+    skipped_with_data: list[str] = field(default_factory=list)
 
 
 def _split_status(text: str) -> tuple[str, str]:
@@ -3051,6 +3106,7 @@ def import_tab(
     text: str,
     settings: Settings,
     now: str,
+    counters: RunCounters | None = None,
 ) -> ImportStats:
     header, rows = read_tsv(text)
     index = {name.strip(): i for i, name in enumerate(header) if name.strip()}
@@ -3061,18 +3117,29 @@ def import_tab(
         return row[i].strip() if i is not None and i < len(row) else ""
 
     for row in rows:
+        # 행마다 올려 둔다. 중간에 터져도 run_log에 어디까지 갔는지 남는다.
+        if counters is not None:
+            counters.processed += 1
+
         org_name = cell(row, "org")
         title = cell(row, "title")
         if not org_name or not title:
             stats.skipped += 1
+            # 내용이 있는데 필수 칸만 빈 행은 조용히 사라지면 안 된다.
+            filled = [v.strip() for v in row if v.strip()]
+            if filled and len(stats.skipped_with_data) < SKIPPED_PREVIEW_MAX:
+                stats.skipped_with_data.append(" | ".join(filled)[:120])
             continue
         stats.imported += 1
 
         org_id = upsert_org(conn, org_name, settings, now)
         bid_no = cell(row, "bid_no")
         source = "g2b" if bid_no else "manual"
+        existed = conn.execute(
+            "SELECT 1 FROM project WHERE org_id = ? AND name = ?", (org_id, title)
+        ).fetchone()
         project_id = ensure_project(conn, org_id, title, source, now)
-        if source == "manual":
+        if source == "manual" and not existed:
             stats.projects += 1
 
         conn.execute(
@@ -3095,10 +3162,13 @@ def import_tab(
                 "SELECT 1 FROM notice WHERE bid_no = ?", (bid_no,)
             ).fetchone()
             if not existing:
+                # open_date를 넣지 않으면 이 공고는 Task 10의 낙찰 대기 쿼리
+                # (open_date != '' AND open_date <= today)에 영영 들어오지 못한다.
                 conn.execute(
                     "INSERT INTO notice (bid_no, project_id, org_id, org_name, title, "
-                    "budget_basis, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (bid_no, project_id, org_id, org_name, title, cell(row, "budget"), now),
+                    "open_date, budget_basis, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (bid_no, project_id, org_id, org_name, title,
+                     to_iso_date(cell(row, "open_date")), cell(row, "budget"), now),
                 )
                 stats.notices += 1
             if winner := cell(row, "winner"):
@@ -3152,7 +3222,7 @@ def import_tab(
 - [ ] **Step 5: 테스트 통과 확인**
 
 Run: `uv run pytest tests/test_migrate_sheets.py -v`
-Expected: PASS (12 passed)
+Expected: PASS (16 passed)
 
 - [ ] **Step 6: CLI에 이관 명령 연결**
 
@@ -3188,8 +3258,9 @@ def migrate_tsv(
     shutil.copy2(path, backup)
 
     with run_log(conn, "migrate tsv", f"{tab}") as counters:
-        stats = import_tab(conn, tab, path.read_text(encoding="utf-8"), settings, now)
-        counters.processed = stats.rows
+        stats = import_tab(
+            conn, tab, path.read_text(encoding="utf-8"), settings, now, counters
+        )
         counters.updated = stats.notices + stats.projects
         counters.failed = stats.skipped
 
@@ -3199,6 +3270,16 @@ def migrate_tsv(
         f"신규 수기사업 {stats.projects} / 설비 {stats.energy} / 진행현황 {stats.status} / "
         f"부서 {stats.dept} / 건너뜀 {stats.skipped}"
     )
+    if stats.skipped_with_data:
+        typer.echo(
+            f"내용이 있는데 수요기관·공고명이 비어 건너뛴 행 "
+            f"{len(stats.skipped_with_data)}건:",
+            err=True,
+        )
+        for preview in stats.skipped_with_data:
+            typer.echo(f"  {preview}", err=True)
+        typer.echo("원본 TSV를 열어 확인한다. 자동으로 채우지 않는다.", err=True)
+
     accounted = stats.imported + stats.skipped
     if accounted != stats.rows:
         typer.echo(
