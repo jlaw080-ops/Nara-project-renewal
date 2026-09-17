@@ -67,11 +67,29 @@ def test_read_signals_finds_completion():
     assert SIGNAL_DONE in read_signals(_a(title="순창군 동계면 종합체육관 준공"))
 
 
-def test_read_signals_treats_demolition_as_not_started():
-    """철거는 착공이 아니다. 이주 → 철거 → 착공 순서이고 철거 중이면 접촉 최적기다."""
-    signals = read_signals(_a(title="옛 청사 철거 공사 착수", body="멸실 신고 완료"))
+def test_read_signals_finds_pure_demolition_without_start():
+    """철거 낱말만 있고 착공 낱말이 없으면 착공 신호는 세우지 않는다."""
+    signals = read_signals(_a(title="옛 청사 철거 현장 가림막 설치"))
     assert SIGNAL_DEMOLITION in signals
     assert SIGNAL_START not in signals
+
+
+def test_read_signals_raises_both_on_demolition_and_start_collision():
+    """'철거 마치고 본공사 착공'은 착공을 보도하는 기사다.
+
+    철거 낱말이 있다고 착공 신호를 죽이면 실제 착공 기사를 놓친다(F1).
+    둘 다 세워서 다음 단계(read_news)가 애매함으로 보류하게 한다 —
+    잘못된 확정 판정보다 미확인 쪽이 안전하다.
+    """
+    signals = read_signals(_a(title="완주군 종합복지관, 철거 마치고 본공사 착공"))
+    assert SIGNAL_DEMOLITION in signals
+    assert SIGNAL_START in signals
+
+
+def test_read_signals_does_not_treat_committee_dissolution_as_demolition():
+    """'추진위원회 해체'는 물리적 철거가 아니다. '해체'는 철거 낱말 목록에서 뺐다(F2)."""
+    signals = read_signals(_a(title="추진위원회 해체"))
+    assert SIGNAL_DEMOLITION not in signals
 
 
 def test_read_signals_marks_planned_language():
@@ -83,6 +101,16 @@ def test_read_signals_marks_planned_language():
 
 def test_read_signals_finds_design_stage():
     assert SIGNAL_DESIGN in read_signals(_a(title="설계공모 당선작 발표"))
+
+
+def test_read_signals_does_not_read_builder_award_as_design_stage():
+    """시공사 낙찰은 설계 단계가 아니다. '낙찰'은 설계 낱말 목록에서 뺐다(F3).
+
+    설계 낙찰 여부는 award 테이블로 이미 안다(rule_verdict) — 뉴스에서
+    '낙찰'을 다시 읽으면 시공사 낙찰과 구분되지 않아 오히려 오도한다.
+    """
+    signals = read_signals(_a(title="OO체육관 신축공사 시공사 A건설 낙찰"))
+    assert SIGNAL_DESIGN not in signals
 
 
 def test_read_signals_returns_empty_for_unrelated_text():

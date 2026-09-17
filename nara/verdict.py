@@ -38,11 +38,14 @@ SIGNAL_DESIGN = "설계"
 SIGNAL_DEMOLITION = "철거"
 SIGNAL_PLANNED = "예정"
 
-# 철거를 착공으로 오판한 사고가 반복됐다. 철거 낱말이 보이면 착공 신호를 세우지 않는다.
-_DEMOLITION_WORDS = ("철거", "멸실", "해체")
+# "해체"는 위원회 해체처럼 철거가 아닌 문맥도 잡아서 뺐다. 철거·멸실만 남긴다.
+_DEMOLITION_WORDS = ("철거", "멸실")
 _START_WORDS = ("착공", "기공식", "첫 삽", "공사 착수")
 _DONE_WORDS = ("준공", "개관", "준공식", "운영 개시", "개원")
-_DESIGN_WORDS = ("설계", "공모", "당선작", "낙찰", "실시설계", "기본설계")
+# "낙찰"은 설계 낙찰과 시공사 낙찰을 구분 못 해 뺐다.
+# 설계 낙찰 여부는 award 테이블로 이미 안다(rule_verdict).
+# "실시설계"·"기본설계"는 "설계"의 부분 문자열이라 이미 잡힌다.
+_DESIGN_WORDS = ("설계", "공모", "당선작")
 _PLANNED_WORDS = ("예정", "목표", "계획", "추진")
 
 
@@ -55,13 +58,17 @@ class Article:
 
 
 def read_signals(article: Article) -> frozenset[str]:
-    """기사에서 판정 재료만 뽑는다. 여기서 판정하지 않는다."""
+    """기사에서 판정 재료만 뽑는다. 여기서 판정하지 않는다.
+
+    철거와 착공 낱말이 함께 있으면(철거 마치고 본공사 착공 등) 착공 신호를
+    억누르지 않고 둘 다 세운다. 어느 한쪽으로 단정해 조용히 틀리는 것보다,
+    다음 단계가 애매하다고 보고 미확인으로 보류하는 편이 낫다.
+    """
     text = f"{article.title} {article.body}"
     found: set[str] = set()
-    demolition = any(w in text for w in _DEMOLITION_WORDS)
-    if demolition:
+    if any(w in text for w in _DEMOLITION_WORDS):
         found.add(SIGNAL_DEMOLITION)
-    if any(w in text for w in _START_WORDS) and not demolition:
+    if any(w in text for w in _START_WORDS):
         found.add(SIGNAL_START)
     if any(w in text for w in _DONE_WORDS):
         found.add(SIGNAL_DONE)
