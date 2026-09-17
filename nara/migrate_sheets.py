@@ -7,7 +7,7 @@ from nara.config import Settings
 from nara.dates import to_iso_date
 from nara.energy import parse_energy_plan
 from nara.runlog import RunCounters
-from nara.sheets_tsv import read_tsv
+from nara.sheets_tsv import read_tsv_with_stats
 from nara.store import ensure_project, upsert_org
 
 _VERDICTS = ("준공 완료", "시공 중", "착공 전(설계 단계)", "미확인")
@@ -43,6 +43,9 @@ class ImportStats:
     dept: int = 0
     skipped: int = 0
     skipped_with_data: list[str] = field(default_factory=list)
+    physical_lines: int = 0
+    merges: int = 0
+    truncations: int = 0
 
 
 def _split_status(text: str) -> tuple[str, str]:
@@ -65,9 +68,14 @@ def import_tab(
     now: str,
     counters: RunCounters | None = None,
 ) -> ImportStats:
-    header, rows = read_tsv(text)
+    header, rows, tsv_stats = read_tsv_with_stats(text)
     index = {name.strip(): i for i, name in enumerate(header) if name.strip()}
-    stats = ImportStats(rows=len(rows))
+    stats = ImportStats(
+        rows=len(rows),
+        physical_lines=tsv_stats.physical_lines,
+        merges=tsv_stats.merges,
+        truncations=tsv_stats.truncations,
+    )
 
     def cell(row: list[str], key: str) -> str:
         i = index.get(COLUMNS[key])
@@ -99,16 +107,23 @@ def import_tab(
         if source == "manual" and not existed:
             stats.projects += 1
 
+        # 시트의 예정공사비는 건물 공사비(자유 텍스트)이지, notice.budget_basis가
+        # 뜻하는 API 산정근거 이름("추정가격"/"배정예산")이 아니다. 같은 칸에 두면
+        # 나중에 backfill이 API 값으로 덮어써 시트 값이 사라진다. project.note로 분리한다.
+        budget_note = cell(row, "budget")
+        note_value = f"예정공사비: {budget_note}" if budget_note else ""
         conn.execute(
             "UPDATE project SET address = COALESCE(NULLIF(?, ''), address), "
             "start_date = COALESCE(NULLIF(?, ''), start_date), "
             "end_date = COALESCE(NULLIF(?, ''), end_date), "
-            "zeb_grade = COALESCE(NULLIF(?, ''), zeb_grade), updated_at = ? WHERE id = ?",
+            "zeb_grade = COALESCE(NULLIF(?, ''), zeb_grade), "
+            "note = COALESCE(NULLIF(?, ''), note), updated_at = ? WHERE id = ?",
             (
                 cell(row, "address"),
                 to_iso_date(cell(row, "start_date")),
                 to_iso_date(cell(row, "end_date")),
                 cell(row, "zeb"),
+                note_value,
                 now,
                 project_id,
             ),
@@ -121,7 +136,7 @@ def import_tab(
                 # (open_date != '' AND open_date <= today)에 영영 들어오지 못한다.
                 conn.execute(
                     "INSERT INTO notice (bid_no, project_id, org_id, org_name, title, "
-                    "open_date, budget_basis, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "open_date, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         bid_no,
                         project_id,
@@ -129,7 +144,6 @@ def import_tab(
                         org_name,
                         title,
                         to_iso_date(cell(row, "open_date")),
-                        cell(row, "budget"),
                         now,
                     ),
                 )

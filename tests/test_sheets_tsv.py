@@ -1,4 +1,4 @@
-from nara.sheets_tsv import read_tsv
+from nara.sheets_tsv import read_tsv, read_tsv_with_stats
 
 HEADER = ["수요기관", "공고명", "설치계획내용", "업데이트일시"]
 
@@ -74,3 +74,64 @@ def test_read_tsv_truncates_a_row_wider_than_the_header():
     _, rows = read_tsv(text)
     assert len(rows[0]) == len(HEADER)
     assert rows[0][3] == "2026.09.16"
+
+
+def test_read_tsv_with_stats_reports_zero_on_clean_input():
+    text = _tsv(
+        [
+            "전북특별자치도 완주군\t완주 체육관\tPV: 10kW\t2026.09.16",
+            "경기도 용인시\t용인 도서관\t\t2026.09.17",
+        ]
+    )
+    _, rows, stats = read_tsv_with_stats(text)
+    assert len(rows) == 2
+    assert stats.physical_lines == 2
+    assert stats.restored_rows == 2
+    assert stats.merges == 0
+    assert stats.truncations == 0
+
+
+def test_read_tsv_with_stats_counts_embedded_newline_merge():
+    text = _tsv(
+        [
+            "전북특별자치도 진안군\t진안고원 마이스테이\t지열 수직밀폐형: 663.988",
+            " 태양광 고정식: 113.280\t2026.09.16",
+        ]
+    )
+    _, rows, stats = read_tsv_with_stats(text)
+    assert len(rows) == 1
+    assert stats.physical_lines == 2
+    assert stats.restored_rows == 1
+    assert stats.merges == 1
+    assert stats.truncations == 0
+
+
+def test_read_tsv_with_stats_counts_blank_line_swallow_as_a_merge():
+    text = "\n".join(
+        [
+            "\t".join(HEADER),
+            "전북특별자치도 진안군\t진안고원\t첫 줄",
+            "",
+            "셋째 줄\t2026.09.16",
+        ]
+    )
+    _, rows, stats = read_tsv_with_stats(text)
+    assert len(rows) == 1
+    assert stats.physical_lines == 3
+    assert stats.restored_rows == 1
+    assert stats.merges == 2
+    assert stats.truncations == 0
+
+
+def test_read_tsv_with_stats_counts_truncation():
+    text = "\n".join(
+        [
+            "\t".join(HEADER),
+            "전북특별자치도 완주군\t완주 체육관\tPV: 10kW\t2026.09.16\t여분",
+        ]
+    )
+    _, rows, stats = read_tsv_with_stats(text)
+    assert stats.physical_lines == 1
+    assert stats.restored_rows == 1
+    assert stats.merges == 0
+    assert stats.truncations == 1

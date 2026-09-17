@@ -189,11 +189,14 @@ def migrate_tsv(
         for preview in stats.skipped_with_data:
             typer.echo(f"  {preview}", err=True)
         typer.echo("원본 TSV를 열어 확인한다. 자동으로 채우지 않는다.", err=True)
-    accounted = stats.imported + stats.skipped
-    if accounted != stats.rows:
+    typer.echo(
+        f"물리 줄 {stats.physical_lines} / 복원 행 {stats.rows} / "
+        f"병합 {stats.merges} / 절단 {stats.truncations}"
+    )
+    if stats.truncations:
         typer.echo(
-            f"대조 불일치 — 시트 {stats.rows}행인데 처리한 것은 {accounted}건이다. "
-            f"TSV 줄 병합이 잘못됐을 수 있으니 확인한다.",
+            f"헤더보다 칸이 많아 잘린 행이 {stats.truncations}건 있다. "
+            f"원본 TSV에서 열이 밀리지 않았는지 확인한다.",
             err=True,
         )
         raise typer.Exit(code=1)

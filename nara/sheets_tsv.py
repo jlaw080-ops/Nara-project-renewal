@@ -6,16 +6,27 @@
 
 import csv
 import io
+from dataclasses import dataclass
 
 
-def read_tsv(text: str) -> tuple[list[str], list[list[str]]]:
+@dataclass(frozen=True)
+class TsvStats:
+    physical_lines: int  # 헤더를 뺀 물리 줄 수
+    restored_rows: int  # 병합 후 행 수
+    merges: int  # 병합에 흡수된 줄 수
+    truncations: int  # 헤더보다 길어 잘린 행 수
+
+
+def read_tsv_with_stats(text: str) -> tuple[list[str], list[list[str]], TsvStats]:
     raw = list(csv.reader(io.StringIO(text), delimiter="\t"))
     if not raw:
-        return [], []
+        return [], [], TsvStats(physical_lines=0, restored_rows=0, merges=0, truncations=0)
 
     header = raw[0]
     width = len(header)
+    physical_lines = len(raw) - 1
     rows: list[list[str]] = []
+    truncations = 0
 
     i = 1
     while i < len(raw):
@@ -29,9 +40,22 @@ def read_tsv(text: str) -> tuple[list[str], list[list[str]]]:
                 continue
             row = row[:-1] + [f"{row[-1]} {nxt[0].strip()}".strip()] + nxt[1:]
             i += 1
+        if len(row) > width:
+            truncations += 1
         # 헤더 길이에 정확히 맞춘다. 모자라면 채우고, 넘치면 자른다 — 넘친 칸은
         # 헤더에 대응하는 열이 없어 어차피 읽히지 않는다.
         rows.append((row + [""] * (width - len(row)))[:width])
         i += 1
 
+    stats = TsvStats(
+        physical_lines=physical_lines,
+        restored_rows=len(rows),
+        merges=physical_lines - len(rows),
+        truncations=truncations,
+    )
+    return header, rows, stats
+
+
+def read_tsv(text: str) -> tuple[list[str], list[list[str]]]:
+    header, rows, _ = read_tsv_with_stats(text)
     return header, rows

@@ -246,7 +246,6 @@ def test_import_tab_counts_every_row_for_reconciliation(conn):
     stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     assert stats.rows == 3
     assert stats.imported == 2
-    assert stats.rows == stats.imported + stats.skipped
 
 
 def test_import_tab_reconciles_on_a_second_run(conn):
@@ -274,7 +273,37 @@ def test_import_tab_reconciles_on_a_second_run(conn):
     import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     again = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     assert again.notices == 0
-    assert again.rows == again.imported + again.skipped
+
+
+def test_import_tab_puts_sheet_budget_on_project_note_not_notice_budget_basis(conn):
+    """시트의 예정공사비는 건물 공사비 자유 텍스트이지, notice.budget_basis가 뜻하는
+    API 산정근거 이름("추정가격"/"배정예산")이 아니다. 같은 칸에 두면 나중에 backfill이
+    API 값으로 덮어써 시트 값이 사라지므로 project.note로 분리해야 한다."""
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 완주군",
+                "완주 체육관",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "1,777억원",
+                "",
+                "",
+                "",
+                "R1",
+                "",
+                "",
+            ]
+        ]
+    )
+    import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
+    project = conn.execute("SELECT note FROM project WHERE name = '완주 체육관'").fetchone()
+    assert project["note"] == "예정공사비: 1,777억원"
+    notice = conn.execute("SELECT budget_basis FROM notice WHERE bid_no = 'R1'").fetchone()
+    assert not notice["budget_basis"]
 
 
 def test_import_tab_reads_columns_by_header_not_position(conn):
