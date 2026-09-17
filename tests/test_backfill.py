@@ -70,3 +70,21 @@ def test_backfill_clears_cursor_when_finished(conn):
         backfill(conn, client, "KEY", SETTINGS, days_back=3, chunk_days=3,
                  counters=RunCounters(), now=NOW)
     assert conn.execute("SELECT value FROM app_state WHERE key='backfill_cursor'").fetchone() is None
+
+
+def test_backfill_rejects_non_positive_chunk_days(conn):
+    calls = []
+    with _empty_client(calls) as client:
+        with pytest.raises(ValueError):
+            backfill(conn, client, "KEY", SETTINGS, days_back=9, chunk_days=0,
+                     counters=RunCounters(), now=NOW)
+    assert calls == []
+
+
+def test_backfill_rejects_non_positive_days_back(conn):
+    calls = []
+    with _empty_client(calls) as client:
+        with pytest.raises(ValueError):
+            backfill(conn, client, "KEY", SETTINGS, days_back=0, chunk_days=3,
+                     counters=RunCounters(), now=NOW)
+    assert calls == []
