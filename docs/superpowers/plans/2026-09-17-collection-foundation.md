@@ -2284,6 +2284,11 @@ class AwardItem:
     raw: dict
 
 
+def _award_date_of(raw: dict) -> str:
+    """등록일 우선, 없으면 최종낙찰일. 언제나 ISO 문자열이라 비교가 안전하다."""
+    return to_iso_date(text(raw.get("rgstDt"))) or to_iso_date(text(raw.get("fnlSucsfDate")))
+
+
 def fetch_award(client: httpx.Client, api_key: str, bid_no: str) -> AwardItem | None:
     """공고번호로 낙찰업체를 조회한다. 아직 없으면 None."""
     response = client.get(
@@ -2303,10 +2308,13 @@ def fetch_award(client: httpx.Client, api_key: str, bid_no: str) -> AwardItem | 
     if not named:
         return None
 
-    best = max(named, key=lambda raw: text(raw.get("rgstDt")) or text(raw.get("fnlSucsfDate")))
+    # 정규화한 ISO 날짜로 비교한다. 원문끼리 비교하면 안 된다 — API가 같은 필드를
+    # '20260910'과 '2026-09-20 10:00:00' 두 형태로 섞어 주는데, '-'(0x2D)가 숫자보다
+    # 작아서 max()가 더 이른 날을 고른다.
+    best = max(named, key=_award_date_of)
     return AwardItem(
         winner=text(best.get("bidwinnrNm")),
-        award_date=to_iso_date(text(best.get("rgstDt")) or text(best.get("fnlSucsfDate"))),
+        award_date=_award_date_of(best),
         raw=best,
     )
 ```
@@ -2373,7 +2381,9 @@ def update_awards(
         counters.processed += 1
         try:
             award = fetch_award(client, api_key, bid_no)
-        except G2BError:
+        except (G2BError, httpx.HTTPError):
+            # 한 건이 실패해도 나머지는 계속 본다. 일시적 네트워크 오류 하나가
+            # 그 회차의 남은 대기 건을 통째로 날리지 않게 한다.
             counters.failed += 1
             continue
         if award is None:
@@ -3198,7 +3208,7 @@ import pytest
 
 from nara.config import load_settings
 from nara.db import connect, migrate
-from nara.doctor import run_checks
+from nara.doctor import AWARD_BATCH_LIMIT, run_checks
 from nara.store import ensure_project, upsert_org
 
 SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
@@ -3247,6 +3257,32 @@ def test_run_checks_flags_orphan_project(conn):
     assert any(f.check == "공고 없는 g2b 사업" for f in findings)
 
 
+def test_run_checks_is_quiet_when_award_backlog_fits_one_batch(conn):
+    _notice(conn, "R1", "2026-09-10")
+    assert not any(f.check == "낙찰 조회 적체" for f in run_checks(conn, TODAY))
+
+
+def test_run_checks_flags_award_backlog_larger_than_one_batch(conn):
+    """낙찰이 영영 안 나는 건이 쌓이면 최근 공고가 매 회차 뒤로 밀린다."""
+    for i in range(AWARD_BATCH_LIMIT + 1):
+        _notice(conn, f"R{i}", "2026-09-10")
+    hit = [f for f in run_checks(conn, TODAY) if f.check == "낙찰 조회 적체"]
+    assert len(hit) == 1
+    assert str(AWARD_BATCH_LIMIT + 1) in hit[0].detail
+
+
+def test_award_backlog_ignores_notices_already_awarded(conn):
+    """낙찰이 채워진 건은 적체가 아니다."""
+    for i in range(AWARD_BATCH_LIMIT + 1):
+        _notice(conn, f"R{i}", "2026-09-10")
+        conn.execute(
+            "INSERT INTO award (bid_no, winner, checked_at) VALUES (?, '가건축', ?)",
+            (f"R{i}", NOW),
+        )
+    conn.commit()
+    assert not any(f.check == "낙찰 조회 적체" for f in run_checks(conn, TODAY))
+
+
 def test_run_checks_flags_rest_org_without_weekday_group(conn):
     conn.execute(
         "INSERT INTO org (name, tier, weekday_group, added_at) "
@@ -3271,6 +3307,11 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'nara.doctor'`
 
 import sqlite3
 from dataclasses import dataclass
+
+
+# `nara enrich award --limit`의 기본값과 같아야 한다. 대기가 이 수를 넘으면
+# 한 회차가 대기를 다 비우지 못한다.
+AWARD_BATCH_LIMIT = 300
 
 
 @dataclass(frozen=True)
@@ -3308,13 +3349,34 @@ def run_checks(conn: sqlite3.Connection, today: str) -> list[Finding]:
     ):
         findings.append(Finding("요일 그룹 없는 비관심 기관", row["name"]))
 
+    # 낙찰 대기는 성공해야만 줄어든다. 취소되거나 낙찰 공고가 안 뜬 건은 영영 대기에
+    # 남아 한 회차 상한을 잡아먹고, 그런 건이 상한만큼 쌓이면 더 최근 공고는 매번
+    # 뒤로 밀려 조회되지 않는다. 조용히 밀리므로 여기서 눈에 보이게 만든다.
+    backlog = conn.execute(
+        "SELECT COUNT(*) AS n, MIN(n.open_date) AS oldest FROM notice n "
+        "LEFT JOIN award a ON a.bid_no = n.bid_no "
+        "WHERE a.bid_no IS NULL AND n.open_date != '' AND n.open_date <= ?",
+        (today,),
+    ).fetchone()
+    if backlog["n"] > AWARD_BATCH_LIMIT:
+        findings.append(
+            Finding(
+                "낙찰 조회 적체",
+                f"개찰이 지났는데 낙찰 미확인인 공고가 {backlog['n']}건이다"
+                f"(가장 오래된 개찰일 {backlog['oldest']}). 한 회차 상한"
+                f" {AWARD_BATCH_LIMIT}건을 넘어 최근 공고가 계속 밀릴 수 있다."
+                " `nara enrich award --limit`를 키워 한 번 비우거나, 낙찰이 영영"
+                " 없을 건을 가려낼 방법이 필요하다.",
+            )
+        )
+
     return findings
 ```
 
 - [ ] **Step 4: 테스트 통과 확인**
 
 Run: `uv run pytest tests/test_doctor.py -v`
-Expected: PASS (4 passed)
+Expected: PASS (7 passed)
 
 - [ ] **Step 5: CLI에 doctor 명령 연결**
 
