@@ -18,13 +18,18 @@ def test_load_settings_reads_repo_config():
 def test_load_settings_keeps_every_focus_org():
     """목록이 잘려서 들어오지 않았는지 본다.
 
-    확인해야 하는 것은 '목록이 잘리지 않았다'이다. 위 판정 표대로 관심 기관 19개,
-    제목 제외 68개를 config.toml에 그대로 옮겼으면 그대로 통과한다.
+    확인해야 하는 것은 '목록이 잘리지 않았다'이다. 시트 설정 탭에서 옮긴
+    관심 기관 23개 · 제목 제외 80개 · 기관 제외 8개가 기준선이고, 여기에
+    사용자가 지시한 산림 작업 3개를 더해 제목 제외는 83개다.
+    시트 설정 탭에 그 3개를 넣으면 다시 80 == 83이 되어 이 숫자는 그대로 간다.
     """
     settings = load_settings(REPO_ROOT / "config.toml")
     assert len(settings.focus_orgs) == 23
-    assert len(settings.title_excluded) == 80
+    assert len(settings.title_excluded) == 83
     assert len(settings.org_excluded) == 8
+    # 시트보다 앞서 있는 3개. 시트에 반영되기 전까지 여기가 유일한 기록이다.
+    for keyword in ("덩굴제거", "숲가꾸기", "산불예방"):
+        assert keyword in settings.title_excluded
 
 
 def test_load_secrets_reads_env_file(tmp_path):
