@@ -111,9 +111,46 @@ def test_iter_notices_stops_when_total_reached():
 
 
 def test_iter_notices_honours_max_pages():
+    """total이 max_pages*rows보다 커서 매 페이지가 total-도달 분기를 타지 않을 때,
+    max_pages 소진 자체가 G2BError를 올려야 한다 (조용히 끝나면 안 됨)."""
+    page = json.loads(json.dumps(PAGE1))
+    page["response"]["body"]["totalCount"] = 10
+
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=PAGE1)
+        return httpx.Response(200, json=page)
 
     with _client(handler) as client:
-        items = list(iter_notices(client, "KEY", BEGIN, END, rows=2, max_pages=2))
-    assert len(items) == 4
+        with pytest.raises(G2BError, match="max_pages"):
+            list(iter_notices(client, "KEY", BEGIN, END, rows=2, max_pages=2))
+
+
+def test_iter_notices_raises_on_short_read_mid_run():
+    """페이지가 비었는데 total이 아직 남아 있으면 조용히 끝나지 않고 raise한다."""
+    page1 = json.loads(json.dumps(PAGE1))
+    page1["response"]["body"]["totalCount"] = 1832
+    page2 = json.loads(json.dumps(PAGE1))
+    page2["response"]["body"]["totalCount"] = 1832
+    page2["response"]["body"]["items"] = []
+    pages = {1: page1, 2: page2}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = int(dict(request.url.params)["pageNo"])
+        return httpx.Response(200, json=pages[page])
+
+    with _client(handler) as client:
+        with pytest.raises(G2BError, match="1832"):
+            list(iter_notices(client, "KEY", BEGIN, END, rows=2, max_pages=60))
+
+
+def test_iter_notices_genuinely_empty_result_returns_without_raising():
+    """totalCount=0이고 items도 비어 있으면 정상적으로 빈 결과를 돌려준다."""
+    empty = json.loads(json.dumps(PAGE1))
+    empty["response"]["body"]["totalCount"] = 0
+    empty["response"]["body"]["items"] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=empty)
+
+    with _client(handler) as client:
+        items = list(iter_notices(client, "KEY", BEGIN, END, rows=2, max_pages=60))
+    assert items == []

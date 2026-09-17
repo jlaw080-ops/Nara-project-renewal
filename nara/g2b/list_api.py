@@ -7,7 +7,7 @@ from datetime import datetime
 import httpx
 
 from nara.dates import to_iso_date
-from nara.g2b.common import check_response, normalise_items, text, to_int
+from nara.g2b.common import G2BError, check_response, normalise_items, text, to_int
 
 BASE_URL = (
     "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
@@ -112,13 +112,26 @@ def iter_notices(
     rows: int = 500,
     max_pages: int = 60,
 ) -> Iterator[NoticeItem]:
-    """기간 안의 공고를 페이지를 넘겨 가며 전부 돌려준다."""
+    """기간 안의 공고를 페이지를 넘겨 가며 전부 돌려준다.
+
+    빈 페이지나 max_pages 소진은 total이 이미 다 채워졌을 때만 정상 종료다.
+    그렇지 않으면 짧은 응답을 조용히 삼키지 않고 G2BError를 올린다.
+    """
     page = 1
+    fetched = 0
+    total = 0
     while page <= max_pages:
         items, total = fetch_notice_page(client, api_key, begin, end, page, rows)
         if not items:
+            if (page - 1) * rows < total:
+                raise G2BError(
+                    f"{page}페이지가 비어 있는데 totalCount={total}, 지금까지 {fetched}건만 받음"
+                )
             return
+        fetched += len(items)
         yield from items
         if total and page * rows >= total:
             return
         page += 1
+    if total and fetched < total:
+        raise G2BError(f"max_pages={max_pages} 소진, totalCount={total}, {fetched}건만 받음")
