@@ -73,6 +73,22 @@ def test_fetch_award_picks_most_recent_entry():
     assert award.winner == "나건축"
 
 
+def test_fetch_award_picks_most_recent_entry_across_mixed_date_formats():
+    # rgstDt를 압축형('20260910')과 구분형('2026-09-20 10:00:00')으로 섞어 준다.
+    # '-'(0x2D)는 숫자보다 작아 원문 문자열 비교로는 더 이른 압축형이 이긴다 — ISO로
+    # 정규화한 뒤 비교해야 실제로 더 늦은 구분형 날짜가 이긴다.
+    payload = {"response": {"header": {"resultCode": "00"}, "body": {"items": [
+        {"bidwinnrNm": "가건축", "rgstDt": "20260910"},
+        {"bidwinnrNm": "나건축", "rgstDt": "2026-09-20 10:00:00"},
+    ]}}}
+    with httpx.Client(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json=payload))
+    ) as client:
+        award = fetch_award(client, "KEY", "R1")
+    assert award.winner == "나건축"
+    assert award.award_date == "2026-09-20"
+
+
 def test_pending_skips_notices_whose_opening_is_in_the_future(conn):
     _add_notice(conn, "R1", "전북특별자치도 완주군", open_date="2026-09-10")
     _add_notice(conn, "R2", "전북특별자치도 완주군", open_date="2026-12-01")
@@ -119,3 +135,25 @@ def test_update_awards_leaves_row_absent_when_not_yet_awarded(conn):
         updated = update_awards(conn, client, "KEY", TODAY, None, None, 100, RunCounters())
     assert updated == 0
     assert conn.execute("SELECT COUNT(*) FROM award").fetchone()[0] == 0
+
+
+def test_update_awards_continues_after_transport_error(conn):
+    # 첫 건에서 네트워크 오류(httpx.ConnectError)가 나도 나머지 대기 건은 계속 조회해야 한다.
+    _add_notice(conn, "R1", "전북특별자치도 완주군", open_date="2026-09-10")
+    _add_notice(conn, "R2", "전북특별자치도 완주군", open_date="2026-09-11")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("bidNtceNo") == "R1":
+            raise httpx.ConnectError("연결 실패", request=request)
+        return httpx.Response(200, json=_award_payload("가건축"))
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        counters = RunCounters()
+        updated = update_awards(conn, client, "KEY", TODAY, None, None, 100, counters)
+
+    assert updated == 1
+    assert counters.processed == 2
+    assert counters.failed == 1
+    row = conn.execute("SELECT winner FROM award WHERE bid_no='R2'").fetchone()
+    assert row["winner"] == "가건축"
+    assert conn.execute("SELECT COUNT(*) FROM award WHERE bid_no='R1'").fetchone()[0] == 0
