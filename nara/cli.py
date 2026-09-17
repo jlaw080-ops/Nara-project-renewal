@@ -118,6 +118,9 @@ def enrich_award(
     db: Path = typer.Option(DEFAULT_DB),
 ) -> None:
     """낙찰업체를 조회해 채운다."""
+    if tier not in {"focus", "rest", "all"}:
+        typer.echo(f"--tier는 focus | rest | all 중 하나여야 한다: {tier!r}", err=True)
+        raise typer.Exit(code=1)
     secrets = load_secrets(DEFAULT_ENV)
     if not secrets.g2b_api_key:
         typer.echo("G2B_API_KEY가 .env에 없습니다.", err=True)
@@ -140,6 +143,9 @@ def enrich_award(
     typer.echo(
         f"낙찰 조회 — 조회 {counters.processed}건 / 기록 {updated}건 / 실패 {counters.failed}건"
     )
+    if counters.failed and not updated:
+        typer.echo("전체 조회 실패 — API 키나 네트워크를 확인한다.", err=True)
+        raise typer.Exit(code=1)
 
 
 migrate_app = typer.Typer(help="외부 데이터를 가져온다")

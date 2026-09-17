@@ -2,9 +2,13 @@ from pathlib import Path
 
 import httpx
 import pytest
+from typer.testing import CliRunner
 
+import nara.award as award_module
+import nara.cli as cli
 from nara.award import pending_award_bid_nos, update_awards
-from nara.config import load_settings
+from nara.cli import app
+from nara.config import Secrets, load_settings
 from nara.db import connect, migrate
 from nara.g2b.award_api import fetch_award
 from nara.g2b.list_api import NoticeItem
@@ -186,3 +190,101 @@ def test_update_awards_continues_after_transport_error(conn):
     row = conn.execute("SELECT winner FROM award WHERE bid_no='R2'").fetchone()
     assert row["winner"] == "가건축"
     assert conn.execute("SELECT COUNT(*) FROM award WHERE bid_no='R1'").fetchone()[0] == 0
+
+
+def test_update_awards_ignores_conflict_from_concurrent_run(conn, monkeypatch):
+    """동시에 두 enrich award가 같은 bid_no를 집어도 두 번째 INSERT가
+    IntegrityError로 그 회차 전체를 죽이면 안 된다. 먼저 기록된 값이 이긴다 —
+    수기입력 낙찰자를 덮어쓰지 않는 기존 규칙과 같은 원칙이다."""
+    _add_notice(conn, "R1", "전북특별자치도 완주군", open_date="2026-09-10")
+    # 다른(가상의) 동시 실행이 이 bid_no를 이미 기록해 둔 상태를 흉내낸다.
+    conn.execute(
+        "INSERT INTO award (bid_no, winner, award_date, checked_at) VALUES (?, ?, ?, ?)",
+        ("R1", "먼저기록", "2026-09-10", NOW),
+    )
+    conn.commit()
+    # pending 쿼리는 원래 award가 있는 건을 걸러내지만, 두 프로세스가 동시에 같은
+    # 목록을 읽은 순간을 재현하려면 이 건이 여전히 대기 목록에 들어 있어야 한다.
+    monkeypatch.setattr(award_module, "pending_award_bid_nos", lambda *a, **k: ["R1"])
+
+    with _client("나중기록") as client:
+        updated = update_awards(conn, client, "KEY", TODAY, None, None, 100, RunCounters())
+
+    assert updated == 1  # IntegrityError 없이 흐름이 끝까지 진행됐다
+    row = conn.execute("SELECT winner FROM award WHERE bid_no='R1'").fetchone()
+    assert row["winner"] == "먼저기록"
+
+
+def test_enrich_award_command_all_failures_exit_nonzero(tmp_path, monkeypatch):
+    """API 키가 죽어 전부 실패하면, 조용히 exit 0으로 끝나지 않고 실패로 표시한다."""
+    db = tmp_path / "test.db"
+    conn = connect(db)
+    migrate(conn)
+    _add_notice(conn, "R1", "전북특별자치도 완주군", open_date="2026-09-10")
+    _add_notice(conn, "R2", "전북특별자치도 완주군", open_date="2026-09-11")
+    conn.close()
+
+    monkeypatch.setattr(cli, "load_secrets", lambda path: Secrets("BADKEY", None, None, None))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("연결 실패", request=request)
+
+    real_client_class = httpx.Client
+    monkeypatch.setattr(
+        cli.httpx,
+        "Client",
+        lambda *a, **k: real_client_class(transport=httpx.MockTransport(handler)),
+    )
+
+    result = CliRunner().invoke(app, ["enrich", "award", "--db", str(db)])
+
+    assert result.exit_code != 0
+    assert "실패" in result.output
+
+    conn2 = connect(db)
+    row = conn2.execute("SELECT status FROM run_log ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["status"] == "partial"
+
+
+def test_enrich_award_command_mixed_failures_exit_zero(tmp_path, monkeypatch):
+    """일부만 실패하는 통상적인 일시 오류는 스케줄러를 실패로 만들지 않는다."""
+    db = tmp_path / "test.db"
+    conn = connect(db)
+    migrate(conn)
+    _add_notice(conn, "R1", "전북특별자치도 완주군", open_date="2026-09-10")
+    _add_notice(conn, "R2", "전북특별자치도 완주군", open_date="2026-09-11")
+    conn.close()
+
+    monkeypatch.setattr(cli, "load_secrets", lambda path: Secrets("KEY", None, None, None))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("bidNtceNo") == "R1":
+            raise httpx.ConnectError("연결 실패", request=request)
+        return httpx.Response(200, json=_award_payload("가건축"))
+
+    real_client_class = httpx.Client
+    monkeypatch.setattr(
+        cli.httpx,
+        "Client",
+        lambda *a, **k: real_client_class(transport=httpx.MockTransport(handler)),
+    )
+
+    result = CliRunner().invoke(app, ["enrich", "award", "--db", str(db)])
+
+    assert result.exit_code == 0
+
+    conn2 = connect(db)
+    row = conn2.execute("SELECT status FROM run_log ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["status"] == "partial"
+
+
+def test_enrich_award_command_rejects_invalid_tier(tmp_path):
+    """오타 tier가 빈 대기 집합 + exit 0인 조용한 무동작이 되면 안 된다."""
+    db = tmp_path / "test.db"
+    conn = connect(db)
+    migrate(conn)
+    conn.close()
+
+    result = CliRunner().invoke(app, ["enrich", "award", "--db", str(db), "--tier", "focu"])
+
+    assert result.exit_code != 0

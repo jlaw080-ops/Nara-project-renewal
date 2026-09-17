@@ -63,7 +63,7 @@ def update_awards(
         if award is None:
             continue
         conn.execute(
-            "INSERT INTO award (bid_no, winner, award_date, raw_json, checked_at) "
+            "INSERT OR IGNORE INTO award (bid_no, winner, award_date, raw_json, checked_at) "
             "VALUES (?, ?, ?, ?, ?)",
             (
                 bid_no,
