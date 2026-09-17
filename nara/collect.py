@@ -1,7 +1,8 @@
 """수집 흐름 — API에서 받아 필터를 거쳐 DB에 넣는다."""
 
 import sqlite3
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 
 import httpx
 
@@ -44,3 +45,67 @@ def collect_range(
             added += 1
             counters.updated += 1
     return added
+
+
+CURSOR_KEY = "backfill_cursor"
+
+
+@dataclass(frozen=True)
+class BackfillResult:
+    added: int
+    cursor: str
+    done: bool
+
+
+def _get_state(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def _set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO app_state (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    conn.commit()
+
+
+def backfill(
+    conn: sqlite3.Connection,
+    client: httpx.Client,
+    api_key: str,
+    settings: Settings,
+    days_back: int,
+    chunk_days: int,
+    counters: RunCounters,
+    now: datetime | None = None,
+    max_chunks: int | None = None,
+) -> BackfillResult:
+    """과거 공고를 기간을 쪼개 과거에서 현재 방향으로 수집한다."""
+    now = now or datetime.now()
+    floor = (now - timedelta(days=days_back)).date()
+    saved = _get_state(conn, CURSOR_KEY)
+    cursor = date.fromisoformat(saved) if saved else floor
+    cursor = max(cursor, floor)
+
+    added = 0
+    chunks = 0
+    while cursor < now.date():
+        if max_chunks is not None and chunks >= max_chunks:
+            _set_state(conn, CURSOR_KEY, cursor.isoformat())
+            return BackfillResult(added, cursor.isoformat(), done=False)
+        chunk_end = min(cursor + timedelta(days=chunk_days), now.date())
+        added += collect_range(
+            conn, client, api_key, settings,
+            datetime.combine(cursor, datetime.min.time()),
+            datetime.combine(chunk_end, datetime.min.time()),
+            counters,
+        )
+        cursor = chunk_end
+        chunks += 1
+        _set_state(conn, CURSOR_KEY, cursor.isoformat())
+
+    conn.execute("DELETE FROM app_state WHERE key = ?", (CURSOR_KEY,))
+    conn.commit()
+    return BackfillResult(added, cursor.isoformat(), done=True)

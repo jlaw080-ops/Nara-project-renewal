@@ -5,6 +5,7 @@ import httpx
 import typer
 
 from nara import __version__
+from nara.collect import backfill as run_backfill
 from nara.collect import collect_range
 from nara.config import load_secrets, load_settings
 from nara.db import connect, migrate
@@ -56,6 +57,30 @@ def collect(
                 conn, client, secrets.g2b_api_key, settings, begin, end, counters
             )
     typer.echo(f"수집 완료 — 조회 {counters.processed}건 / 신규 {added}건")
+
+
+@app.command()
+def backfill(
+    days: int = typer.Option(365, min=1, help="며칠 전까지 소급할지"),
+    chunk: int = typer.Option(3, min=1, help="한 번에 조회할 기간(일)"),
+    db: Path = typer.Option(DEFAULT_DB),
+    config: Path = typer.Option(DEFAULT_CONFIG),
+) -> None:
+    """과거 공고를 소급 수집한다. 중단해도 다음 실행에서 이어진다."""
+    settings = load_settings(config)
+    secrets = load_secrets(DEFAULT_ENV)
+    if not secrets.g2b_api_key:
+        typer.echo("G2B_API_KEY가 .env에 없습니다.", err=True)
+        raise typer.Exit(code=1)
+
+    conn = _open_db(db)
+    with run_log(conn, "backfill", f"--days {days}") as counters:
+        with httpx.Client() as client:
+            result = run_backfill(
+                conn, client, secrets.g2b_api_key, settings, days, chunk, counters
+            )
+    state = "완료" if result.done else f"진행 중 — {result.cursor}까지"
+    typer.echo(f"소급 수집 {state} / 신규 {result.added}건")
 
 
 if __name__ == "__main__":
