@@ -2028,6 +2028,12 @@ def backfill(
     max_chunks: int | None = None,
 ) -> BackfillResult:
     """과거 공고를 기간을 쪼개 과거에서 현재 방향으로 수집한다."""
+    # CLI는 min=1로 막지만 이 함수는 직접 부를 수 있다. chunk_days가 0 이하면
+    # cursor가 전진하지 않아 while 루프가 끝나지 않는다.
+    if chunk_days < 1:
+        raise ValueError(f"chunk_days는 1 이상이어야 한다: {chunk_days}")
+    if days_back < 1:
+        raise ValueError(f"days_back은 1 이상이어야 한다: {days_back}")
     now = now or datetime.now()
     floor = (now - timedelta(days=days_back)).date()
     saved = _get_state(conn, CURSOR_KEY)
