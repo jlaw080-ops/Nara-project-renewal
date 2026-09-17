@@ -30,3 +30,43 @@ def rule_verdict(facts: Facts) -> tuple[str, str]:
     if facts.open_date:
         return UNKNOWN, f"개찰 전(개찰 예정 {facts.open_date})"
     return UNKNOWN, "개찰일 없음"
+
+
+SIGNAL_START = "착공"
+SIGNAL_DONE = "준공"
+SIGNAL_DESIGN = "설계"
+SIGNAL_DEMOLITION = "철거"
+SIGNAL_PLANNED = "예정"
+
+# 철거를 착공으로 오판한 사고가 반복됐다. 철거 낱말이 보이면 착공 신호를 세우지 않는다.
+_DEMOLITION_WORDS = ("철거", "멸실", "해체")
+_START_WORDS = ("착공", "기공식", "첫 삽", "공사 착수")
+_DONE_WORDS = ("준공", "개관", "준공식", "운영 개시", "개원")
+_DESIGN_WORDS = ("설계", "공모", "당선작", "낙찰", "실시설계", "기본설계")
+_PLANNED_WORDS = ("예정", "목표", "계획", "추진")
+
+
+@dataclass(frozen=True)
+class Article:
+    title: str
+    body: str
+    url: str
+    published: str  # ISO 또는 ""
+
+
+def read_signals(article: Article) -> frozenset[str]:
+    """기사에서 판정 재료만 뽑는다. 여기서 판정하지 않는다."""
+    text = f"{article.title} {article.body}"
+    found: set[str] = set()
+    demolition = any(w in text for w in _DEMOLITION_WORDS)
+    if demolition:
+        found.add(SIGNAL_DEMOLITION)
+    if any(w in text for w in _START_WORDS) and not demolition:
+        found.add(SIGNAL_START)
+    if any(w in text for w in _DONE_WORDS):
+        found.add(SIGNAL_DONE)
+    if any(w in text for w in _DESIGN_WORDS):
+        found.add(SIGNAL_DESIGN)
+    if any(w in text for w in _PLANNED_WORDS):
+        found.add(SIGNAL_PLANNED)
+    return frozenset(found)
