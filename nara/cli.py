@@ -1,3 +1,4 @@
+import shutil
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from nara.collect import backfill as run_backfill
 from nara.collect import collect_range
 from nara.config import load_secrets, load_settings
 from nara.db import connect, migrate
+from nara.migrate_sheets import import_tab
 from nara.runlog import run_log
 
 app = typer.Typer(help="나라장터 설계용역 수집·조사 도구")
@@ -17,6 +19,7 @@ app = typer.Typer(help="나라장터 설계용역 수집·조사 도구")
 DEFAULT_DB = Path("data/nara.db")
 DEFAULT_CONFIG = Path("config.toml")
 DEFAULT_ENV = Path(".env")
+BACKUP_DIR = Path("data/sheet_backup")
 
 
 def _open_db(db: Path):
@@ -112,6 +115,50 @@ def enrich_award(
     typer.echo(
         f"낙찰 조회 — 조회 {counters.processed}건 / 기록 {updated}건 / 실패 {counters.failed}건"
     )
+
+
+migrate_app = typer.Typer(help="외부 데이터를 가져온다")
+app.add_typer(migrate_app, name="migrate")
+
+
+@migrate_app.command("tsv")
+def migrate_tsv(
+    path: Path = typer.Argument(..., help="내려받은 시트 탭 TSV 파일"),
+    tab: str = typer.Option(..., help="탭 이름"),
+    db: Path = typer.Option(DEFAULT_DB),
+    config: Path = typer.Option(DEFAULT_CONFIG),
+) -> None:
+    """시트 탭 TSV 한 개를 DB로 옮긴다. 원본은 그대로 보관한다."""
+    settings = load_settings(config)
+    conn = _open_db(db)
+    now = datetime.now().isoformat(timespec="seconds")
+
+    # 되돌릴 수 있도록 원본을 먼저 복사해 둔다.
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = BACKUP_DIR / f"{stamp}_{tab}.tsv"
+    shutil.copy2(path, backup)
+
+    with run_log(conn, "migrate tsv", f"{tab}") as counters:
+        stats = import_tab(conn, tab, path.read_text(encoding="utf-8"), settings, now)
+        counters.processed = stats.rows
+        counters.updated = stats.notices + stats.projects
+        counters.failed = stats.skipped
+
+    typer.echo(f"원본 보관: {backup}")
+    typer.echo(
+        f"[{tab}] 시트 행 {stats.rows} / 처리 {stats.imported} / 신규 공고 {stats.notices} / "
+        f"신규 수기사업 {stats.projects} / 설비 {stats.energy} / 진행현황 {stats.status} / "
+        f"부서 {stats.dept} / 건너뜀 {stats.skipped}"
+    )
+    accounted = stats.imported + stats.skipped
+    if accounted != stats.rows:
+        typer.echo(
+            f"대조 불일치 — 시트 {stats.rows}행인데 처리한 것은 {accounted}건이다. "
+            f"TSV 줄 병합이 잘못됐을 수 있으니 확인한다.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":
