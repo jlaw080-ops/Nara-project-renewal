@@ -205,16 +205,29 @@ def test_update_awards_ignores_conflict_from_concurrent_run(conn, monkeypatch):
     conn.commit()
     # pending 쿼리는 원래 award가 있는 건을 걸러내지만, 두 프로세스가 동시에 같은
     # 목록을 읽은 순간을 재현하려면 이 건이 여전히 대기 목록에 들어 있어야 한다.
-    monkeypatch.setattr(award_module, "pending_award_bid_nos", lambda *a, **k: ["R1"])
+    # 충돌하는 R1을 먼저, 멀쩡한 R2를 뒤에 둔다. R1에서 IntegrityError가 나면
+    # R2는 영영 기록되지 않으므로, R2가 기록됐다는 사실이 "흐름이 안 죽었다"의 증거다.
+    _add_notice(conn, "R2", "전북특별자치도 완주군", open_date="2026-09-11")
+    monkeypatch.setattr(award_module, "pending_award_bid_nos", lambda *a, **k: ["R1", "R2"])
 
+    counters = RunCounters()
     with _client("나중기록") as client:
-        updated = update_awards(conn, client, "KEY", TODAY, None, None, 100, RunCounters())
+        updated = update_awards(conn, client, "KEY", TODAY, None, None, 100, counters)
 
-    # IntegrityError 없이 흐름은 끝까지 진행되지만, INSERT OR IGNORE가 실제로
-    # 무시했으므로 기록된 건수는 0이어야 한다 — 실제로 쓰지 않은 행을 썼다고 세면 안 된다.
-    assert updated == 0
-    row = conn.execute("SELECT winner FROM award WHERE bid_no='R1'").fetchone()
-    assert row["winner"] == "먼저기록"
+    # 충돌한 R1은 세지 않고, 실제로 쓴 R2만 센다 — 쓰지 않은 행을 썼다고 세면 안 된다.
+    assert updated == 1
+    assert counters.updated == 1
+    assert counters.processed == 2
+    assert counters.failed == 0
+    # 먼저 기록된 값이 이긴다.
+    assert conn.execute("SELECT winner FROM award WHERE bid_no='R1'").fetchone()["winner"] == (
+        "먼저기록"
+    )
+    assert conn.execute("SELECT COUNT(*) FROM award WHERE bid_no='R1'").fetchone()[0] == 1
+    # R1의 충돌이 회차를 죽이지 않았다.
+    assert conn.execute("SELECT winner FROM award WHERE bid_no='R2'").fetchone()["winner"] == (
+        "나중기록"
+    )
 
 
 def test_enrich_award_command_all_failures_exit_nonzero(tmp_path, monkeypatch):

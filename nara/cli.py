@@ -189,6 +189,14 @@ def migrate_tsv(
         for preview in stats.skipped_with_data:
             typer.echo(f"  {preview}", err=True)
         typer.echo("원본 TSV를 열어 확인한다. 자동으로 채우지 않는다.", err=True)
+    if stats.unparsed_numbers:
+        typer.echo(
+            f"숫자로 읽지 못해 비워 둔 칸 {stats.unparsed_numbers}건:",
+            err=True,
+        )
+        for preview in stats.unparsed_preview:
+            typer.echo(f"  {preview}", err=True)
+        typer.echo("시트에서 단위·기호를 빼고 숫자만 남긴 뒤 다시 이관한다.", err=True)
     typer.echo(
         f"물리 줄 {stats.physical_lines} / 복원 행 {stats.rows} / "
         f"병합 {stats.merges} / 절단 {stats.truncations}"

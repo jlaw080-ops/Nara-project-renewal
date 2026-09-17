@@ -852,3 +852,33 @@ def test_to_float_returns_none_for_unparseable_text():
 
 def test_to_float_parses_thousands_separator():
     assert _to_float("1,234.56") == 1234.56
+
+
+def test_import_tab_reports_floor_area_it_could_not_read_as_a_number(conn):
+    """연면적은 REAL 칼럼이라 '2,686㎡' 같은 칸은 원문조차 남길 수 없다.
+    조용히 버리면 아무도 모른다 — 건너뛴 행과 같은 방식으로 숫자와 원문을 보고한다."""
+    row = [""] * len(HEADER)
+    row[HEADER.index("수요기관")] = "전북특별자치도 완주군"
+    row[HEADER.index("공고명")] = "완주 체육관 실시설계용역"
+    row[HEADER.index("연면적(㎡, jootek)")] = "2,686㎡"
+
+    stats = import_tab(conn, "전북특별자치도", _tsv([row]), SETTINGS, NOW)
+
+    assert stats.unparsed_numbers == 1
+    assert len(stats.unparsed_preview) == 1
+    assert "2,686㎡" in stats.unparsed_preview[0]
+    assert "완주 체육관 실시설계용역" in stats.unparsed_preview[0]
+    # 값은 넣지 않는다 — 추측으로 채우느니 비워 두고 보고한다.
+    assert conn.execute("SELECT floor_area FROM project").fetchone()["floor_area"] is None
+
+
+def test_import_tab_does_not_report_blank_floor_area_as_unreadable(conn):
+    """빈 칸은 읽지 못한 게 아니라 없는 것이다. 헛경보를 내면 안 된다."""
+    row = [""] * len(HEADER)
+    row[HEADER.index("수요기관")] = "전북특별자치도 완주군"
+    row[HEADER.index("공고명")] = "완주 체육관 실시설계용역"
+
+    stats = import_tab(conn, "전북특별자치도", _tsv([row]), SETTINGS, NOW)
+
+    assert stats.unparsed_numbers == 0
+    assert stats.unparsed_preview == []

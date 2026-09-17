@@ -54,6 +54,8 @@ class ImportStats:
     dept: int = 0
     skipped: int = 0
     skipped_with_data: list[str] = field(default_factory=list)
+    unparsed_numbers: int = 0
+    unparsed_preview: list[str] = field(default_factory=list)
     physical_lines: int = 0
     merges: int = 0
     truncations: int = 0
@@ -142,6 +144,15 @@ def import_tab(
         # 나중에 backfill이 API 값으로 덮어써 시트 값이 사라진다. project.note로 분리한다.
         budget_note = cell(row, "budget")
         note_value = f"예정공사비: {budget_note}" if budget_note else ""
+
+        raw_floor = cell(row, "floor_area")
+        floor_area = _to_float(raw_floor)
+        if raw_floor and floor_area is None:
+            # 연면적은 REAL 칼럼이라 원문을 대신 남길 수도 없다. 조용히 버리면
+            # 그 칸이 비어 있는 건지 못 읽은 건지 나중에 구분할 방법이 없다.
+            stats.unparsed_numbers += 1
+            if len(stats.unparsed_preview) < SKIPPED_PREVIEW_MAX:
+                stats.unparsed_preview.append(f"{title}: 연면적 {raw_floor}"[:120])
         conn.execute(
             "UPDATE project SET address = COALESCE(NULLIF(?, ''), address), "
             "start_date = COALESCE(NULLIF(?, ''), start_date), "
@@ -157,7 +168,7 @@ def import_tab(
                 to_iso_date(cell(row, "start_date")),
                 to_iso_date(cell(row, "end_date")),
                 cell(row, "zeb"),
-                _to_float(cell(row, "floor_area")),
+                floor_area,
                 cell(row, "re_ratio"),
                 cell(row, "etc_cert"),
                 cell(row, "guide_equip"),
