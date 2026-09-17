@@ -76,20 +76,26 @@ from nara.verdict import BEFORE, UNKNOWN, Facts, rule_verdict
 
 def test_rule_verdict_uses_award_as_evidence_of_design_stage():
     """낙찰업체가 있으면 설계가 도는 중이다. 착공했다는 뜻이 아니다."""
-    verdict, reason = rule_verdict(Facts(has_winner=True, open_date="2026-09-10", today="2026-09-18"))
+    verdict, reason = rule_verdict(
+        Facts(has_winner=True, open_date="2026-09-10", today="2026-09-18")
+    )
     assert verdict == BEFORE
     assert "낙찰" in reason
 
 
 def test_rule_verdict_uses_passed_opening_when_winner_unknown():
-    verdict, reason = rule_verdict(Facts(has_winner=False, open_date="2026-09-10", today="2026-09-18"))
+    verdict, reason = rule_verdict(
+        Facts(has_winner=False, open_date="2026-09-10", today="2026-09-18")
+    )
     assert verdict == BEFORE
     assert "개찰" in reason
 
 
 def test_rule_verdict_is_unknown_before_opening():
     """개찰 전이면 아무것도 모른다. 공고일로 추정하지 않는다."""
-    verdict, reason = rule_verdict(Facts(has_winner=False, open_date="2026-12-01", today="2026-09-18"))
+    verdict, reason = rule_verdict(
+        Facts(has_winner=False, open_date="2026-12-01", today="2026-09-18")
+    )
     assert verdict == UNKNOWN
     assert reason
 
@@ -434,7 +440,9 @@ def test_read_news_defers_when_completion_and_start_collide():
 
 def test_read_news_defers_when_article_year_is_far_from_project_dates():
     """진안복합노인 복지센터 — 2006년 개원 시설이 검색돼 들어왔다."""
-    got = read_news([_a("진안복합노인 복지센터 개원", published="2006-05-26")], ("2026-01-01", "2027-12-31"))
+    got = read_news(
+        [_a("진안복합노인 복지센터 개원", published="2006-05-26")], ("2026-01-01", "2027-12-31")
+    )
     assert got.needs_llm is True
     assert "연도" in got.llm_reason
 
@@ -499,16 +507,26 @@ def read_news(articles: list[Article], project_dates: tuple[str, str]) -> NewsRe
     planned = {a.url for a, s in signals if SIGNAL_PLANNED in s}
 
     if starts and dones:
-        return NewsRead(UNKNOWN, "착공 기사와 준공 기사가 함께 잡힘", dones[0].url, True,
-                        "착공 기사와 준공 기사가 동시에 잡힘")
+        return NewsRead(
+            UNKNOWN,
+            "착공 기사와 준공 기사가 함께 잡힘",
+            dones[0].url,
+            True,
+            "착공 기사와 준공 기사가 동시에 잡힘",
+        )
 
     for group, strong, label in ((dones, DONE, "준공"), (starts, BUILDING, "착공·기공식")):
         if not group:
             continue
         article = group[0]
         if article.url in planned:
-            return NewsRead(UNKNOWN, f"{label} 예정 표기", article.url, True,
-                            f"{label}과 예정이 함께 쓰여 실제인지 불분명")
+            return NewsRead(
+                UNKNOWN,
+                f"{label} 예정 표기",
+                article.url,
+                True,
+                f"{label}과 예정이 함께 쓰여 실제인지 불분명",
+            )
         verdict, note = demote_without_evidence(strong, article.url)
         return NewsRead(verdict, note or f"{label} 보도", article.url, False, "")
 
@@ -778,10 +796,12 @@ import httpx
 from nara.config import Secrets
 from nara.naver import search_news
 
-KEYED = Secrets(g2b_api_key="x", naver_client_id="id", naver_client_secret="sec",
-                anthropic_api_key=None)
-KEYLESS = Secrets(g2b_api_key="x", naver_client_id=None, naver_client_secret=None,
-                  anthropic_api_key=None)
+KEYED = Secrets(
+    g2b_api_key="x", naver_client_id="id", naver_client_secret="sec", anthropic_api_key=None
+)
+KEYLESS = Secrets(
+    g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+)
 
 PAYLOAD = {
     "items": [
@@ -896,7 +916,7 @@ def _iso(pub_date: str) -> str:
     """RFC 822('Mon, 26 Sep 2026 14:12:00 +0900') → ISO 날짜. 못 읽으면 빈 문자열."""
     try:
         return parsedate_to_datetime(pub_date).date().isoformat()
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return ""
 
 
@@ -997,12 +1017,20 @@ from nara.config import Secrets
 from nara.llm import adjudicate
 from nara.verdict import BEFORE, BUILDING, Article
 
-KEYED = Secrets(g2b_api_key="x", naver_client_id=None, naver_client_secret=None,
-                anthropic_api_key="sk-test")
-KEYLESS = Secrets(g2b_api_key="x", naver_client_id=None, naver_client_secret=None,
-                  anthropic_api_key=None)
-ARTICLES = [Article(title="완주군 다목적체육관 2026년 9월 착공 예정", body="",
-                    url="https://news.example.com/a", published="2026-08-01")]
+KEYED = Secrets(
+    g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key="sk-test"
+)
+KEYLESS = Secrets(
+    g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+)
+ARTICLES = [
+    Article(
+        title="완주군 다목적체육관 2026년 9월 착공 예정",
+        body="",
+        url="https://news.example.com/a",
+        published="2026-08-01",
+    )
+]
 
 
 class _Block:
@@ -1373,8 +1401,9 @@ from nara.naver import SearchResult
 from nara.status import judge_project
 from nara.verdict import BEFORE, BUILDING, UNKNOWN, Article
 
-SECRETS = Secrets(g2b_api_key="x", naver_client_id=None, naver_client_secret=None,
-                  anthropic_api_key=None)
+SECRETS = Secrets(
+    g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+)
 
 
 def _no_search(*args, **kwargs):
@@ -1395,8 +1424,9 @@ def _row(conn, project_id):
 
 def test_judge_falls_back_to_rules_when_search_is_unavailable(conn):
     project_id = _project(conn, "전북특별자치도 완주군", "사업")
-    got = judge_project(conn, _row(conn, project_id), SECRETS, "2026-09-18",
-                        search=_no_search, adjudicator=_no_llm)
+    got = judge_project(
+        conn, _row(conn, project_id), SECRETS, "2026-09-18", search=_no_search, adjudicator=_no_llm
+    )
     assert got.decided_by == "rule"
     assert got.verdict in (BEFORE, UNKNOWN)
 
@@ -1404,8 +1434,9 @@ def test_judge_falls_back_to_rules_when_search_is_unavailable(conn):
 def test_judge_says_it_skipped_the_news_search(conn):
     """검색을 안 했다는 사실이 근거에 남아야 한다. 조용히 넘어가지 않는다."""
     project_id = _project(conn, "전북특별자치도 완주군", "사업")
-    got = judge_project(conn, _row(conn, project_id), SECRETS, "2026-09-18",
-                        search=_no_search, adjudicator=_no_llm)
+    got = judge_project(
+        conn, _row(conn, project_id), SECRETS, "2026-09-18", search=_no_search, adjudicator=_no_llm
+    )
     assert "건너뛰" in got.reason
 
 
@@ -1415,8 +1446,14 @@ def test_judge_uses_news_when_it_finds_evidence(conn):
         articles=[Article("완주군 종합사회복지관 기공식", "", "https://n/1", "2026-08-28")],
         searched=True,
     )
-    got = judge_project(conn, _row(conn, project_id), SECRETS, "2026-09-18",
-                        search=lambda *a, **k: found, adjudicator=_no_llm)
+    got = judge_project(
+        conn,
+        _row(conn, project_id),
+        SECRETS,
+        "2026-09-18",
+        search=lambda *a, **k: found,
+        adjudicator=_no_llm,
+    )
     assert got.verdict == BUILDING
     assert got.decided_by == "news"
     assert got.evidence_url == "https://n/1"
@@ -1425,8 +1462,9 @@ def test_judge_uses_news_when_it_finds_evidence(conn):
 def test_judge_asks_the_llm_only_when_the_news_read_is_ambiguous(conn):
     project_id = _project(conn, "전북특별자치도 완주군", "완주군 다목적체육관")
     found = SearchResult(
-        articles=[Article("완주군 다목적체육관 2026년 9월 착공 예정", "",
-                          "https://n/2", "2026-08-01")],
+        articles=[
+            Article("완주군 다목적체육관 2026년 9월 착공 예정", "", "https://n/2", "2026-08-01")
+        ],
         searched=True,
     )
     asked = []
@@ -1435,8 +1473,14 @@ def test_judge_asks_the_llm_only_when_the_news_read_is_ambiguous(conn):
         asked.append(True)
         return BEFORE, "기사가 예정이라고 적었다"
 
-    got = judge_project(conn, _row(conn, project_id), SECRETS, "2026-09-18",
-                        search=lambda *a, **k: found, adjudicator=adjudicator)
+    got = judge_project(
+        conn,
+        _row(conn, project_id),
+        SECRETS,
+        "2026-09-18",
+        search=lambda *a, **k: found,
+        adjudicator=adjudicator,
+    )
     assert asked
     assert got.decided_by == "llm"
     assert got.verdict == BEFORE
@@ -1454,20 +1498,33 @@ def test_judge_does_not_ask_the_llm_when_the_news_read_is_clear(conn):
         asked.append(True)
         return BEFORE, "불려서는 안 된다"
 
-    judge_project(conn, _row(conn, project_id), SECRETS, "2026-09-18",
-                  search=lambda *a, **k: found, adjudicator=adjudicator)
+    judge_project(
+        conn,
+        _row(conn, project_id),
+        SECRETS,
+        "2026-09-18",
+        search=lambda *a, **k: found,
+        adjudicator=adjudicator,
+    )
     assert not asked
 
 
 def test_judge_stays_unknown_when_the_llm_cannot_answer(conn):
     project_id = _project(conn, "전북특별자치도 완주군", "완주군 다목적체육관")
     found = SearchResult(
-        articles=[Article("완주군 다목적체육관 2026년 9월 착공 예정", "",
-                          "https://n/2", "2026-08-01")],
+        articles=[
+            Article("완주군 다목적체육관 2026년 9월 착공 예정", "", "https://n/2", "2026-08-01")
+        ],
         searched=True,
     )
-    got = judge_project(conn, _row(conn, project_id), SECRETS, "2026-09-18",
-                        search=lambda *a, **k: found, adjudicator=_no_llm)
+    got = judge_project(
+        conn,
+        _row(conn, project_id),
+        SECRETS,
+        "2026-09-18",
+        search=lambda *a, **k: found,
+        adjudicator=_no_llm,
+    )
     assert got.verdict == UNKNOWN
     assert got.decided_by == "news"
 
@@ -1476,8 +1533,9 @@ def test_judge_records_the_date_conflict_in_the_reason(conn):
     project_id = _project(conn, "전북특별자치도 완주군", "사업")
     conn.execute("UPDATE project SET start_date = '2025-11-03' WHERE id = ?", (project_id,))
     conn.commit()
-    got = judge_project(conn, _row(conn, project_id), SECRETS, "2026-09-18",
-                        search=_no_search, adjudicator=_no_llm)
+    got = judge_project(
+        conn, _row(conn, project_id), SECRETS, "2026-09-18", search=_no_search, adjudicator=_no_llm
+    )
     assert "2025-11-03" in got.reason
 
 
@@ -1486,8 +1544,9 @@ def test_judge_never_changes_the_project_dates(conn):
     project_id = _project(conn, "전북특별자치도 완주군", "사업")
     conn.execute("UPDATE project SET start_date = '2025-11-03' WHERE id = ?", (project_id,))
     conn.commit()
-    judge_project(conn, _row(conn, project_id), SECRETS, "2026-09-18",
-                  search=_no_search, adjudicator=_no_llm)
+    judge_project(
+        conn, _row(conn, project_id), SECRETS, "2026-09-18", search=_no_search, adjudicator=_no_llm
+    )
     after = conn.execute("SELECT start_date FROM project WHERE id = ?", (project_id,)).fetchone()
     assert after["start_date"] == "2025-11-03"
 ```
@@ -1537,9 +1596,7 @@ def judge_project(
     )
     dates = (row["start_date"] or "", row["end_date"] or "")
 
-    verdict, reason = rule_verdict(
-        Facts(has_winner=has_winner, open_date=open_date, today=today)
-    )
+    verdict, reason = rule_verdict(Facts(has_winner=has_winner, open_date=open_date, today=today))
     decided_by, evidence_url = "rule", ""
 
     found = search(secrets, f"{row['name']} 착공 준공")
@@ -1671,8 +1728,16 @@ def test_update_statuses_counts_what_it_actually_did(conn):
     for i in range(3):
         _project(conn, "전북특별자치도 완주군", f"사업 {i}")
     counters = RunCounters()
-    update_statuses(conn, SECRETS, "2026-09-18", tier=None, limit=100, counters=counters,
-                    search=_no_search, adjudicator=_no_llm)
+    update_statuses(
+        conn,
+        SECRETS,
+        "2026-09-18",
+        tier=None,
+        limit=100,
+        counters=counters,
+        search=_no_search,
+        adjudicator=_no_llm,
+    )
     assert counters.processed == 3
     assert counters.updated == 3
 
@@ -1683,9 +1748,18 @@ def test_update_statuses_stops_when_the_budget_runs_out(conn):
         _project(conn, "전북특별자치도 완주군", f"사업 {i}")
     ticks = iter([0.0, 0.0, 30.0, 61.0, 61.0, 61.0, 61.0])
 
-    got = update_statuses(conn, SECRETS, "2026-09-18", tier=None, limit=100,
-                          counters=RunCounters(), search=_no_search, adjudicator=_no_llm,
-                          budget_seconds=60, now_fn=lambda: next(ticks))
+    got = update_statuses(
+        conn,
+        SECRETS,
+        "2026-09-18",
+        tier=None,
+        limit=100,
+        counters=RunCounters(),
+        search=_no_search,
+        adjudicator=_no_llm,
+        budget_seconds=60,
+        now_fn=lambda: next(ticks),
+    )
 
     assert got.stopped_early is True
     assert got.checked < 5
@@ -1855,24 +1929,24 @@ def _db(tmp_path, projects=1):
 
 
 def test_enrich_status_rejects_a_bad_tier(tmp_path):
-    result = runner.invoke(app, ["enrich", "status", "--tier", "oops",
-                                 "--db", str(_db(tmp_path))])
+    result = runner.invoke(app, ["enrich", "status", "--tier", "oops", "--db", str(_db(tmp_path))])
     assert result.exit_code == 1
     assert "focus" in result.output
 
 
 def test_enrich_status_rejects_nonpositive_limit(tmp_path):
-    result = runner.invoke(app, ["enrich", "status", "--limit", "0",
-                                 "--db", str(_db(tmp_path))])
+    result = runner.invoke(app, ["enrich", "status", "--limit", "0", "--db", str(_db(tmp_path))])
     assert result.exit_code != 0
 
 
 def test_enrich_status_says_which_steps_it_skipped(tmp_path, monkeypatch):
     """키가 없으면 그 사실이 화면에 나와야 한다 — 스펙이 요구한다."""
     monkeypatch.setattr(
-        cli, "load_secrets",
-        lambda path: Secrets(g2b_api_key="x", naver_client_id=None,
-                             naver_client_secret=None, anthropic_api_key=None),
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+        ),
     )
     result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path))])
     assert result.exit_code == 0
@@ -1882,9 +1956,11 @@ def test_enrich_status_says_which_steps_it_skipped(tmp_path, monkeypatch):
 
 def test_enrich_status_reports_counts(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        cli, "load_secrets",
-        lambda path: Secrets(g2b_api_key="x", naver_client_id=None,
-                             naver_client_secret=None, anthropic_api_key=None),
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+        ),
     )
     result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path, projects=3))])
     assert "3" in result.output
@@ -1892,9 +1968,11 @@ def test_enrich_status_reports_counts(tmp_path, monkeypatch):
 
 def test_enrich_status_writes_a_run_log_row(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        cli, "load_secrets",
-        lambda path: Secrets(g2b_api_key="x", naver_client_id=None,
-                             naver_client_secret=None, anthropic_api_key=None),
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+        ),
     )
     db = _db(tmp_path)
     runner.invoke(app, ["enrich", "status", "--db", str(db)])
@@ -2189,8 +2267,14 @@ def test_wanju_multipurpose_gym_start_or_plan_is_not_decided_by_rules():
     예정인지 실제인지 기사만으로 갈리지 않는다. 기계가 정하면 안 된다.
     """
     got = read_news(
-        [Article("완주군 다목적체육관 조성사업 2026년 9월 착공 목표", "",
-                 "https://news.example.com/wanju", "2026-08-10")],
+        [
+            Article(
+                "완주군 다목적체육관 조성사업 2026년 9월 착공 목표",
+                "",
+                "https://news.example.com/wanju",
+                "2026-08-10",
+            )
+        ],
         ("2026-04-30", "2028-12-31"),
     )
     assert got.needs_llm is True
@@ -2203,8 +2287,7 @@ def test_jinan_senior_center_2006_article_does_not_decide_a_2026_project():
     시트는 착공 2007·준공 2008이다. 같은 이름의 다른(또는 옛) 시설이다.
     """
     got = read_news(
-        [Article("진안복합노인 복지센터 개원", "", "https://news.example.com/jinan",
-                 "2006-05-26")],
+        [Article("진안복합노인 복지센터 개원", "", "https://news.example.com/jinan", "2006-05-26")],
         ("2026-01-01", "2027-12-31"),
     )
     assert got.needs_llm is True
@@ -2215,10 +2298,12 @@ def test_sunchang_gym_completion_and_start_articles_collide():
     """순창군 동계면 종합체육관 — 시트 착공 2025.07.17, 보도는 2020 착공·2025.06.25 준공."""
     got = read_news(
         [
-            Article("순창군 동계면 종합체육관 착공", "", "https://news.example.com/s1",
-                    "2020-01-15"),
-            Article("순창군 동계면 종합체육관 준공식", "", "https://news.example.com/s2",
-                    "2025-06-25"),
+            Article(
+                "순창군 동계면 종합체육관 착공", "", "https://news.example.com/s1", "2020-01-15"
+            ),
+            Article(
+                "순창군 동계면 종합체육관 준공식", "", "https://news.example.com/s2", "2025-06-25"
+            ),
         ],
         ("2025-07-17", "2026-12-31"),
     )
@@ -2231,8 +2316,14 @@ def test_demolition_is_not_construction_start():
     이주 → 철거 → 본공사 착공 순서다. 철거 중이면 오히려 접촉 최적기다.
     """
     got = read_news(
-        [Article("옛 청사 철거공사 착수", "멸실 신고를 마쳤다",
-                 "https://news.example.com/demo", "2026-07-01")],
+        [
+            Article(
+                "옛 청사 철거공사 착수",
+                "멸실 신고를 마쳤다",
+                "https://news.example.com/demo",
+                "2026-07-01",
+            )
+        ],
         ("", ""),
     )
     assert got.verdict == BEFORE
@@ -2242,8 +2333,11 @@ def test_demolition_is_not_construction_start():
 def test_a_clear_groundbreaking_still_reads_as_construction():
     """강등 규칙이 과해져서 진짜 착공까지 놓치면 안 된다 — 반대 방향 확인."""
     got = read_news(
-        [Article("완주군 종합사회복지관 기공식 개최", "", "https://news.example.com/w2",
-                 "2026-08-28")],
+        [
+            Article(
+                "완주군 종합사회복지관 기공식 개최", "", "https://news.example.com/w2", "2026-08-28"
+            )
+        ],
         ("2027-10-07", ""),
     )
     assert got.verdict == BUILDING
