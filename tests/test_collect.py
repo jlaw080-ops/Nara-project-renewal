@@ -36,9 +36,15 @@ def _payload(items):
 
 def _raw(bid_no, org, title, div="기술용역", kind="등록공고"):
     return {
-        "bidNtceNo": bid_no, "bidNtceOrd": "0", "dminsttNm": org, "bidNtceNm": title,
-        "srvceDivNm": div, "ntceKindNm": kind,
-        "bidNtceDt": "20260901", "opengDt": "20260910", "bidClseDt": "20260909",
+        "bidNtceNo": bid_no,
+        "bidNtceOrd": "0",
+        "dminsttNm": org,
+        "bidNtceNm": title,
+        "srvceDivNm": div,
+        "ntceKindNm": kind,
+        "bidNtceDt": "20260901",
+        "opengDt": "20260910",
+        "bidClseDt": "20260909",
     }
 
 
@@ -144,9 +150,7 @@ def test_collect_command_rejects_non_positive_days(monkeypatch):
         yield RunCounters()
 
     monkeypatch.setattr(cli, "run_log", fake_run_log)
-    monkeypatch.setattr(
-        cli, "collect_range", lambda *a, **k: calls.append("collect_range") or 0
-    )
+    monkeypatch.setattr(cli, "collect_range", lambda *a, **k: calls.append("collect_range") or 0)
 
     result = CliRunner().invoke(app, ["collect", "--days", "0"])
 

@@ -55,7 +55,7 @@ def update_awards(
         counters.processed += 1
         try:
             award = fetch_award(client, api_key, bid_no)
-        except (G2BError, httpx.HTTPError):
+        except G2BError, httpx.HTTPError:
             # 한 건이 실패해도 나머지는 계속 본다. 일시적 네트워크 오류 하나가
             # 그 회차의 남은 대기 건을 통째로 날리지 않게 한다.
             counters.failed += 1
@@ -65,8 +65,13 @@ def update_awards(
         conn.execute(
             "INSERT INTO award (bid_no, winner, award_date, raw_json, checked_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            (bid_no, award.winner, award.award_date,
-             json.dumps(award.raw, ensure_ascii=False), now),
+            (
+                bid_no,
+                award.winner,
+                award.award_date,
+                json.dumps(award.raw, ensure_ascii=False),
+                now,
+            ),
         )
         conn.commit()
         updated += 1

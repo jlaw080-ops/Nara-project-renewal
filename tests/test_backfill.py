@@ -26,9 +26,12 @@ def _empty_client(calls: list):
         calls.append((params["inqryBgnDt"], params["inqryEndDt"]))
         return httpx.Response(
             200,
-            json={"response": {"header": {"resultCode": "00"},
-                               "body": {"pageNo": 1, "numOfRows": 500,
-                                        "totalCount": 0, "items": []}}},
+            json={
+                "response": {
+                    "header": {"resultCode": "00"},
+                    "body": {"pageNo": 1, "numOfRows": 500, "totalCount": 0, "items": []},
+                }
+            },
         )
 
     return httpx.Client(transport=httpx.MockTransport(handler))
@@ -37,8 +40,16 @@ def _empty_client(calls: list):
 def test_backfill_walks_from_past_to_present_in_chunks(conn):
     calls = []
     with _empty_client(calls) as client:
-        result = backfill(conn, client, "KEY", SETTINGS, days_back=9, chunk_days=3,
-                          counters=RunCounters(), now=NOW)
+        result = backfill(
+            conn,
+            client,
+            "KEY",
+            SETTINGS,
+            days_back=9,
+            chunk_days=3,
+            counters=RunCounters(),
+            now=NOW,
+        )
     assert result.done is True
     assert [c[0][:8] for c in calls] == ["20260908", "20260911", "20260914"]
 
@@ -46,8 +57,17 @@ def test_backfill_walks_from_past_to_present_in_chunks(conn):
 def test_backfill_saves_cursor_when_stopped_early(conn):
     calls = []
     with _empty_client(calls) as client:
-        result = backfill(conn, client, "KEY", SETTINGS, days_back=9, chunk_days=3,
-                          counters=RunCounters(), now=NOW, max_chunks=1)
+        result = backfill(
+            conn,
+            client,
+            "KEY",
+            SETTINGS,
+            days_back=9,
+            chunk_days=3,
+            counters=RunCounters(),
+            now=NOW,
+            max_chunks=1,
+        )
     assert result.done is False
     assert result.cursor == "2026-09-11"
     saved = conn.execute("SELECT value FROM app_state WHERE key='backfill_cursor'").fetchone()
@@ -59,25 +79,50 @@ def test_backfill_resumes_from_saved_cursor(conn):
     conn.commit()
     calls = []
     with _empty_client(calls) as client:
-        backfill(conn, client, "KEY", SETTINGS, days_back=9, chunk_days=3,
-                 counters=RunCounters(), now=NOW)
+        backfill(
+            conn,
+            client,
+            "KEY",
+            SETTINGS,
+            days_back=9,
+            chunk_days=3,
+            counters=RunCounters(),
+            now=NOW,
+        )
     assert [c[0][:8] for c in calls] == ["20260914"]
 
 
 def test_backfill_clears_cursor_when_finished(conn):
     calls = []
     with _empty_client(calls) as client:
-        backfill(conn, client, "KEY", SETTINGS, days_back=3, chunk_days=3,
-                 counters=RunCounters(), now=NOW)
-    assert conn.execute("SELECT value FROM app_state WHERE key='backfill_cursor'").fetchone() is None
+        backfill(
+            conn,
+            client,
+            "KEY",
+            SETTINGS,
+            days_back=3,
+            chunk_days=3,
+            counters=RunCounters(),
+            now=NOW,
+        )
+    row = conn.execute("SELECT value FROM app_state WHERE key='backfill_cursor'").fetchone()
+    assert row is None
 
 
 def test_backfill_rejects_non_positive_chunk_days(conn):
     calls = []
     with _empty_client(calls) as client:
         with pytest.raises(ValueError):
-            backfill(conn, client, "KEY", SETTINGS, days_back=9, chunk_days=0,
-                     counters=RunCounters(), now=NOW)
+            backfill(
+                conn,
+                client,
+                "KEY",
+                SETTINGS,
+                days_back=9,
+                chunk_days=0,
+                counters=RunCounters(),
+                now=NOW,
+            )
     assert calls == []
 
 
@@ -85,6 +130,14 @@ def test_backfill_rejects_non_positive_days_back(conn):
     calls = []
     with _empty_client(calls) as client:
         with pytest.raises(ValueError):
-            backfill(conn, client, "KEY", SETTINGS, days_back=0, chunk_days=3,
-                     counters=RunCounters(), now=NOW)
+            backfill(
+                conn,
+                client,
+                "KEY",
+                SETTINGS,
+                days_back=0,
+                chunk_days=3,
+                counters=RunCounters(),
+                now=NOW,
+            )
     assert calls == []

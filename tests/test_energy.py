@@ -2,31 +2,39 @@ import pytest
 
 from nara.energy import EnergyItem, estimate_cost, parse_energy_plan
 
-PRICES = {"BIPV": 5_000_000, "PV": 2_500_000, "지열": 2_500_000,
-          "PEMFC": 32_000_000, "SOFC": 98_250_000}
+PRICES = {
+    "BIPV": 5_000_000,
+    "PV": 2_500_000,
+    "지열": 2_500_000,
+    "PEMFC": 32_000_000,
+    "SOFC": 98_250_000,
+}
 
 
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("PV: 21.96kW BIPV: 72.6kW",
-         [EnergyItem("PV", 21.96), EnergyItem("BIPV", 72.6)]),
-        ("지열 수직밀폐형 1031.044kW",
-         [EnergyItem("지열", 1031.044)]),
-        ("PV: 42.24kW 지열 수직밀폐형: 220.938kW",
-         [EnergyItem("PV", 42.24), EnergyItem("지열", 220.938)]),
-        ("태양광 BIPV: 1,756.800 연료전지 PEMFC: 120.000",
-         [EnergyItem("BIPV", 1756.8), EnergyItem("PEMFC", 120.0)]),
-        ("태양광 고정식: 337.920",
-         [EnergyItem("PV", 337.92)]),
-        ("지열: 280.000",
-         [EnergyItem("지열", 280.0)]),
-        ("PV: 69.12kW PEMFC: 15kW(에스퓨얼셀)",
-         [EnergyItem("PV", 69.12), EnergyItem("PEMFC", 15.0)]),
-        ("PV: 46.kW BIPV: 41.07kW",
-         [EnergyItem("PV", 46.0), EnergyItem("BIPV", 41.07)]),
-        ("지열 수직밀폐형: 663.988 태양광 고정식: 113.280",
-         [EnergyItem("지열", 663.988), EnergyItem("PV", 113.28)]),
+        ("PV: 21.96kW BIPV: 72.6kW", [EnergyItem("PV", 21.96), EnergyItem("BIPV", 72.6)]),
+        ("지열 수직밀폐형 1031.044kW", [EnergyItem("지열", 1031.044)]),
+        (
+            "PV: 42.24kW 지열 수직밀폐형: 220.938kW",
+            [EnergyItem("PV", 42.24), EnergyItem("지열", 220.938)],
+        ),
+        (
+            "태양광 BIPV: 1,756.800 연료전지 PEMFC: 120.000",
+            [EnergyItem("BIPV", 1756.8), EnergyItem("PEMFC", 120.0)],
+        ),
+        ("태양광 고정식: 337.920", [EnergyItem("PV", 337.92)]),
+        ("지열: 280.000", [EnergyItem("지열", 280.0)]),
+        (
+            "PV: 69.12kW PEMFC: 15kW(에스퓨얼셀)",
+            [EnergyItem("PV", 69.12), EnergyItem("PEMFC", 15.0)],
+        ),
+        ("PV: 46.kW BIPV: 41.07kW", [EnergyItem("PV", 46.0), EnergyItem("BIPV", 41.07)]),
+        (
+            "지열 수직밀폐형: 663.988 태양광 고정식: 113.280",
+            [EnergyItem("지열", 663.988), EnergyItem("PV", 113.28)],
+        ),
     ],
 )
 def test_parse_energy_plan_reads_real_sheet_values(text, expected):

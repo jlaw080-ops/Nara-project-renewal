@@ -33,10 +33,10 @@ def test_title_passes_when_keyword_is_a_prefix_only():
 @pytest.mark.parametrize(
     "title",
     [
-        "남천동 주차타워 건립공사 감리용역",           # 감리
-        "학교 기숙사 신축 실시설계용역",               # 기숙사
-        "OO지구 지방하천 정비 실시설계",               # 지방하천
-        "상수도 관망 정비 실시설계용역",               # 상수도
+        "남천동 주차타워 건립공사 감리용역",  # 감리
+        "학교 기숙사 신축 실시설계용역",  # 기숙사
+        "OO지구 지방하천 정비 실시설계",  # 지방하천
+        "상수도 관망 정비 실시설계용역",  # 상수도
     ],
 )
 def test_title_rejected_by_excluded_keyword(title):

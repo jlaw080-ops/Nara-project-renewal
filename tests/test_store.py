@@ -22,11 +22,21 @@ def conn(tmp_path):
 
 def _item(bid_no="R1", org="전북특별자치도 완주군", title="완주 체육관 실시설계용역") -> NoticeItem:
     return NoticeItem(
-        bid_no=bid_no, bid_ord="0", org_name=org, title=title,
-        service_div="기술용역", kind="등록공고",
-        notice_date="2026-09-01", open_date="2026-09-10", close_date="2026-09-09",
-        url="https://example.test/1", budget_krw=100_000_000, budget_basis="추정가격",
-        officer_name="", officer_tel="", raw={"bidNtceNo": bid_no},
+        bid_no=bid_no,
+        bid_ord="0",
+        org_name=org,
+        title=title,
+        service_div="기술용역",
+        kind="등록공고",
+        notice_date="2026-09-01",
+        open_date="2026-09-10",
+        close_date="2026-09-09",
+        url="https://example.test/1",
+        budget_krw=100_000_000,
+        budget_basis="추정가격",
+        officer_name="",
+        officer_tel="",
+        raw={"bidNtceNo": bid_no},
     )
 
 

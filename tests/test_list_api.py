@@ -46,8 +46,7 @@ def test_fetch_notice_page_builds_url_when_api_omits_it():
     with _client(lambda req: httpx.Response(200, json=PAGE1)) as client:
         items, _ = fetch_notice_page(client, "KEY", BEGIN, END, page=1, rows=2)
     assert items[1].url == (
-        "https://www.g2b.go.kr/link/PNPE027_01/single/"
-        "?bidPbancNo=R26BK01462347&bidPbancOrd=000"
+        "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01462347&bidPbancOrd=000"
     )
 
 
@@ -70,7 +69,11 @@ def test_fetch_notice_page_raises_on_xml_error_body():
 
 
 def test_fetch_notice_page_raises_on_bad_result_code():
-    bad = {"response": {"header": {"resultCode": "22", "resultMsg": "LIMITED NUMBER OF SERVICE REQUESTS"}}}
+    bad = {
+        "response": {
+            "header": {"resultCode": "22", "resultMsg": "LIMITED NUMBER OF SERVICE REQUESTS"}
+        }
+    }
     with _client(lambda req: httpx.Response(200, json=bad)) as client:
         with pytest.raises(G2BError, match="22"):
             fetch_notice_page(client, "KEY", BEGIN, END, page=1, rows=2)

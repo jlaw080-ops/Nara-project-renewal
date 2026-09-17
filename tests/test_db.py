@@ -1,8 +1,17 @@
 from nara.db import connect, migrate
 
 EXPECTED_TABLES = {
-    "org", "project", "notice", "award", "status_check", "dept_check",
-    "attachment", "energy_plan", "energy_unit_price", "run_log", "app_state",
+    "org",
+    "project",
+    "notice",
+    "award",
+    "status_check",
+    "dept_check",
+    "attachment",
+    "energy_plan",
+    "energy_unit_price",
+    "run_log",
+    "app_state",
 }
 
 

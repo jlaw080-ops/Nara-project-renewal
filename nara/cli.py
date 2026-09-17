@@ -58,9 +58,7 @@ def collect(
     conn = _open_db(db)
     with run_log(conn, "collect", f"--days {days}") as counters:
         with httpx.Client() as client:
-            added = collect_range(
-                conn, client, secrets.g2b_api_key, settings, begin, end, counters
-            )
+            added = collect_range(conn, client, secrets.g2b_api_key, settings, begin, end, counters)
     typer.echo(f"수집 완료 — 조회 {counters.processed}건 / 신규 {added}건")
 
 
@@ -130,8 +128,14 @@ def enrich_award(
     with run_log(conn, "enrich award", f"--tier {tier}") as counters:
         with httpx.Client() as client:
             updated = update_awards(
-                conn, client, secrets.g2b_api_key, date.today().isoformat(),
-                selected, group, limit, counters,
+                conn,
+                client,
+                secrets.g2b_api_key,
+                date.today().isoformat(),
+                selected,
+                group,
+                limit,
+                counters,
             )
     typer.echo(
         f"낙찰 조회 — 조회 {counters.processed}건 / 기록 {updated}건 / 실패 {counters.failed}건"
@@ -161,9 +165,7 @@ def migrate_tsv(
     shutil.copy2(path, backup)
 
     with run_log(conn, "migrate tsv", f"{tab}") as counters:
-        stats = import_tab(
-            conn, tab, path.read_text(encoding="utf-8"), settings, now, counters
-        )
+        stats = import_tab(conn, tab, path.read_text(encoding="utf-8"), settings, now, counters)
         counters.updated = stats.notices + stats.projects
         counters.failed = stats.skipped
 
@@ -175,8 +177,7 @@ def migrate_tsv(
     )
     if stats.skipped_with_data:
         typer.echo(
-            f"내용이 있는데 수요기관·공고명이 비어 건너뛴 행 "
-            f"{len(stats.skipped_with_data)}건:",
+            f"내용이 있는데 수요기관·공고명이 비어 건너뛴 행 {len(stats.skipped_with_data)}건:",
             err=True,
         )
         for preview in stats.skipped_with_data:

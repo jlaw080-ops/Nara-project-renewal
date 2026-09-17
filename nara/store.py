@@ -38,8 +38,7 @@ def ensure_project(conn: sqlite3.Connection, org_id: int, name: str, source: str
     if row:
         return row["id"]
     cursor = conn.execute(
-        "INSERT INTO project (org_id, name, source, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO project (org_id, name, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         (org_id, name, source, now, now),
     )
     conn.commit()
@@ -58,10 +57,21 @@ def upsert_notice(
         "SELECT project_id FROM notice WHERE bid_no = ?", (item.bid_no,)
     ).fetchone()
     values = (
-        org_id, item.bid_ord, item.org_name, item.title, item.kind,
-        item.notice_date, item.open_date, item.close_date, item.url,
-        item.budget_krw, item.budget_basis, item.officer_name, item.officer_tel,
-        json.dumps(item.raw, ensure_ascii=False), now,
+        org_id,
+        item.bid_ord,
+        item.org_name,
+        item.title,
+        item.kind,
+        item.notice_date,
+        item.open_date,
+        item.close_date,
+        item.url,
+        item.budget_krw,
+        item.budget_basis,
+        item.officer_name,
+        item.officer_tel,
+        json.dumps(item.raw, ensure_ascii=False),
+        now,
     )
     if existing:
         # 사업 연결은 건드리지 않는다. 사람이 바꿔 놓았을 수 있다.

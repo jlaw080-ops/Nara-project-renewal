@@ -103,7 +103,10 @@ def backfill(
             return BackfillResult(added, cursor.isoformat(), done=False)
         chunk_end = min(cursor + timedelta(days=chunk_days), now.date())
         added += collect_range(
-            conn, client, api_key, settings,
+            conn,
+            client,
+            api_key,
+            settings,
             datetime.combine(cursor, datetime.min.time()),
             datetime.combine(chunk_end, datetime.min.time()),
             counters,

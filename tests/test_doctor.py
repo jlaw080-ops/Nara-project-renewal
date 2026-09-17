@@ -87,7 +87,8 @@ def test_award_backlog_ignores_notices_already_awarded(conn):
 def test_run_checks_flags_rest_org_without_weekday_group(conn):
     conn.execute(
         "INSERT INTO org (name, tier, weekday_group, added_at) "
-        "VALUES ('충청북도 제천시', 'rest', NULL, ?)", (NOW,)
+        "VALUES ('충청북도 제천시', 'rest', NULL, ?)",
+        (NOW,),
     )
     conn.commit()
     findings = run_checks(conn, TODAY)
@@ -109,18 +110,27 @@ def test_run_checks_is_quiet_when_backlog_is_spread_across_weekday_groups(conn):
             conn.execute(
                 "INSERT INTO notice (bid_no, project_id, org_id, org_name, title, open_date, "
                 "collected_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (bid_no, project_id, org_id, f"비관심기관{group}", f"{bid_no} 사업",
-                 "2026-09-10", NOW),
+                (
+                    bid_no,
+                    project_id,
+                    org_id,
+                    f"비관심기관{group}",
+                    f"{bid_no} 사업",
+                    "2026-09-10",
+                    NOW,
+                ),
             )
     conn.commit()
     assert not any(f.check == "낙찰 조회 적체" for f in run_checks(conn, TODAY))
 
 
 def test_run_checks_flags_notice_without_org(conn):
-    """org_id가 없는 공고는 낙찰 대기 partition 쿼리(org JOIN)에 영영 안 잡히므로 따로 걸러야 한다."""
+    """org_id가 없는 공고는 낙찰 대기 partition 쿼리(org JOIN)에 영영 안 잡히므로
+    따로 걸러야 한다."""
     conn.execute(
         "INSERT INTO notice (bid_no, org_name, title, open_date, collected_at) "
-        "VALUES ('ORPHAN1', '알수없음', 'ORPHAN1 사업', '2026-09-10', ?)", (NOW,)
+        "VALUES ('ORPHAN1', '알수없음', 'ORPHAN1 사업', '2026-09-10', ?)",
+        (NOW,),
     )
     conn.commit()
     hits = [f for f in run_checks(conn, TODAY) if f.check == "기관 연결 없는 공고"]

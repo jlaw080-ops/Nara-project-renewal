@@ -7,9 +7,7 @@ import httpx
 from nara.dates import to_iso_date
 from nara.g2b.common import check_response, normalise_items, text
 
-BASE_URL = (
-    "https://apis.data.go.kr/1230000/as/ScsbidInfoService/getScsbidListSttusServc"
-)
+BASE_URL = "https://apis.data.go.kr/1230000/as/ScsbidInfoService/getScsbidListSttusServc"
 
 
 @dataclass(frozen=True)

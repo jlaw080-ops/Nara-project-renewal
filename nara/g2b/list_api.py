@@ -10,8 +10,7 @@ from nara.dates import to_iso_date
 from nara.g2b.common import check_response, normalise_items, text, to_int
 
 BASE_URL = (
-    "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
-    "/getBidPblancListInfoServcPPSSrch"
+    "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
 )
 DETAIL_URL = "https://www.g2b.go.kr/link/PNPE027_01/single/"
 

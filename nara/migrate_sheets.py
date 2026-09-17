@@ -115,17 +115,23 @@ def import_tab(
         )
 
         if bid_no:
-            existing = conn.execute(
-                "SELECT 1 FROM notice WHERE bid_no = ?", (bid_no,)
-            ).fetchone()
+            existing = conn.execute("SELECT 1 FROM notice WHERE bid_no = ?", (bid_no,)).fetchone()
             if not existing:
                 # open_date를 넣지 않으면 이 공고는 Task 10의 낙찰 대기 쿼리
                 # (open_date != '' AND open_date <= today)에 영영 들어오지 못한다.
                 conn.execute(
                     "INSERT INTO notice (bid_no, project_id, org_id, org_name, title, "
                     "open_date, budget_basis, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (bid_no, project_id, org_id, org_name, title,
-                     to_iso_date(cell(row, "open_date")), cell(row, "budget"), now),
+                    (
+                        bid_no,
+                        project_id,
+                        org_id,
+                        org_name,
+                        title,
+                        to_iso_date(cell(row, "open_date")),
+                        cell(row, "budget"),
+                        now,
+                    ),
                 )
                 stats.notices += 1
             if winner := cell(row, "winner"):
@@ -135,10 +141,13 @@ def import_tab(
                 )
 
         verdict, reason = _split_status(cell(row, "status"))
-        if verdict and not conn.execute(
-            "SELECT 1 FROM status_check WHERE project_id = ? AND decided_by = 'imported'",
-            (project_id,),
-        ).fetchone():
+        if (
+            verdict
+            and not conn.execute(
+                "SELECT 1 FROM status_check WHERE project_id = ? AND decided_by = 'imported'",
+                (project_id,),
+            ).fetchone()
+        ):
             conn.execute(
                 "INSERT INTO status_check (project_id, verdict, reason, decided_by, checked_at) "
                 "VALUES (?, ?, ?, 'imported', ?)",
@@ -152,7 +161,8 @@ def import_tab(
                 (project_id,),
             ).fetchone():
                 conn.execute(
-                    "INSERT INTO dept_check (project_id, bid_no, exec_dept, decided_by, checked_at) "
+                    "INSERT INTO dept_check "
+                    "(project_id, bid_no, exec_dept, decided_by, checked_at) "
                     "VALUES (?, ?, ?, 'imported', ?)",
                     (project_id, bid_no or None, dept, now),
                 )

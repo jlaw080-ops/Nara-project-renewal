@@ -59,26 +59,40 @@ class Settings:
     service_div_name: str
     skip_cancelled: bool
 
+
 # nara/g2b/list_api.py
 @dataclass(frozen=True)
 class NoticeItem:
-    bid_no: str; bid_ord: str; org_name: str; title: str
-    service_div: str; kind: str
-    notice_date: str; open_date: str; close_date: str   # ISO
+    bid_no: str
+    bid_ord: str
+    org_name: str
+    title: str
+    service_div: str
+    kind: str
+    notice_date: str
+    open_date: str
+    close_date: str  # ISO
     url: str
-    budget_krw: int | None; budget_basis: str
-    officer_name: str; officer_tel: str
+    budget_krw: int | None
+    budget_basis: str
+    officer_name: str
+    officer_tel: str
     raw: dict
+
 
 # nara/g2b/award_api.py
 @dataclass(frozen=True)
 class AwardItem:
-    winner: str; award_date: str; raw: dict
+    winner: str
+    award_date: str
+    raw: dict
+
 
 # nara/energy.py
 @dataclass(frozen=True)
 class EnergyItem:
-    source_type: str; capacity_kw: float
+    source_type: str
+    capacity_kw: float
 ```
 
 ---
@@ -567,10 +581,10 @@ def test_title_passes_when_keyword_is_a_prefix_only():
 @pytest.mark.parametrize(
     "title",
     [
-        "남천동 주차타워 건립공사 감리용역",           # 감리
-        "학교 기숙사 신축 실시설계용역",               # 기숙사
-        "OO지구 지방하천 정비 실시설계",               # 지방하천
-        "상수도 관망 정비 실시설계용역",               # 상수도
+        "남천동 주차타워 건립공사 감리용역",  # 감리
+        "학교 기숙사 신축 실시설계용역",  # 기숙사
+        "OO지구 지방하천 정비 실시설계",  # 지방하천
+        "상수도 관망 정비 실시설계용역",  # 상수도
     ],
 )
 def test_title_rejected_by_excluded_keyword(title):
@@ -694,8 +708,17 @@ git commit -m "feat: 제목·수요기관 필터"
 from nara.db import connect, migrate
 
 EXPECTED_TABLES = {
-    "org", "project", "notice", "award", "status_check", "dept_check",
-    "attachment", "energy_plan", "energy_unit_price", "run_log", "app_state",
+    "org",
+    "project",
+    "notice",
+    "award",
+    "status_check",
+    "dept_check",
+    "attachment",
+    "energy_plan",
+    "energy_unit_price",
+    "run_log",
+    "app_state",
 }
 
 
@@ -1037,8 +1060,7 @@ def test_fetch_notice_page_builds_url_when_api_omits_it():
     with _client(lambda req: httpx.Response(200, json=PAGE1)) as client:
         items, _ = fetch_notice_page(client, "KEY", BEGIN, END, page=1, rows=2)
     assert items[1].url == (
-        "https://www.g2b.go.kr/link/PNPE027_01/single/"
-        "?bidPbancNo=R26BK01462347&bidPbancOrd=000"
+        "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01462347&bidPbancOrd=000"
     )
 
 
@@ -1061,7 +1083,11 @@ def test_fetch_notice_page_raises_on_xml_error_body():
 
 
 def test_fetch_notice_page_raises_on_bad_result_code():
-    bad = {"response": {"header": {"resultCode": "22", "resultMsg": "LIMITED NUMBER OF SERVICE REQUESTS"}}}
+    bad = {
+        "response": {
+            "header": {"resultCode": "22", "resultMsg": "LIMITED NUMBER OF SERVICE REQUESTS"}
+        }
+    }
     with _client(lambda req: httpx.Response(200, json=bad)) as client:
         with pytest.raises(G2BError, match="22"):
             fetch_notice_page(client, "KEY", BEGIN, END, page=1, rows=2)
@@ -1183,8 +1209,7 @@ from nara.dates import to_iso_date
 from nara.g2b.common import check_response, normalise_items, text, to_int
 
 BASE_URL = (
-    "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
-    "/getBidPblancListInfoServcPPSSrch"
+    "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
 )
 DETAIL_URL = "https://www.g2b.go.kr/link/PNPE027_01/single/"
 
@@ -1357,11 +1382,21 @@ def conn(tmp_path):
 
 def _item(bid_no="R1", org="전북특별자치도 완주군", title="완주 체육관 실시설계용역") -> NoticeItem:
     return NoticeItem(
-        bid_no=bid_no, bid_ord="0", org_name=org, title=title,
-        service_div="기술용역", kind="등록공고",
-        notice_date="2026-09-01", open_date="2026-09-10", close_date="2026-09-09",
-        url="https://example.test/1", budget_krw=100_000_000, budget_basis="추정가격",
-        officer_name="", officer_tel="", raw={"bidNtceNo": bid_no},
+        bid_no=bid_no,
+        bid_ord="0",
+        org_name=org,
+        title=title,
+        service_div="기술용역",
+        kind="등록공고",
+        notice_date="2026-09-01",
+        open_date="2026-09-10",
+        close_date="2026-09-09",
+        url="https://example.test/1",
+        budget_krw=100_000_000,
+        budget_basis="추정가격",
+        officer_name="",
+        officer_tel="",
+        raw={"bidNtceNo": bid_no},
     )
 
 
@@ -1548,8 +1583,7 @@ def ensure_project(conn: sqlite3.Connection, org_id: int, name: str, source: str
     if row:
         return row["id"]
     cursor = conn.execute(
-        "INSERT INTO project (org_id, name, source, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO project (org_id, name, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         (org_id, name, source, now, now),
     )
     conn.commit()
@@ -1568,10 +1602,21 @@ def upsert_notice(
         "SELECT project_id FROM notice WHERE bid_no = ?", (item.bid_no,)
     ).fetchone()
     values = (
-        org_id, item.bid_ord, item.org_name, item.title, item.kind,
-        item.notice_date, item.open_date, item.close_date, item.url,
-        item.budget_krw, item.budget_basis, item.officer_name, item.officer_tel,
-        json.dumps(item.raw, ensure_ascii=False), now,
+        org_id,
+        item.bid_ord,
+        item.org_name,
+        item.title,
+        item.kind,
+        item.notice_date,
+        item.open_date,
+        item.close_date,
+        item.url,
+        item.budget_krw,
+        item.budget_basis,
+        item.officer_name,
+        item.officer_tel,
+        json.dumps(item.raw, ensure_ascii=False),
+        now,
     )
     if existing:
         # 사업 연결은 건드리지 않는다. 사람이 바꿔 놓았을 수 있다.
@@ -1669,9 +1714,15 @@ def _payload(items):
 
 def _raw(bid_no, org, title, div="기술용역", kind="등록공고"):
     return {
-        "bidNtceNo": bid_no, "bidNtceOrd": "0", "dminsttNm": org, "bidNtceNm": title,
-        "srvceDivNm": div, "ntceKindNm": kind,
-        "bidNtceDt": "20260901", "opengDt": "20260910", "bidClseDt": "20260909",
+        "bidNtceNo": bid_no,
+        "bidNtceOrd": "0",
+        "dminsttNm": org,
+        "bidNtceNm": title,
+        "srvceDivNm": div,
+        "ntceKindNm": kind,
+        "bidNtceDt": "20260901",
+        "opengDt": "20260910",
+        "bidClseDt": "20260909",
     }
 
 
@@ -1868,9 +1919,7 @@ def collect(
     conn = _open_db(db)
     with run_log(conn, "collect", f"--days {days}") as counters:
         with httpx.Client() as client:
-            added = collect_range(
-                conn, client, secrets.g2b_api_key, settings, begin, end, counters
-            )
+            added = collect_range(conn, client, secrets.g2b_api_key, settings, begin, end, counters)
     typer.echo(f"수집 완료 — 조회 {counters.processed}건 / 신규 {added}건")
 ```
 
@@ -1932,9 +1981,12 @@ def _empty_client(calls: list):
         calls.append((params["inqryBgnDt"], params["inqryEndDt"]))
         return httpx.Response(
             200,
-            json={"response": {"header": {"resultCode": "00"},
-                               "body": {"pageNo": 1, "numOfRows": 500,
-                                        "totalCount": 0, "items": []}}},
+            json={
+                "response": {
+                    "header": {"resultCode": "00"},
+                    "body": {"pageNo": 1, "numOfRows": 500, "totalCount": 0, "items": []},
+                }
+            },
         )
 
     return httpx.Client(transport=httpx.MockTransport(handler))
@@ -1943,8 +1995,16 @@ def _empty_client(calls: list):
 def test_backfill_walks_from_past_to_present_in_chunks(conn):
     calls = []
     with _empty_client(calls) as client:
-        result = backfill(conn, client, "KEY", SETTINGS, days_back=9, chunk_days=3,
-                          counters=RunCounters(), now=NOW)
+        result = backfill(
+            conn,
+            client,
+            "KEY",
+            SETTINGS,
+            days_back=9,
+            chunk_days=3,
+            counters=RunCounters(),
+            now=NOW,
+        )
     assert result.done is True
     assert [c[0][:8] for c in calls] == ["20260908", "20260911", "20260914"]
 
@@ -1952,8 +2012,17 @@ def test_backfill_walks_from_past_to_present_in_chunks(conn):
 def test_backfill_saves_cursor_when_stopped_early(conn):
     calls = []
     with _empty_client(calls) as client:
-        result = backfill(conn, client, "KEY", SETTINGS, days_back=9, chunk_days=3,
-                          counters=RunCounters(), now=NOW, max_chunks=1)
+        result = backfill(
+            conn,
+            client,
+            "KEY",
+            SETTINGS,
+            days_back=9,
+            chunk_days=3,
+            counters=RunCounters(),
+            now=NOW,
+            max_chunks=1,
+        )
     assert result.done is False
     assert result.cursor == "2026-09-11"
     saved = conn.execute("SELECT value FROM app_state WHERE key='backfill_cursor'").fetchone()
@@ -1965,17 +2034,35 @@ def test_backfill_resumes_from_saved_cursor(conn):
     conn.commit()
     calls = []
     with _empty_client(calls) as client:
-        backfill(conn, client, "KEY", SETTINGS, days_back=9, chunk_days=3,
-                 counters=RunCounters(), now=NOW)
+        backfill(
+            conn,
+            client,
+            "KEY",
+            SETTINGS,
+            days_back=9,
+            chunk_days=3,
+            counters=RunCounters(),
+            now=NOW,
+        )
     assert [c[0][:8] for c in calls] == ["20260914"]
 
 
 def test_backfill_clears_cursor_when_finished(conn):
     calls = []
     with _empty_client(calls) as client:
-        backfill(conn, client, "KEY", SETTINGS, days_back=3, chunk_days=3,
-                 counters=RunCounters(), now=NOW)
-    assert conn.execute("SELECT value FROM app_state WHERE key='backfill_cursor'").fetchone() is None
+        backfill(
+            conn,
+            client,
+            "KEY",
+            SETTINGS,
+            days_back=3,
+            chunk_days=3,
+            counters=RunCounters(),
+            now=NOW,
+        )
+    assert (
+        conn.execute("SELECT value FROM app_state WHERE key='backfill_cursor'").fetchone() is None
+    )
 ```
 
 - [ ] **Step 2: 테스트가 실패하는지 확인**
@@ -2048,7 +2135,10 @@ def backfill(
             return BackfillResult(added, cursor.isoformat(), done=False)
         chunk_end = min(cursor + timedelta(days=chunk_days), now.date())
         added += collect_range(
-            conn, client, api_key, settings,
+            conn,
+            client,
+            api_key,
+            settings,
             datetime.combine(cursor, datetime.min.time()),
             datetime.combine(chunk_end, datetime.min.time()),
             counters,
@@ -2159,10 +2249,20 @@ def _add_notice(conn, bid_no, org, open_date):
     org_id = upsert_org(conn, org, SETTINGS, NOW)
     project_id = ensure_project(conn, org_id, f"{bid_no} 사업", "g2b", NOW)
     item = NoticeItem(
-        bid_no=bid_no, bid_ord="0", org_name=org, title=f"{bid_no} 사업",
-        service_div="기술용역", kind="등록공고",
-        notice_date="2026-09-01", open_date=open_date, close_date="2026-09-09",
-        url="", budget_krw=None, budget_basis="", officer_name="", officer_tel="",
+        bid_no=bid_no,
+        bid_ord="0",
+        org_name=org,
+        title=f"{bid_no} 사업",
+        service_div="기술용역",
+        kind="등록공고",
+        notice_date="2026-09-01",
+        open_date=open_date,
+        close_date="2026-09-09",
+        url="",
+        budget_krw=None,
+        budget_basis="",
+        officer_name="",
+        officer_tel="",
         raw={},
     )
     upsert_notice(conn, item, org_id, project_id, NOW)
@@ -2170,9 +2270,12 @@ def _add_notice(conn, bid_no, org, open_date):
 
 def _award_payload(winner: str | None):
     items = [] if winner is None else [{"bidwinnrNm": winner, "rgstDt": "2026-09-12 10:00:00"}]
-    return {"response": {"header": {"resultCode": "00"},
-                         "body": {"pageNo": 1, "numOfRows": 10,
-                                  "totalCount": len(items), "items": items}}}
+    return {
+        "response": {
+            "header": {"resultCode": "00"},
+            "body": {"pageNo": 1, "numOfRows": 10, "totalCount": len(items), "items": items},
+        }
+    }
 
 
 def _client(winner: str | None):
@@ -2194,10 +2297,17 @@ def test_fetch_award_returns_none_when_no_result():
 
 
 def test_fetch_award_picks_most_recent_entry():
-    payload = {"response": {"header": {"resultCode": "00"}, "body": {"items": [
-        {"bidwinnrNm": "가건축", "rgstDt": "2026-09-10 10:00:00"},
-        {"bidwinnrNm": "나건축", "rgstDt": "2026-09-14 10:00:00"},
-    ]}}}
+    payload = {
+        "response": {
+            "header": {"resultCode": "00"},
+            "body": {
+                "items": [
+                    {"bidwinnrNm": "가건축", "rgstDt": "2026-09-10 10:00:00"},
+                    {"bidwinnrNm": "나건축", "rgstDt": "2026-09-14 10:00:00"},
+                ]
+            },
+        }
+    }
     with httpx.Client(
         transport=httpx.MockTransport(lambda r: httpx.Response(200, json=payload))
     ) as client:
@@ -2272,9 +2382,7 @@ import httpx
 from nara.dates import to_iso_date
 from nara.g2b.common import check_response, normalise_items, text
 
-BASE_URL = (
-    "https://apis.data.go.kr/1230000/as/ScsbidInfoService/getScsbidListSttusServc"
-)
+BASE_URL = "https://apis.data.go.kr/1230000/as/ScsbidInfoService/getScsbidListSttusServc"
 
 
 @dataclass(frozen=True)
@@ -2381,7 +2489,7 @@ def update_awards(
         counters.processed += 1
         try:
             award = fetch_award(client, api_key, bid_no)
-        except (G2BError, httpx.HTTPError):
+        except G2BError, httpx.HTTPError:
             # 한 건이 실패해도 나머지는 계속 본다. 일시적 네트워크 오류 하나가
             # 그 회차의 남은 대기 건을 통째로 날리지 않게 한다.
             counters.failed += 1
@@ -2391,8 +2499,13 @@ def update_awards(
         conn.execute(
             "INSERT INTO award (bid_no, winner, award_date, raw_json, checked_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            (bid_no, award.winner, award.award_date,
-             json.dumps(award.raw, ensure_ascii=False), now),
+            (
+                bid_no,
+                award.winner,
+                award.award_date,
+                json.dumps(award.raw, ensure_ascii=False),
+                now,
+            ),
         )
         conn.commit()
         updated += 1
@@ -2434,8 +2547,14 @@ def enrich_award(
     with run_log(conn, "enrich award", f"--tier {tier}") as counters:
         with httpx.Client() as client:
             updated = update_awards(
-                conn, client, secrets.g2b_api_key, date.today().isoformat(),
-                selected, group, limit, counters,
+                conn,
+                client,
+                secrets.g2b_api_key,
+                date.today().isoformat(),
+                selected,
+                group,
+                limit,
+                counters,
             )
     typer.echo(
         f"낙찰 조회 — 조회 {counters.processed}건 / 기록 {updated}건 / 실패 {counters.failed}건"
@@ -2486,10 +2605,12 @@ def test_read_tsv_returns_header_and_rows():
 
 def test_read_tsv_merges_row_split_by_embedded_newline():
     """설치계획내용 칸의 줄바꿈이 행을 둘로 쪼갠 경우."""
-    text = _tsv([
-        "전북특별자치도 진안군\t진안고원 마이스테이\t지열 수직밀폐형: 663.988",
-        " 태양광 고정식: 113.280\t2026.09.16",
-    ])
+    text = _tsv(
+        [
+            "전북특별자치도 진안군\t진안고원 마이스테이\t지열 수직밀폐형: 663.988",
+            " 태양광 고정식: 113.280\t2026.09.16",
+        ]
+    )
     _, rows = read_tsv(text)
     assert len(rows) == 1
     assert rows[0][2] == "지열 수직밀폐형: 663.988 태양광 고정식: 113.280"
@@ -2511,12 +2632,14 @@ def test_read_tsv_keeps_blank_rows():
 
 def test_read_tsv_survives_a_blank_line_inside_a_cell():
     """셀 안에 문단 구분용 빈 줄이 있으면 그 물리 줄은 칸이 0개다."""
-    text = "\n".join([
-        "\t".join(HEADER),
-        "전북특별자치도 진안군\t진안고원\t첫 줄",
-        "",
-        "셋째 줄\t2026.09.16",
-    ])
+    text = "\n".join(
+        [
+            "\t".join(HEADER),
+            "전북특별자치도 진안군\t진안고원\t첫 줄",
+            "",
+            "셋째 줄\t2026.09.16",
+        ]
+    )
     _, rows = read_tsv(text)
     assert len(rows) == 1
     assert rows[0][2] == "첫 줄 셋째 줄"
@@ -2525,10 +2648,12 @@ def test_read_tsv_survives_a_blank_line_inside_a_cell():
 
 def test_read_tsv_truncates_a_row_wider_than_the_header():
     """칸이 남으면 자른다 — 헤더에 대응하는 열이 없어 읽을 수 없는 값이다."""
-    text = "\n".join([
-        "\t".join(HEADER),
-        "전북특별자치도 완주군\t완주 체육관\tPV: 10kW\t2026.09.16\t여분",
-    ])
+    text = "\n".join(
+        [
+            "\t".join(HEADER),
+            "전북특별자치도 완주군\t완주 체육관\tPV: 10kW\t2026.09.16\t여분",
+        ]
+    )
     _, rows = read_tsv(text)
     assert len(rows[0]) == len(HEADER)
     assert rows[0][3] == "2026.09.16"
@@ -2624,31 +2749,39 @@ import pytest
 
 from nara.energy import EnergyItem, estimate_cost, parse_energy_plan
 
-PRICES = {"BIPV": 5_000_000, "PV": 2_500_000, "지열": 2_500_000,
-          "PEMFC": 32_000_000, "SOFC": 98_250_000}
+PRICES = {
+    "BIPV": 5_000_000,
+    "PV": 2_500_000,
+    "지열": 2_500_000,
+    "PEMFC": 32_000_000,
+    "SOFC": 98_250_000,
+}
 
 
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("PV: 21.96kW BIPV: 72.6kW",
-         [EnergyItem("PV", 21.96), EnergyItem("BIPV", 72.6)]),
-        ("지열 수직밀폐형 1031.044kW",
-         [EnergyItem("지열", 1031.044)]),
-        ("PV: 42.24kW 지열 수직밀폐형: 220.938kW",
-         [EnergyItem("PV", 42.24), EnergyItem("지열", 220.938)]),
-        ("태양광 BIPV: 1,756.800 연료전지 PEMFC: 120.000",
-         [EnergyItem("BIPV", 1756.8), EnergyItem("PEMFC", 120.0)]),
-        ("태양광 고정식: 337.920",
-         [EnergyItem("PV", 337.92)]),
-        ("지열: 280.000",
-         [EnergyItem("지열", 280.0)]),
-        ("PV: 69.12kW PEMFC: 15kW(에스퓨얼셀)",
-         [EnergyItem("PV", 69.12), EnergyItem("PEMFC", 15.0)]),
-        ("PV: 46.kW BIPV: 41.07kW",
-         [EnergyItem("PV", 46.0), EnergyItem("BIPV", 41.07)]),
-        ("지열 수직밀폐형: 663.988 태양광 고정식: 113.280",
-         [EnergyItem("지열", 663.988), EnergyItem("PV", 113.28)]),
+        ("PV: 21.96kW BIPV: 72.6kW", [EnergyItem("PV", 21.96), EnergyItem("BIPV", 72.6)]),
+        ("지열 수직밀폐형 1031.044kW", [EnergyItem("지열", 1031.044)]),
+        (
+            "PV: 42.24kW 지열 수직밀폐형: 220.938kW",
+            [EnergyItem("PV", 42.24), EnergyItem("지열", 220.938)],
+        ),
+        (
+            "태양광 BIPV: 1,756.800 연료전지 PEMFC: 120.000",
+            [EnergyItem("BIPV", 1756.8), EnergyItem("PEMFC", 120.0)],
+        ),
+        ("태양광 고정식: 337.920", [EnergyItem("PV", 337.92)]),
+        ("지열: 280.000", [EnergyItem("지열", 280.0)]),
+        (
+            "PV: 69.12kW PEMFC: 15kW(에스퓨얼셀)",
+            [EnergyItem("PV", 69.12), EnergyItem("PEMFC", 15.0)],
+        ),
+        ("PV: 46.kW BIPV: 41.07kW", [EnergyItem("PV", 46.0), EnergyItem("BIPV", 41.07)]),
+        (
+            "지열 수직밀폐형: 663.988 태양광 고정식: 113.280",
+            [EnergyItem("지열", 663.988), EnergyItem("PV", 113.28)],
+        ),
     ],
 )
 def test_parse_energy_plan_reads_real_sheet_values(text, expected):
@@ -2818,9 +2951,19 @@ SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
 NOW = "2026-09-17T09:00:00"
 
 HEADER = [
-    "수요기관", "공고명", "주소", "착공일", "준공(예정)일", "담당부서",
-    "낙찰업체 설계사무소", "예정공사비", "진행현황", "설치계획내용",
-    "업데이트일시", "공고번호", "ZEB 인증등급",
+    "수요기관",
+    "공고명",
+    "주소",
+    "착공일",
+    "준공(예정)일",
+    "담당부서",
+    "낙찰업체 설계사무소",
+    "예정공사비",
+    "진행현황",
+    "설치계획내용",
+    "업데이트일시",
+    "공고번호",
+    "ZEB 인증등급",
 ]
 
 
@@ -2836,11 +2979,25 @@ def conn(tmp_path):
 
 
 def test_import_tab_creates_notice_for_row_with_bid_number(conn):
-    text = _tsv([[
-        "전북특별자치도 완주군", "완주 체육관 실시설계용역", "", "", "", "",
-        "가건축사사무소", "100,000,000원(추정가격)", "착공 전(설계 단계) - 낙찰",
-        "", "2026.09.16", "R26BK01418098", "",
-    ]])
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 완주군",
+                "완주 체육관 실시설계용역",
+                "",
+                "",
+                "",
+                "",
+                "가건축사사무소",
+                "100,000,000원(추정가격)",
+                "착공 전(설계 단계) - 낙찰",
+                "",
+                "2026.09.16",
+                "R26BK01418098",
+                "",
+            ]
+        ]
+    )
     stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     assert stats.notices == 1
     assert conn.execute("SELECT COUNT(*) FROM notice").fetchone()[0] == 1
@@ -2849,21 +3006,52 @@ def test_import_tab_creates_notice_for_row_with_bid_number(conn):
 
 def test_import_tab_links_the_org_on_imported_notices(conn):
     """org_id가 비면 이관된 공고가 낙찰 조회 대상에서 빠진다."""
-    text = _tsv([[
-        "전북특별자치도 완주군", "완주 체육관 실시설계용역", "", "", "", "",
-        "", "", "", "", "", "R1", "",
-    ]])
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 완주군",
+                "완주 체육관 실시설계용역",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "R1",
+                "",
+            ]
+        ]
+    )
     import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
-    org_id = conn.execute("SELECT id FROM org WHERE name = ?", ("전북특별자치도 완주군",)).fetchone()[0]
+    org_id = conn.execute(
+        "SELECT id FROM org WHERE name = ?", ("전북특별자치도 완주군",)
+    ).fetchone()[0]
     assert conn.execute("SELECT org_id FROM notice WHERE bid_no = 'R1'").fetchone()[0] == org_id
 
 
 def test_import_tab_creates_manual_project_for_row_without_bid_number(conn):
-    text = _tsv([[
-        "전북특별자치도 고창군", "고창터미널",
-        "전북특별자치도 고창군 고창읍 중앙로 191", "20270311", "20270312", "건설과",
-        "", "", "", "지열 수직밀폐형 1031.044kW", "", "", "",
-    ]])
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 고창군",
+                "고창터미널",
+                "전북특별자치도 고창군 고창읍 중앙로 191",
+                "20270311",
+                "20270312",
+                "건설과",
+                "",
+                "",
+                "",
+                "지열 수직밀폐형 1031.044kW",
+                "",
+                "",
+                "",
+            ]
+        ]
+    )
     stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     assert stats.projects == 1
     assert conn.execute("SELECT COUNT(*) FROM notice").fetchone()[0] == 0
@@ -2875,22 +3063,54 @@ def test_import_tab_creates_manual_project_for_row_without_bid_number(conn):
 
 
 def test_import_tab_splits_energy_plan_into_rows(conn):
-    text = _tsv([[
-        "전북특별자치도 고창군", "고창갯벌 센터", "", "", "", "",
-        "", "", "", "PV: 21.96kW BIPV: 72.6kW", "", "", "",
-    ]])
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 고창군",
+                "고창갯벌 센터",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "PV: 21.96kW BIPV: 72.6kW",
+                "",
+                "",
+                "",
+            ]
+        ]
+    )
     stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     assert stats.energy == 2
-    rows = {r["source_type"]: r["capacity_kw"] for r in
-            conn.execute("SELECT source_type, capacity_kw FROM energy_plan")}
+    rows = {
+        r["source_type"]: r["capacity_kw"]
+        for r in conn.execute("SELECT source_type, capacity_kw FROM energy_plan")
+    }
     assert rows == {"PV": 21.96, "BIPV": 72.6}
 
 
 def test_import_tab_records_status_as_imported(conn):
-    text = _tsv([[
-        "전북특별자치도 완주군", "완주 체육관", "", "", "", "",
-        "", "", "시공 중 - 2026.08.28 기공식", "", "", "R1", "",
-    ]])
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 완주군",
+                "완주 체육관",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "시공 중 - 2026.08.28 기공식",
+                "",
+                "",
+                "R1",
+                "",
+            ]
+        ]
+    )
     import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     row = conn.execute("SELECT verdict, reason, decided_by FROM status_check").fetchone()
     assert row["verdict"] == "시공 중"
@@ -2899,10 +3119,25 @@ def test_import_tab_records_status_as_imported(conn):
 
 
 def test_import_tab_records_department_as_imported(conn):
-    text = _tsv([[
-        "전북특별자치도 고창군", "고창갯벌 센터", "", "", "", "세계유산과",
-        "", "", "", "", "", "", "",
-    ]])
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 고창군",
+                "고창갯벌 센터",
+                "",
+                "",
+                "",
+                "세계유산과",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ]
+        ]
+    )
     import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     row = conn.execute("SELECT exec_dept, decided_by FROM dept_check").fetchone()
     assert row["exec_dept"] == "세계유산과"
@@ -2913,10 +3148,25 @@ def test_imported_notice_carries_the_opening_date(conn):
     """open_date가 없으면 Task 10의 낙찰 대기 쿼리에 영영 들어오지 못한다."""
     from nara.award import pending_award_bid_nos
 
-    text = _tsv([[
-        "전북특별자치도 완주군", "완주 체육관 실시설계용역", "", "", "", "",
-        "", "", "", "", "2026.09.10", "R1", "",
-    ]])
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 완주군",
+                "완주 체육관 실시설계용역",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "2026.09.10",
+                "R1",
+                "",
+            ]
+        ]
+    )
     import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     got = conn.execute("SELECT open_date FROM notice WHERE bid_no='R1'").fetchone()[0]
     assert got == "2026-09-10"
@@ -2925,21 +3175,51 @@ def test_imported_notice_carries_the_opening_date(conn):
 
 def test_import_tab_counts_only_manual_projects_it_created(conn):
     """재이관에서 신규 수기사업은 0이어야 한다. 이미 있던 사업은 새것이 아니다."""
-    text = _tsv([[
-        "전북특별자치도 고창군", "고창터미널", "", "", "", "",
-        "", "", "", "", "", "", "",
-    ]])
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 고창군",
+                "고창터미널",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ]
+        ]
+    )
     assert import_tab(conn, "전북특별자치도", text, SETTINGS, NOW).projects == 1
     assert import_tab(conn, "전북특별자치도", text, SETTINGS, NOW).projects == 0
 
 
 def test_import_tab_reports_skipped_rows_that_still_held_data(conn):
     """공고명만 빈 행은 조용히 사라지면 안 된다. 대조는 통과해버리기 때문이다."""
-    text = _tsv([
-        ["", "", "전북특별자치도 고창군 고창읍 중앙로 191", "", "", "건설과",
-         "", "1,777억원", "", "지열 1031.044kW", "", "", ""],
-        ["", "", "", "", "", "", "", "", "", "", "", "", ""],
-    ])
+    text = _tsv(
+        [
+            [
+                "",
+                "",
+                "전북특별자치도 고창군 고창읍 중앙로 191",
+                "",
+                "",
+                "건설과",
+                "",
+                "1,777억원",
+                "",
+                "지열 1031.044kW",
+                "",
+                "",
+                "",
+            ],
+            ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+        ]
+    )
     stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     assert stats.skipped == 2
     assert len(stats.skipped_with_data) == 1
@@ -2951,11 +3231,13 @@ def test_import_tab_advances_counters_row_by_row(conn):
     from nara.runlog import RunCounters
 
     counters = RunCounters()
-    text = _tsv([
-        ["전북특별자치도 완주군", "A", "", "", "", "", "", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", "", "", "", "", "", "", ""],
-        ["전북특별자치도 완주군", "B", "", "", "", "", "", "", "", "", "", "", ""],
-    ])
+    text = _tsv(
+        [
+            ["전북특별자치도 완주군", "A", "", "", "", "", "", "", "", "", "", "", ""],
+            ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+            ["전북특별자치도 완주군", "B", "", "", "", "", "", "", "", "", "", "", ""],
+        ]
+    )
     import_tab(conn, "전북특별자치도", text, SETTINGS, NOW, counters)
     assert counters.processed == 3
 
@@ -2969,13 +3251,27 @@ def test_import_tab_skips_rows_without_org_or_title(conn):
 
 def test_import_tab_counts_every_row_for_reconciliation(conn):
     """시트 행 수와 DB 건수 대조가 stats.rows로 성립해야 한다."""
-    text = _tsv([
-        ["전북특별자치도 완주군", "공고 있는 사업", "", "", "", "",
-         "", "", "", "", "", "R1", ""],
-        ["전북특별자치도 고창군", "수기 사업", "", "", "", "",
-         "", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", "", "", "", "", "", "", ""],
-    ])
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 완주군",
+                "공고 있는 사업",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "R1",
+                "",
+            ],
+            ["전북특별자치도 고창군", "수기 사업", "", "", "", "", "", "", "", "", "", "", ""],
+            ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+        ]
+    )
     stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     assert stats.rows == 3
     assert stats.imported == 2
@@ -2984,10 +3280,25 @@ def test_import_tab_counts_every_row_for_reconciliation(conn):
 
 def test_import_tab_reconciles_on_a_second_run(conn):
     """같은 탭을 다시 넣어도 대조가 성립해야 한다. 재실행은 오류가 아니다."""
-    text = _tsv([[
-        "전북특별자치도 완주군", "완주 체육관", "", "", "", "",
-        "", "", "", "", "", "R1", "",
-    ]])
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 완주군",
+                "완주 체육관",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "R1",
+                "",
+            ]
+        ]
+    )
     import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     again = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     assert again.notices == 0
@@ -2997,10 +3308,12 @@ def test_import_tab_reconciles_on_a_second_run(conn):
 def test_import_tab_reads_columns_by_header_not_position(conn):
     """열 순서가 바뀐 탭에서도 헤더 이름으로 찾아야 한다."""
     shuffled = ["공고명", "공고번호", "수요기관", "담당부서"]
-    text = "\n".join([
-        "\t".join(shuffled),
-        "\t".join(["완주 체육관", "R9", "전북특별자치도 완주군", "건설과"]),
-    ])
+    text = "\n".join(
+        [
+            "\t".join(shuffled),
+            "\t".join(["완주 체육관", "R9", "전북특별자치도 완주군", "건설과"]),
+        ]
+    )
     import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     row = conn.execute("SELECT org_name, title FROM notice WHERE bid_no = 'R9'").fetchone()
     assert row["org_name"] == "전북특별자치도 완주군"
@@ -3009,21 +3322,38 @@ def test_import_tab_reads_columns_by_header_not_position(conn):
 
 
 def test_import_tab_merges_row_split_by_embedded_newline(conn):
-    text = "\n".join([
-        "\t".join(HEADER),
-        "전북특별자치도 진안군\t진안고원 마이스테이\t\t\t\t\t\t\t\t지열 수직밀폐형: 663.988",
-        " 태양광 고정식: 113.280\t\t\t",
-    ])
+    text = "\n".join(
+        [
+            "\t".join(HEADER),
+            "전북특별자치도 진안군\t진안고원 마이스테이\t\t\t\t\t\t\t\t지열 수직밀폐형: 663.988",
+            " 태양광 고정식: 113.280\t\t\t",
+        ]
+    )
     stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     assert stats.projects == 1
     assert stats.energy == 2
 
 
 def test_import_tab_is_idempotent(conn):
-    text = _tsv([[
-        "전북특별자치도 완주군", "완주 체육관 실시설계용역", "", "", "", "",
-        "", "", "", "PV: 10kW", "", "R1", "",
-    ]])
+    text = _tsv(
+        [
+            [
+                "전북특별자치도 완주군",
+                "완주 체육관 실시설계용역",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "PV: 10kW",
+                "",
+                "R1",
+                "",
+            ]
+        ]
+    )
     import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     assert conn.execute("SELECT COUNT(*) FROM project").fetchone()[0] == 1
@@ -3158,17 +3488,23 @@ def import_tab(
         )
 
         if bid_no:
-            existing = conn.execute(
-                "SELECT 1 FROM notice WHERE bid_no = ?", (bid_no,)
-            ).fetchone()
+            existing = conn.execute("SELECT 1 FROM notice WHERE bid_no = ?", (bid_no,)).fetchone()
             if not existing:
                 # open_date를 넣지 않으면 이 공고는 Task 10의 낙찰 대기 쿼리
                 # (open_date != '' AND open_date <= today)에 영영 들어오지 못한다.
                 conn.execute(
                     "INSERT INTO notice (bid_no, project_id, org_id, org_name, title, "
                     "open_date, budget_basis, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (bid_no, project_id, org_id, org_name, title,
-                     to_iso_date(cell(row, "open_date")), cell(row, "budget"), now),
+                    (
+                        bid_no,
+                        project_id,
+                        org_id,
+                        org_name,
+                        title,
+                        to_iso_date(cell(row, "open_date")),
+                        cell(row, "budget"),
+                        now,
+                    ),
                 )
                 stats.notices += 1
             if winner := cell(row, "winner"):
@@ -3178,10 +3514,13 @@ def import_tab(
                 )
 
         verdict, reason = _split_status(cell(row, "status"))
-        if verdict and not conn.execute(
-            "SELECT 1 FROM status_check WHERE project_id = ? AND decided_by = 'imported'",
-            (project_id,),
-        ).fetchone():
+        if (
+            verdict
+            and not conn.execute(
+                "SELECT 1 FROM status_check WHERE project_id = ? AND decided_by = 'imported'",
+                (project_id,),
+            ).fetchone()
+        ):
             conn.execute(
                 "INSERT INTO status_check (project_id, verdict, reason, decided_by, checked_at) "
                 "VALUES (?, ?, ?, 'imported', ?)",
@@ -3258,9 +3597,7 @@ def migrate_tsv(
     shutil.copy2(path, backup)
 
     with run_log(conn, "migrate tsv", f"{tab}") as counters:
-        stats = import_tab(
-            conn, tab, path.read_text(encoding="utf-8"), settings, now, counters
-        )
+        stats = import_tab(conn, tab, path.read_text(encoding="utf-8"), settings, now, counters)
         counters.updated = stats.notices + stats.projects
         counters.failed = stats.skipped
 
@@ -3272,8 +3609,7 @@ def migrate_tsv(
     )
     if stats.skipped_with_data:
         typer.echo(
-            f"내용이 있는데 수요기관·공고명이 비어 건너뛴 행 "
-            f"{len(stats.skipped_with_data)}건:",
+            f"내용이 있는데 수요기관·공고명이 비어 건너뛴 행 {len(stats.skipped_with_data)}건:",
             err=True,
         )
         for preview in stats.skipped_with_data:
@@ -3437,7 +3773,8 @@ def test_run_checks_flags_a_notice_with_no_org_link(conn):
 def test_run_checks_flags_rest_org_without_weekday_group(conn):
     conn.execute(
         "INSERT INTO org (name, tier, weekday_group, added_at) "
-        "VALUES ('충청북도 제천시', 'rest', NULL, ?)", (NOW,)
+        "VALUES ('충청북도 제천시', 'rest', NULL, ?)",
+        (NOW,),
     )
     conn.commit()
     findings = run_checks(conn, TODAY)
@@ -3485,7 +3822,9 @@ def run_checks(conn: sqlite3.Connection, today: str) -> list[Finding]:
         (today,),
     ):
         findings.append(
-            Finding("개찰 전 낙찰", f"{row['bid_no']} — 개찰 {row['open_date']}인데 낙찰업체가 있다")
+            Finding(
+                "개찰 전 낙찰", f"{row['bid_no']} — 개찰 {row['open_date']}인데 낙찰업체가 있다"
+            )
         )
 
     for row in _rows(
@@ -3495,9 +3834,7 @@ def run_checks(conn: sqlite3.Connection, today: str) -> list[Finding]:
     ):
         findings.append(Finding("공고 없는 g2b 사업", f"{row['id']} {row['name']}"))
 
-    for row in _rows(
-        conn, "SELECT name FROM org WHERE tier = 'rest' AND weekday_group IS NULL"
-    ):
+    for row in _rows(conn, "SELECT name FROM org WHERE tier = 'rest' AND weekday_group IS NULL"):
         findings.append(Finding("요일 그룹 없는 비관심 기관", row["name"]))
 
     # 기관에 연결되지 않은 공고는 낙찰 대기 쿼리(org JOIN)에 영영 잡히지 않는다.

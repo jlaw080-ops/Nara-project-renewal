@@ -3,7 +3,6 @@
 import sqlite3
 from dataclasses import dataclass
 
-
 # `nara enrich award --limit`의 기본값과 같아야 한다. 대기가 이 수를 넘으면
 # 한 회차가 대기를 다 비우지 못한다.
 AWARD_BATCH_LIMIT = 300
@@ -29,7 +28,10 @@ def run_checks(conn: sqlite3.Connection, today: str) -> list[Finding]:
         (today,),
     ):
         findings.append(
-            Finding("개찰 전 낙찰", f"{row['bid_no']} — 개찰 {row['open_date']}인데 낙찰업체가 있다")
+            Finding(
+                "개찰 전 낙찰",
+                f"{row['bid_no']} — 개찰 {row['open_date']}인데 낙찰업체가 있다",
+            )
         )
 
     for row in _rows(
@@ -39,9 +41,7 @@ def run_checks(conn: sqlite3.Connection, today: str) -> list[Finding]:
     ):
         findings.append(Finding("공고 없는 g2b 사업", f"{row['id']} {row['name']}"))
 
-    for row in _rows(
-        conn, "SELECT name FROM org WHERE tier = 'rest' AND weekday_group IS NULL"
-    ):
+    for row in _rows(conn, "SELECT name FROM org WHERE tier = 'rest' AND weekday_group IS NULL"):
         findings.append(Finding("요일 그룹 없는 비관심 기관", row["name"]))
 
     # 기관에 연결되지 않은 공고는 낙찰 대기 쿼리(org JOIN)에 영영 잡히지 않는다.

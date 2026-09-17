@@ -27,10 +27,20 @@ def _add_notice(conn, bid_no, org, open_date):
     org_id = upsert_org(conn, org, SETTINGS, NOW)
     project_id = ensure_project(conn, org_id, f"{bid_no} 사업", "g2b", NOW)
     item = NoticeItem(
-        bid_no=bid_no, bid_ord="0", org_name=org, title=f"{bid_no} 사업",
-        service_div="기술용역", kind="등록공고",
-        notice_date="2026-09-01", open_date=open_date, close_date="2026-09-09",
-        url="", budget_krw=None, budget_basis="", officer_name="", officer_tel="",
+        bid_no=bid_no,
+        bid_ord="0",
+        org_name=org,
+        title=f"{bid_no} 사업",
+        service_div="기술용역",
+        kind="등록공고",
+        notice_date="2026-09-01",
+        open_date=open_date,
+        close_date="2026-09-09",
+        url="",
+        budget_krw=None,
+        budget_basis="",
+        officer_name="",
+        officer_tel="",
         raw={},
     )
     upsert_notice(conn, item, org_id, project_id, NOW)
@@ -38,9 +48,12 @@ def _add_notice(conn, bid_no, org, open_date):
 
 def _award_payload(winner: str | None):
     items = [] if winner is None else [{"bidwinnrNm": winner, "rgstDt": "2026-09-12 10:00:00"}]
-    return {"response": {"header": {"resultCode": "00"},
-                         "body": {"pageNo": 1, "numOfRows": 10,
-                                  "totalCount": len(items), "items": items}}}
+    return {
+        "response": {
+            "header": {"resultCode": "00"},
+            "body": {"pageNo": 1, "numOfRows": 10, "totalCount": len(items), "items": items},
+        }
+    }
 
 
 def _client(winner: str | None):
@@ -62,10 +75,17 @@ def test_fetch_award_returns_none_when_no_result():
 
 
 def test_fetch_award_picks_most_recent_entry():
-    payload = {"response": {"header": {"resultCode": "00"}, "body": {"items": [
-        {"bidwinnrNm": "가건축", "rgstDt": "2026-09-10 10:00:00"},
-        {"bidwinnrNm": "나건축", "rgstDt": "2026-09-14 10:00:00"},
-    ]}}}
+    payload = {
+        "response": {
+            "header": {"resultCode": "00"},
+            "body": {
+                "items": [
+                    {"bidwinnrNm": "가건축", "rgstDt": "2026-09-10 10:00:00"},
+                    {"bidwinnrNm": "나건축", "rgstDt": "2026-09-14 10:00:00"},
+                ]
+            },
+        }
+    }
     with httpx.Client(
         transport=httpx.MockTransport(lambda r: httpx.Response(200, json=payload))
     ) as client:
@@ -77,10 +97,17 @@ def test_fetch_award_picks_most_recent_entry_across_mixed_date_formats():
     # rgstDt를 압축형('20260910')과 구분형('2026-09-20 10:00:00')으로 섞어 준다.
     # '-'(0x2D)는 숫자보다 작아 원문 문자열 비교로는 더 이른 압축형이 이긴다 — ISO로
     # 정규화한 뒤 비교해야 실제로 더 늦은 구분형 날짜가 이긴다.
-    payload = {"response": {"header": {"resultCode": "00"}, "body": {"items": [
-        {"bidwinnrNm": "가건축", "rgstDt": "20260910"},
-        {"bidwinnrNm": "나건축", "rgstDt": "2026-09-20 10:00:00"},
-    ]}}}
+    payload = {
+        "response": {
+            "header": {"resultCode": "00"},
+            "body": {
+                "items": [
+                    {"bidwinnrNm": "가건축", "rgstDt": "20260910"},
+                    {"bidwinnrNm": "나건축", "rgstDt": "2026-09-20 10:00:00"},
+                ]
+            },
+        }
+    }
     with httpx.Client(
         transport=httpx.MockTransport(lambda r: httpx.Response(200, json=payload))
     ) as client:
