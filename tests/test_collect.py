@@ -96,13 +96,13 @@ def test_collect_range_drops_excluded_org(conn):
 def test_collect_range_registers_org_tier(conn):
     items = [
         _raw("A1", "전북특별자치도 완주군", "완주 체육관 실시설계용역"),
-        _raw("A2", "충청북도 제천시", "제천 도서관 건축설계공모"),
+        _raw("A2", "강원특별자치도 강릉시", "강릉 도서관 건축설계공모"),
     ]
     with _client(items) as client:
         collect_range(conn, client, "KEY", SETTINGS, BEGIN, END, RunCounters())
     tiers = dict(conn.execute("SELECT name, tier FROM org"))
     assert tiers["전북특별자치도 완주군"] == "focus"
-    assert tiers["충청북도 제천시"] == "rest"
+    assert tiers["강원특별자치도 강릉시"] == "rest"
 
 
 def test_collect_range_is_idempotent(conn):

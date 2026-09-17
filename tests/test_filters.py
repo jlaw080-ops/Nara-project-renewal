@@ -73,8 +73,8 @@ def test_org_rejected_by_excluded_keyword(org):
         ("전북특별자치도 완주군", True),
         ("경기도 용인시 처인구", True),
         ("전라북도 전주시", True),
-        ("충청북도 제천시", False),
-        ("경상남도 김해시", False),
+        ("경상북도 상주시", False),
+        ("강원특별자치도 강릉시", False),
     ],
 )
 def test_is_focus_org_matches_by_substring(org, expected):

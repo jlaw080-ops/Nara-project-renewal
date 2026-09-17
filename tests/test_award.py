@@ -124,13 +124,15 @@ def test_pending_skips_notices_whose_opening_is_in_the_future(conn):
 
 def test_pending_filters_by_tier(conn):
     _add_notice(conn, "R1", "전북특별자치도 완주군", open_date="2026-09-10")
-    _add_notice(conn, "R2", "충청북도 제천시", open_date="2026-09-10")
+    _add_notice(conn, "R2", "강원특별자치도 강릉시", open_date="2026-09-10")
     assert pending_award_bid_nos(conn, TODAY, "focus", None, 100) == ["R1"]
 
 
 def test_pending_filters_by_weekday_group(conn):
-    _add_notice(conn, "R1", "충청북도 제천시", open_date="2026-09-10")
-    group = conn.execute("SELECT weekday_group FROM org WHERE name='충청북도 제천시'").fetchone()[0]
+    _add_notice(conn, "R1", "강원특별자치도 강릉시", open_date="2026-09-10")
+    group = conn.execute(
+        "SELECT weekday_group FROM org WHERE name='강원특별자치도 강릉시'"
+    ).fetchone()[0]
     assert pending_award_bid_nos(conn, TODAY, "rest", group, 100) == ["R1"]
     other = group % 5 + 1
     assert pending_award_bid_nos(conn, TODAY, "rest", other, 100) == []

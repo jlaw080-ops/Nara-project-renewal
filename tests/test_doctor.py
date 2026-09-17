@@ -87,7 +87,7 @@ def test_award_backlog_ignores_notices_already_awarded(conn):
 def test_run_checks_flags_rest_org_without_weekday_group(conn):
     conn.execute(
         "INSERT INTO org (name, tier, weekday_group, added_at) "
-        "VALUES ('충청북도 제천시', 'rest', NULL, ?)",
+        "VALUES ('강원특별자치도 강릉시', 'rest', NULL, ?)",
         (NOW,),
     )
     conn.commit()

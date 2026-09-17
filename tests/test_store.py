@@ -48,7 +48,7 @@ def test_upsert_org_marks_focus_agency(conn):
 
 
 def test_upsert_org_assigns_weekday_group_to_rest_agency(conn):
-    org_id = upsert_org(conn, "충청북도 제천시", SETTINGS, NOW)
+    org_id = upsert_org(conn, "강원특별자치도 강릉시", SETTINGS, NOW)
     row = conn.execute("SELECT tier, weekday_group FROM org WHERE id = ?", (org_id,)).fetchone()
     assert row["tier"] == "rest"
     assert row["weekday_group"] in {1, 2, 3, 4, 5}

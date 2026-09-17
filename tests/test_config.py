@@ -22,9 +22,9 @@ def test_load_settings_keeps_every_focus_org():
     제목 제외 68개를 config.toml에 그대로 옮겼으면 그대로 통과한다.
     """
     settings = load_settings(REPO_ROOT / "config.toml")
-    assert len(settings.focus_orgs) == 19
-    assert len(settings.title_excluded) == 68
-    assert len(settings.org_excluded) == 7
+    assert len(settings.focus_orgs) == 23
+    assert len(settings.title_excluded) == 80
+    assert len(settings.org_excluded) == 8
 
 
 def test_load_secrets_reads_env_file(tmp_path):
