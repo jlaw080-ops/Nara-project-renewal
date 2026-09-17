@@ -2509,6 +2509,33 @@ def test_read_tsv_keeps_blank_rows():
     assert rows[0] == ["", "", "", ""]
 
 
+def test_read_tsv_survives_a_blank_line_inside_a_cell():
+    """셀 안에 문단 구분용 빈 줄이 있으면 그 물리 줄은 칸이 0개다."""
+    text = "
+".join([
+        "	".join(HEADER),
+        "전북특별자치도 진안군	진안고원	첫 줄",
+        "",
+        "셋째 줄	2026.09.16",
+    ])
+    _, rows = read_tsv(text)
+    assert len(rows) == 1
+    assert rows[0][2] == "첫 줄 셋째 줄"
+    assert rows[0][3] == "2026.09.16"
+
+
+def test_read_tsv_truncates_a_row_wider_than_the_header():
+    """칸이 남으면 자른다 — 헤더에 대응하는 열이 없어 읽을 수 없는 값이다."""
+    text = "
+".join([
+        "	".join(HEADER),
+        "전북특별자치도 완주군	완주 체육관	PV: 10kW	2026.09.16	여분",
+    ])
+    _, rows = read_tsv(text)
+    assert len(rows[0]) == len(HEADER)
+    assert rows[0][3] == "2026.09.16"
+
+
 def test_read_tsv_handles_empty_body():
     header, rows = read_tsv("\t".join(HEADER))
     assert header == HEADER
@@ -2549,9 +2576,16 @@ def read_tsv(text: str) -> tuple[list[str], list[list[str]]]:
         row = raw[i]
         while len(row) < width and i + 1 < len(raw):
             nxt = raw[i + 1]
+            if not nxt:
+                # 셀 안의 빈 줄(문단 구분). 이어붙일 내용이 없으니 삼키고 넘어간다.
+                # 이걸 안 막으면 nxt[0]에서 IndexError가 나 이관 전체가 죽는다.
+                i += 1
+                continue
             row = row[:-1] + [f"{row[-1]} {nxt[0].strip()}".strip()] + nxt[1:]
             i += 1
-        rows.append(row + [""] * (width - len(row)))
+        # 헤더 길이에 정확히 맞춘다. 모자라면 채우고, 넘치면 자른다 — 넘친 칸은
+        # 헤더에 대응하는 열이 없어 어차피 읽히지 않는다.
+        rows.append((row + [""] * (width - len(row)))[:width])
         i += 1
 
     return header, rows
@@ -2560,7 +2594,7 @@ def read_tsv(text: str) -> tuple[list[str], list[list[str]]]:
 - [ ] **Step 4: 테스트 통과 확인**
 
 Run: `uv run pytest tests/test_sheets_tsv.py -v`
-Expected: PASS (5 passed)
+Expected: PASS (7 passed)
 
 - [ ] **Step 5: 커밋**
 
