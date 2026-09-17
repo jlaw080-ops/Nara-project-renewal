@@ -3398,6 +3398,42 @@ def test_award_backlog_ignores_notices_already_awarded(conn):
     assert not any(f.check == "낙찰 조회 적체" for f in run_checks(conn, TODAY))
 
 
+def test_award_backlog_is_quiet_under_normal_weekly_rotation(conn):
+    """비관심 기관은 요일 그룹별로 주 1회 돈다. 전체를 합치면 상한을 넘지만
+    실제로 도는 단위별로는 안 넘는다 — 이걸 적체로 잡으면 헛경보다."""
+    for group in range(1, 6):
+        conn.execute(
+            "INSERT INTO org (name, tier, weekday_group, added_at) VALUES (?, 'rest', ?, ?)",
+            (f"기관{group}", group, NOW),
+        )
+        org_id = conn.execute("SELECT id FROM org WHERE name = ?", (f"기관{group}",)).fetchone()[0]
+        for i in range(100):
+            pid = ensure_project(conn, org_id, f"P{group}-{i}", "g2b", NOW)
+            conn.execute(
+                "INSERT INTO notice (bid_no, project_id, org_id, org_name, title, "
+                "open_date, collected_at) VALUES (?, ?, ?, ?, ?, '2026-09-10', ?)",
+                (f"B{group}-{i}", pid, org_id, f"기관{group}", f"P{group}-{i}", NOW),
+            )
+    conn.commit()
+    assert not any(f.check == "낙찰 조회 적체" for f in run_checks(conn, TODAY))
+
+
+def test_run_checks_flags_a_notice_with_no_org_link(conn):
+    """org_id가 비면 낙찰 대기 쿼리에 영영 안 걸린다. 적체 점검도 같은 JOIN을 쓴다."""
+    org_id = upsert_org(conn, "전북특별자치도 완주군", SETTINGS, NOW)
+    pid = ensure_project(conn, org_id, "연결 끊긴 사업", "g2b", NOW)
+    conn.execute(
+        "INSERT INTO notice (bid_no, project_id, org_id, org_name, title, "
+        "open_date, collected_at) VALUES ('ORPHAN', ?, NULL, '전북특별자치도 완주군', "
+        "'연결 끊긴 사업', '2026-09-10', ?)",
+        (pid, NOW),
+    )
+    conn.commit()
+    hit = [f for f in run_checks(conn, TODAY) if f.check == "기관 연결 없는 공고"]
+    assert len(hit) == 1
+    assert "ORPHAN" in hit[0].detail
+
+
 def test_run_checks_flags_rest_org_without_weekday_group(conn):
     conn.execute(
         "INSERT INTO org (name, tier, weekday_group, added_at) "
@@ -3464,21 +3500,42 @@ def run_checks(conn: sqlite3.Connection, today: str) -> list[Finding]:
     ):
         findings.append(Finding("요일 그룹 없는 비관심 기관", row["name"]))
 
+    # 기관에 연결되지 않은 공고는 낙찰 대기 쿼리(org JOIN)에 영영 잡히지 않는다.
+    # 아래 적체 점검도 같은 JOIN을 쓰므로, 먼저 여기서 걸러 내지 않으면 사각지대가 된다.
+    for row in _rows(
+        conn,
+        "SELECT bid_no, title FROM notice WHERE org_id IS NULL",
+    ):
+        findings.append(
+            Finding("기관 연결 없는 공고", f"{row['bid_no']} {row['title']} — 낙찰 조회에서 빠진다")
+        )
+
     # 낙찰 대기는 성공해야만 줄어든다. 취소되거나 낙찰 공고가 안 뜬 건은 영영 대기에
     # 남아 한 회차 상한을 잡아먹고, 그런 건이 상한만큼 쌓이면 더 최근 공고는 매번
     # 뒤로 밀려 조회되지 않는다. 조용히 밀리므로 여기서 눈에 보이게 만든다.
-    backlog = conn.execute(
-        "SELECT COUNT(*) AS n, MIN(n.open_date) AS oldest FROM notice n "
+    #
+    # 실제 조회는 한 덩어리로 돌지 않는다 — 관심 기관은 하루 2회, 비관심 기관은
+    # 요일 그룹별로 주 1회다(스펙의 스케줄). 그래서 전체를 합쳐 상한과 비교하면
+    # 정상적인 주간 순환 대기까지 적체로 잡혀 헛경보가 된다. 실제로 도는 단위
+    # (tier, weekday_group)별로 나눠 센다.
+    for row in _rows(
+        conn,
+        "SELECT o.tier AS tier, o.weekday_group AS grp, COUNT(*) AS n, "
+        "MIN(n.open_date) AS oldest "
+        "FROM notice n JOIN org o ON o.id = n.org_id "
         "LEFT JOIN award a ON a.bid_no = n.bid_no "
-        "WHERE a.bid_no IS NULL AND n.open_date != '' AND n.open_date <= ?",
+        "WHERE a.bid_no IS NULL AND n.open_date != '' AND n.open_date <= ? "
+        "GROUP BY o.tier, o.weekday_group",
         (today,),
-    ).fetchone()
-    if backlog["n"] > AWARD_BATCH_LIMIT:
+    ):
+        if row["n"] <= AWARD_BATCH_LIMIT:
+            continue
+        where = "관심 기관" if row["tier"] == "focus" else f"비관심 기관 요일그룹 {row['grp']}"
         findings.append(
             Finding(
                 "낙찰 조회 적체",
-                f"개찰이 지났는데 낙찰 미확인인 공고가 {backlog['n']}건이다"
-                f"(가장 오래된 개찰일 {backlog['oldest']}). 한 회차 상한"
+                f"{where}: 개찰이 지났는데 낙찰 미확인인 공고가 {row['n']}건이다"
+                f"(가장 오래된 개찰일 {row['oldest']}). 한 회차 상한"
                 f" {AWARD_BATCH_LIMIT}건을 넘어 최근 공고가 계속 밀릴 수 있다."
                 " `nara enrich award --limit`를 키워 한 번 비우거나, 낙찰이 영영"
                 " 없을 건을 가려낼 방법이 필요하다.",
@@ -3491,7 +3548,7 @@ def run_checks(conn: sqlite3.Connection, today: str) -> list[Finding]:
 - [ ] **Step 4: 테스트 통과 확인**
 
 Run: `uv run pytest tests/test_doctor.py -v`
-Expected: PASS (7 passed)
+Expected: PASS (9 passed)
 
 - [ ] **Step 5: CLI에 doctor 명령 연결**
 
@@ -3502,9 +3559,15 @@ from nara.doctor import run_checks
 
 
 @app.command()
-def doctor(db: Path = typer.Option(DEFAULT_DB)) -> None:
-    """데이터가 서로 맞는지 점검한다."""
-    conn = _open_db(db)
+def doctor(db: Path = typer.Option(DEFAULT_DB, help="SQLite 경로")) -> None:
+    """데이터가 서로 맞는지 점검한다. 아무것도 고치지 않는다."""
+    # _open_db를 쓰지 않는다. 그건 migrate를 돌려 없는 파일을 만들어 버리므로,
+    # --db에 오타를 내면 빈 DB를 새로 만들고 "이상 없음"이라고 답한다.
+    # 문제를 시끄럽게 만드는 것이 이 명령의 존재 이유인데 정반대가 된다.
+    if not db.exists():
+        typer.echo(f"DB 파일이 없다: {db}", err=True)
+        raise typer.Exit(code=1)
+    conn = connect(db)
     findings = run_checks(conn, date.today().isoformat())
     if not findings:
         typer.echo("점검 통과 — 이상 없음")
