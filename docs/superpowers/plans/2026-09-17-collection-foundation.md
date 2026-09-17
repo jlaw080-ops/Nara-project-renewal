@@ -322,18 +322,26 @@ git commit -m "feat: 날짜 문자열 ISO 정규화"
 - Consumes: 없음
 - Produces: `Settings`, `Secrets`, `load_settings(path: Path) -> Settings`, `load_secrets(env_path: Path | None) -> Secrets`
 
-- [ ] **Step 1: 원본 Apps Script에서 키워드를 확인한다**
+> **키워드 출처에 대한 사전 판정 (컨트롤러가 이미 확인함 — 다시 조사하지 말 것)**
+>
+> Apps Script는 키워드를 코드에 두지 않는다. 스프레드시트 `설정` 탭에서 읽고,
+> 그 탭이 없을 때만 `DEFAULT_SETTINGS` 상수를 쓴다. 디스크의 `Code.gs`(2026-06-19판)
+> 기본값과 스펙 값을 대조한 결과는 이렇다.
+>
+> | 항목 | Code.gs 기본값 | 아래 config.toml | 판정 |
+> |---|---|---|---|
+> | 제목 필수 | `['설계']` | 같음 | 일치 |
+> | 제목 제외 | 62개 | 68개 (＋상수관·제방·관망·관광지·풍수해·진입로) | 스펙을 따른다 |
+> | 수요기관 제외 | 3개 (교육청·교육지원청·개발공사) | 7개 (＋상하수도사업소·공사·경찰청·의료원) | 스펙을 따른다 |
+> | 관심 기관 | 16개, 어간 표기(`용인`·`평택`) | 19개, 전체 표기(`용인시`·`평택시`, ＋영천시·남양주시·의왕시) | 스펙을 따른다 |
+>
+> **아래 값을 그대로 쓴다.** 디스크의 Code.gs는 6월판이고, 스펙은 사용자가 9월에
+> 붙여넣은 현행 스크립트에서 뽑아 승인한 것이다. 계획의 Global Constraints도
+> "스펙 문서의 값을 그대로 쓴다"로 못박고 있다. 살아 있는 `설정` 탭과의 최종 대조는
+> 사용자가 있는 Task 15에서 한다.
 
-아래 `config.toml`의 키워드는 스펙에 적힌 값이다. 원본과 한 글자라도 다르면 지금까지 걸러지던 공고가 들어오거나 들어오던 공고가 사라진다. 옮기기 전에 원본을 열어 대조한다.
+- [ ] **Step 1: 설정 파일 작성**
 
-```bash
-grep -n "TITLE_EXCLUDE\|ORG_EXCLUDE\|TITLE_INCLUDE\|EXCLUDE_KEYWORDS" \
-  "C:/Users/jlaw8/dev/나라장터설계용역수집_ver02/Code.gs"
-```
-
-원본 배열과 아래 목록의 개수·철자를 눈으로 맞춘다. 다르면 **원본을 따른다**(스펙의 "현재 설정을 그대로 사용"). 차이가 있었으면 무엇이 달랐는지 커밋 메시지 본문에 적는다.
-
-- [ ] **Step 2: 설정 파일 작성**
 
 `config.toml` — 확인한 값으로 쓴다:
 
@@ -373,7 +381,7 @@ ANTHROPIC_API_KEY=
 GOOGLE_SERVICE_ACCOUNT_JSON=
 ```
 
-- [ ] **Step 3: 실패하는 테스트 작성**
+- [ ] **Step 2: 실패하는 테스트 작성**
 
 `tests/test_config.py`:
 
@@ -398,13 +406,13 @@ def test_load_settings_reads_repo_config():
 def test_load_settings_keeps_every_focus_org():
     """목록이 잘려서 들어오지 않았는지 본다.
 
-    Step 1에서 원본과 대조한 결과 개수가 19가 아니면 이 숫자를 원본에 맞춰 고치고,
-    무엇이 달랐는지 커밋 메시지에 적는다. 확인해야 하는 것은 '잘리지 않았다'이지
-    '정확히 19개'가 아니다.
+    확인해야 하는 것은 '목록이 잘리지 않았다'이다. 위 판정 표대로 관심 기관 19개,
+    제목 제외 68개를 config.toml에 그대로 옮겼으면 그대로 통과한다.
     """
     settings = load_settings(REPO_ROOT / "config.toml")
     assert len(settings.focus_orgs) == 19
-    assert len(settings.title_excluded) >= 60
+    assert len(settings.title_excluded) == 68
+    assert len(settings.org_excluded) == 7
 
 
 def test_load_secrets_reads_env_file(tmp_path):
@@ -420,12 +428,12 @@ def test_load_secrets_returns_none_when_file_missing(tmp_path):
     assert secrets.g2b_api_key is None
 ```
 
-- [ ] **Step 4: 테스트가 실패하는지 확인**
+- [ ] **Step 3: 테스트가 실패하는지 확인**
 
 Run: `uv run pytest tests/test_config.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'nara.config'`
 
-- [ ] **Step 5: 최소 구현**
+- [ ] **Step 4: 최소 구현**
 
 `nara/config.py`:
 
@@ -493,12 +501,12 @@ def load_secrets(env_path: Path | None = None) -> Secrets:
     )
 ```
 
-- [ ] **Step 6: 테스트 통과 확인**
+- [ ] **Step 5: 테스트 통과 확인**
 
 Run: `uv run pytest tests/test_config.py -v`
 Expected: PASS (4 passed)
 
-- [ ] **Step 7: 커밋**
+- [ ] **Step 6: 커밋**
 
 ```bash
 git add config.toml .env.example nara/config.py tests/test_config.py
@@ -3353,7 +3361,23 @@ Expected: 전체 통과, `nara` 커버리지 80% 이상.
 Run: `uv run ruff check . && uv run ruff format --check .`
 Expected: 통과. 어기는 부분은 고친다
 
-- [ ] **Step 3: 인증키 넣기**
+- [ ] **Step 3: 살아 있는 `설정` 탭과 키워드를 대조한다**
+
+Task 3은 스펙 값으로 갔다. 디스크의 `Code.gs`(6월판) 기본값과는 제목 제외 6개,
+수요기관 제외 4개, 관심 기관 3개가 달랐다. 진짜 정답은 스프레드시트의 `설정` 탭이다.
+
+브라우저 탭을 아래로 보내 `설정` 탭을 받는다(`sheet=` 는 탭 이름으로 찾는다):
+
+```
+https://docs.google.com/spreadsheets/d/1rFLfePqiaLVONf4HR7MLY6sbLovIklsv42I5T21EUw0/gviz/tq?tqx=out:csv&sheet=설정
+```
+
+네 열(`제목 필수 키워드`·`제목 제외 키워드`·`수요기관 포함 키워드`·`수요기관 제외 키워드`)을
+`config.toml`과 대조한다. **다르면 시트 쪽을 따르고** `config.toml`을 고친 뒤
+`uv run pytest tests/test_config.py`의 개수 단언도 함께 고친다. 무엇이 달랐는지
+커밋 메시지에 적는다. 시트에 `설정` 탭이 없으면 현재 값을 그대로 두고 그 사실을 적는다.
+
+- [ ] **Step 4: 인증키 넣기**
 
 기존 Apps Script의 스크립트 속성 `NARAJANGTER_API_KEY` 값을 가져와 `.env`에 넣는다.
 
@@ -3362,14 +3386,14 @@ cp .env.example .env
 # .env 파일을 열어 G2B_API_KEY= 뒤에 값을 붙여넣는다
 ```
 
-- [ ] **Step 4: 최근 3일 수집 실행**
+- [ ] **Step 5: 최근 3일 수집 실행**
 
 Run: `uv run nara collect --days 3`
 Expected: `수집 완료 — 조회 N건 / 신규 M건`
 
 오류가 나면 메시지를 보고 판단한다. `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`면 키가 틀렸거나 이 API 활용신청이 승인되지 않은 것이다.
 
-- [ ] **Step 5: 수집 결과 눈으로 확인**
+- [ ] **Step 6: 수집 결과 눈으로 확인**
 
 ```bash
 uv run python -c "
@@ -3385,12 +3409,12 @@ for r in conn.execute('SELECT org_name, title FROM notice LIMIT 5'):
 
 Expected: 공고가 0건이 아니고, 제목에 모두 `설계`가 들어 있으며, 수요기관에 교육청·공사가 없다
 
-- [ ] **Step 6: 낙찰 조회 실행**
+- [ ] **Step 7: 낙찰 조회 실행**
 
 Run: `uv run nara enrich award --tier focus --limit 20`
 Expected: `낙찰 조회 — 조회 N건 / 기록 M건 / 실패 0건`
 
-- [ ] **Step 7: 전북 탭을 실제로 이관한다**
+- [ ] **Step 8: 전북 탭을 실제로 이관한다**
 
 Task 13 Step 1에서 받아 둔 TSV를 넣는다.
 
@@ -3415,12 +3439,12 @@ print('설비', conn.execute('SELECT COUNT(*) FROM energy_plan').fetchone()[0])
 
 나머지 탭도 같은 방식으로 하나씩 넣는다. 탭마다 헤더가 다르면 `COLUMNS`를 그 탭에 맞춰 고치고 다시 돌린다.
 
-- [ ] **Step 8: 점검 실행**
+- [ ] **Step 9: 점검 실행**
 
 Run: `uv run nara doctor`
 Expected: `점검 통과 — 이상 없음`. 지적이 나오면 내용을 읽고 진짜 문제인지 판단한다
 
-- [ ] **Step 9: README 작성**
+- [ ] **Step 10: README 작성**
 
 `README.md`:
 
@@ -3456,7 +3480,7 @@ uv run ruff check .
 ```
 ````
 
-- [ ] **Step 10: 커밋**
+- [ ] **Step 11: 커밋**
 
 ```bash
 git add README.md
