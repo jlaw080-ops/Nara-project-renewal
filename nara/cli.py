@@ -140,8 +140,9 @@ def migrate_tsv(
     shutil.copy2(path, backup)
 
     with run_log(conn, "migrate tsv", f"{tab}") as counters:
-        stats = import_tab(conn, tab, path.read_text(encoding="utf-8"), settings, now)
-        counters.processed = stats.rows
+        stats = import_tab(
+            conn, tab, path.read_text(encoding="utf-8"), settings, now, counters
+        )
         counters.updated = stats.notices + stats.projects
         counters.failed = stats.skipped
 
@@ -151,6 +152,15 @@ def migrate_tsv(
         f"신규 수기사업 {stats.projects} / 설비 {stats.energy} / 진행현황 {stats.status} / "
         f"부서 {stats.dept} / 건너뜀 {stats.skipped}"
     )
+    if stats.skipped_with_data:
+        typer.echo(
+            f"내용이 있는데 수요기관·공고명이 비어 건너뛴 행 "
+            f"{len(stats.skipped_with_data)}건:",
+            err=True,
+        )
+        for preview in stats.skipped_with_data:
+            typer.echo(f"  {preview}", err=True)
+        typer.echo("원본 TSV를 열어 확인한다. 자동으로 채우지 않는다.", err=True)
     accounted = stats.imported + stats.skipped
     if accounted != stats.rows:
         typer.echo(

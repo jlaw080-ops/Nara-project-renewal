@@ -1,15 +1,18 @@
 """기존 구글시트 탭을 DB로 옮긴다."""
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from nara.config import Settings
 from nara.dates import to_iso_date
 from nara.energy import parse_energy_plan
+from nara.runlog import RunCounters
 from nara.sheets_tsv import read_tsv
 from nara.store import ensure_project, upsert_org
 
 _VERDICTS = ("준공 완료", "시공 중", "착공 전(설계 단계)", "미확인")
+
+SKIPPED_PREVIEW_MAX = 10
 
 # 논리 이름 → 시트 헤더 문자열. 탭의 헤더가 다르면 여기만 고친다.
 COLUMNS = {
@@ -24,6 +27,7 @@ COLUMNS = {
     "status": "진행현황",
     "energy": "설치계획내용",
     "bid_no": "공고번호",
+    "open_date": "낙찰일(개찰일)",
     "zeb": "ZEB 인증등급",
 }
 
@@ -38,6 +42,7 @@ class ImportStats:
     status: int = 0
     dept: int = 0
     skipped: int = 0
+    skipped_with_data: list[str] = field(default_factory=list)
 
 
 def _split_status(text: str) -> tuple[str, str]:
@@ -58,6 +63,7 @@ def import_tab(
     text: str,
     settings: Settings,
     now: str,
+    counters: RunCounters | None = None,
 ) -> ImportStats:
     header, rows = read_tsv(text)
     index = {name.strip(): i for i, name in enumerate(header) if name.strip()}
@@ -68,18 +74,29 @@ def import_tab(
         return row[i].strip() if i is not None and i < len(row) else ""
 
     for row in rows:
+        # 행마다 올려 둔다. 중간에 터져도 run_log에 어디까지 갔는지 남는다.
+        if counters is not None:
+            counters.processed += 1
+
         org_name = cell(row, "org")
         title = cell(row, "title")
         if not org_name or not title:
             stats.skipped += 1
+            # 내용이 있는데 필수 칸만 빈 행은 조용히 사라지면 안 된다.
+            filled = [v.strip() for v in row if v.strip()]
+            if filled and len(stats.skipped_with_data) < SKIPPED_PREVIEW_MAX:
+                stats.skipped_with_data.append(" | ".join(filled)[:120])
             continue
         stats.imported += 1
 
         org_id = upsert_org(conn, org_name, settings, now)
         bid_no = cell(row, "bid_no")
         source = "g2b" if bid_no else "manual"
+        existed = conn.execute(
+            "SELECT 1 FROM project WHERE org_id = ? AND name = ?", (org_id, title)
+        ).fetchone()
         project_id = ensure_project(conn, org_id, title, source, now)
-        if source == "manual":
+        if source == "manual" and not existed:
             stats.projects += 1
 
         conn.execute(
@@ -102,10 +119,13 @@ def import_tab(
                 "SELECT 1 FROM notice WHERE bid_no = ?", (bid_no,)
             ).fetchone()
             if not existing:
+                # open_date를 넣지 않으면 이 공고는 Task 10의 낙찰 대기 쿼리
+                # (open_date != '' AND open_date <= today)에 영영 들어오지 못한다.
                 conn.execute(
                     "INSERT INTO notice (bid_no, project_id, org_id, org_name, title, "
-                    "budget_basis, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (bid_no, project_id, org_id, org_name, title, cell(row, "budget"), now),
+                    "open_date, budget_basis, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (bid_no, project_id, org_id, org_name, title,
+                     to_iso_date(cell(row, "open_date")), cell(row, "budget"), now),
                 )
                 stats.notices += 1
             if winner := cell(row, "winner"):
