@@ -53,8 +53,13 @@ def check_response(response: httpx.Response) -> dict:
         raise G2BError(explain_xml(body_text))
 
     payload = response.json()
-    header = payload.get("response", {}).get("header", {})
+    envelope = payload.get("response")
+    if not isinstance(envelope, dict):
+        raise G2BError(f"응답 봉투에 response가 없다: {body_text[:200]}")
+    header = envelope.get("header")
+    if not isinstance(header, dict):
+        raise G2BError(f"응답 봉투에 header가 없다: {body_text[:200]}")
     code = text(header.get("resultCode"))
     if code and code not in {"00", "0"}:
         raise G2BError(f"resultCode={code} {text(header.get('resultMsg'))}")
-    return payload.get("response", {}).get("body") or {}
+    return envelope.get("body") or {}

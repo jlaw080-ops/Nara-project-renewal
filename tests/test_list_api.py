@@ -76,6 +76,19 @@ def test_fetch_notice_page_raises_on_bad_result_code():
             fetch_notice_page(client, "KEY", BEGIN, END, page=1, rows=2)
 
 
+def test_fetch_notice_page_raises_on_missing_response_envelope():
+    with _client(lambda req: httpx.Response(200, json={})) as client:
+        with pytest.raises(G2BError):
+            fetch_notice_page(client, "KEY", BEGIN, END, page=1, rows=2)
+
+
+def test_fetch_notice_page_raises_on_missing_header():
+    bad = {"response": {"body": {"items": []}}}
+    with _client(lambda req: httpx.Response(200, json=bad)) as client:
+        with pytest.raises(G2BError):
+            fetch_notice_page(client, "KEY", BEGIN, END, page=1, rows=2)
+
+
 def test_iter_notices_stops_when_total_reached():
     page2 = json.loads(json.dumps(PAGE1))
     page2["response"]["body"]["pageNo"] = 2
