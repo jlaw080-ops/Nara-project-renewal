@@ -95,15 +95,55 @@ class EnergyItem:
 - Consumes: 없음
 - Produces: `nara.cli.app` (typer.Typer), `nara.__version__: str`
 
-- [ ] **Step 1: 프로젝트 초기화**
+- [ ] **Step 1: pyproject.toml을 직접 쓴다**
 
-```bash
-uv init --package --name nara --python 3.14 .
-uv add typer httpx
-uv add --dev pytest pytest-cov ruff
+`uv init`을 쓰지 않는다. `uv init --package`는 `src/nara/` 배치와 `uv_build` 백엔드를 만드는데, 이 계획의 모든 경로는 평면 `nara/`를 전제한다. 또 저장소에 이미 있는 `.gitignore`를 건드린다.
+
+`pyproject.toml`:
+
+```toml
+[project]
+name = "nara"
+version = "0.1.0"
+description = "나라장터 설계용역 공고 수집·조사 도구"
+requires-python = ">=3.14"
+dependencies = ["typer", "httpx"]
+
+[project.scripts]
+nara = "nara.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# 평면 배치. 기본값은 "src"라 이 줄이 없으면 nara 패키지를 찾지 못한다.
+module-root = ""
+
+[dependency-groups]
+dev = ["pytest", "pytest-cov", "ruff"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
 ```
 
-- [ ] **Step 2: 실패하는 테스트 작성**
+- [ ] **Step 2: 의존성 설치**
+
+```bash
+uv sync
+```
+
+Expected: `.venv`가 생기고 typer·httpx·pytest·ruff가 들어온다. `uv.lock`이 만들어진다.
+
+- [ ] **Step 3: 실패하는 테스트 작성**
 
 `tests/test_cli.py`:
 
@@ -120,12 +160,12 @@ def test_version_command_prints_package_version():
     assert __version__ in result.stdout
 ```
 
-- [ ] **Step 3: 테스트가 실패하는지 확인**
+- [ ] **Step 4: 테스트가 실패하는지 확인**
 
 Run: `uv run pytest tests/test_cli.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'nara.cli'`
 
-- [ ] **Step 4: 최소 구현**
+- [ ] **Step 5: 최소 구현**
 
 `nara/__init__.py`:
 
@@ -153,35 +193,17 @@ if __name__ == "__main__":
     app()
 ```
 
-- [ ] **Step 5: 테스트 통과 확인**
+- [ ] **Step 6: 테스트 통과 확인**
 
 Run: `uv run pytest tests/test_cli.py -v`
 Expected: PASS
 
-- [ ] **Step 6: pyproject에 스크립트와 도구 설정 추가**
-
-`pyproject.toml`에 아래를 더한다:
-
-```toml
-[project.scripts]
-nara = "nara.cli:app"
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-q"
-
-[tool.ruff]
-line-length = 100
-target-version = "py314"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
-```
-
-- [ ] **Step 7: 설치 후 CLI 동작 확인**
+- [ ] **Step 7: 설치된 CLI가 도는지 확인**
 
 Run: `uv run nara version`
 Expected: `nara 0.1.0`
+
+평면 배치가 먹었는지 함께 본다. `ModuleNotFoundError: No module named 'nara'`가 나오면 `[tool.uv.build-backend] module-root = ""`가 빠진 것이다.
 
 - [ ] **Step 8: 커밋**
 
@@ -373,9 +395,16 @@ def test_load_settings_reads_repo_config():
     assert settings.skip_cancelled is True
 
 
-def test_load_settings_keeps_all_nineteen_focus_orgs():
+def test_load_settings_keeps_every_focus_org():
+    """목록이 잘려서 들어오지 않았는지 본다.
+
+    Step 1에서 원본과 대조한 결과 개수가 19가 아니면 이 숫자를 원본에 맞춰 고치고,
+    무엇이 달랐는지 커밋 메시지에 적는다. 확인해야 하는 것은 '잘리지 않았다'이지
+    '정확히 19개'가 아니다.
+    """
     settings = load_settings(REPO_ROOT / "config.toml")
     assert len(settings.focus_orgs) == 19
+    assert len(settings.title_excluded) >= 60
 
 
 def test_load_secrets_reads_env_file(tmp_path):
@@ -517,24 +546,14 @@ def test_title_passes_for_building_design_notices(title):
     assert title_passes(title, SETTINGS) is True
 
 
-@pytest.mark.parametrize(
-    ("title", "reason"),
-    [
-        ("2026년 도시숲 조성사업 실시설계 용역", "도로"),  # '도로'는 미포함 — 통과해야 한다
-    ],
-)
-def test_title_excluded_keyword_must_match_substring(title, reason):
-    assert title_passes(title, SETTINGS) is True
+def test_title_passes_when_a_near_miss_keyword_appears():
+    """제외어는 부분 문자열로만 걸린다. '숲길'은 제외어지만 '도시숲'은 아니다."""
+    assert title_passes("2026년 도시숲 조성사업 실시설계 용역", SETTINGS) is True
 
 
-@pytest.mark.parametrize(
-    "title",
-    [
-        "부곡과선교 보수보강공사 실시설계용역",  # 보수정비 아님 — '보수보강'은 제외어 아님
-    ],
-)
-def test_title_passes_when_no_excluded_keyword(title):
-    assert title_passes(title, SETTINGS) is True
+def test_title_passes_when_keyword_is_a_prefix_only():
+    """'보수정비'가 제외어이고 '보수보강'은 아니다."""
+    assert title_passes("부곡과선교 보수보강공사 실시설계용역", SETTINGS) is True
 
 
 @pytest.mark.parametrize(
@@ -652,6 +671,8 @@ git commit -m "feat: 제목·수요기관 필터"
 - Create: `nara/schema.sql`
 - Create: `nara/db.py`
 - Test: `tests/test_db.py`
+
+`pyproject.toml`은 건드리지 않는다. Task 1에서 이미 맞춰 놨다.
 
 **Interfaces:**
 - Consumes: 없음
@@ -886,15 +907,7 @@ def migrate(conn: sqlite3.Connection) -> int:
     return SCHEMA_VERSION
 ```
 
-`pyproject.toml`에 스키마 파일이 패키지에 들어가도록 더한다:
-
-```toml
-[tool.hatch.build.targets.wheel]
-packages = ["nara"]
-
-[tool.hatch.build]
-include = ["nara/**/*.py", "nara/schema.sql"]
-```
+`schema.sql`은 `importlib.resources`로 읽는다. `uv run`은 소스에서 바로 돌기 때문에 별도 패키징 설정 없이 찾아진다. 빌드 백엔드 설정은 Task 1의 `pyproject.toml`에 이미 있다.
 
 - [ ] **Step 5: 테스트 통과 확인**
 
@@ -904,7 +917,7 @@ Expected: PASS (4 passed)
 - [ ] **Step 6: 커밋**
 
 ```bash
-git add nara/schema.sql nara/db.py tests/test_db.py pyproject.toml
+git add nara/schema.sql nara/db.py tests/test_db.py
 git commit -m "feat: SQLite 스키마와 마이그레이션"
 ```
 
@@ -1967,8 +1980,9 @@ Expected: FAIL — `ImportError: cannot import name 'backfill'`
 `nara/collect.py`에 더한다:
 
 ```python
-from dataclasses import dataclass
-from datetime import date, timedelta
+# 파일 맨 위의 import에 더한다 — datetime 줄을 새로 만들지 말고 기존 줄을 넓힌다.
+#   from dataclasses import dataclass
+#   from datetime import date, datetime, timedelta
 
 CURSOR_KEY = "backfill_cursor"
 
@@ -2703,11 +2717,13 @@ git commit -m "feat: 설치계획내용 파서와 예상가 계산"
 
 **Interfaces:**
 - Consumes: `read_tsv`, `parse_energy_plan`, `upsert_org`, `ensure_project`, `to_iso_date`
-- Produces: `COLUMNS`(논리 이름 → 시트 헤더 문자열), `ImportStats`(`rows`·`notices`·`projects`·`energy`·`status`·`dept`·`skipped`), `import_tab(conn, tab_name, text, settings, now) -> ImportStats`
+- Produces: `COLUMNS`(논리 이름 → 시트 헤더 문자열), `ImportStats`(`rows`·`imported`·`notices`·`projects`·`energy`·`status`·`dept`·`skipped`), `import_tab(conn, tab_name, text, settings, now) -> ImportStats`
 
 시트 한 탭의 TSV 본문을 받아 DB에 흩뿌린다. 시트를 직접 내려받는 부분은 계획 3의 Sheets API 작업에서 붙인다. 지금은 파일로 받은 TSV를 넣는다.
 
-`rows`는 헤더를 뺀 전체 데이터 행 수다. 스펙이 요구하는 "시트 행 수와 DB 건수 대조"가 `rows == notices + projects + skipped`로 확인된다.
+`rows`는 헤더를 뺀 전체 데이터 행 수, `imported`는 사업까지 이어진 행 수다. 스펙이 요구하는 "시트 행 수와 DB 건수 대조"가 `rows == imported + skipped`로 확인된다.
+
+`notices`·`projects`가 아니라 `imported`로 대조하는 이유가 있다. 그 둘은 **새로 만든** 건수라 같은 탭을 다시 넣으면 0이 되고, 정상적인 재실행이 대조 실패로 보인다.
 
 - [ ] **Step 1: 실제 탭의 헤더를 확인한다**
 
@@ -2855,7 +2871,20 @@ def test_import_tab_counts_every_row_for_reconciliation(conn):
     ])
     stats = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
     assert stats.rows == 3
-    assert stats.rows == stats.notices + stats.projects + stats.skipped
+    assert stats.imported == 2
+    assert stats.rows == stats.imported + stats.skipped
+
+
+def test_import_tab_reconciles_on_a_second_run(conn):
+    """같은 탭을 다시 넣어도 대조가 성립해야 한다. 재실행은 오류가 아니다."""
+    text = _tsv([[
+        "전북특별자치도 완주군", "완주 체육관", "", "", "", "",
+        "", "", "", "", "", "R1", "",
+    ]])
+    import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
+    again = import_tab(conn, "전북특별자치도", text, SETTINGS, NOW)
+    assert again.notices == 0
+    assert again.rows == again.imported + again.skipped
 
 
 def test_import_tab_reads_columns_by_header_not_position(conn):
@@ -2937,6 +2966,7 @@ COLUMNS = {
 @dataclass
 class ImportStats:
     rows: int = 0
+    imported: int = 0
     notices: int = 0
     projects: int = 0
     energy: int = 0
@@ -2978,6 +3008,7 @@ def import_tab(
         if not org_name or not title:
             stats.skipped += 1
             continue
+        stats.imported += 1
 
         org_id = upsert_org(conn, org_name, settings, now)
         bid_no = cell(row, "bid_no")
@@ -3063,7 +3094,7 @@ def import_tab(
 - [ ] **Step 5: 테스트 통과 확인**
 
 Run: `uv run pytest tests/test_migrate_sheets.py -v`
-Expected: PASS (11 passed)
+Expected: PASS (12 passed)
 
 - [ ] **Step 6: CLI에 이관 명령 연결**
 
@@ -3106,11 +3137,11 @@ def migrate_tsv(
 
     typer.echo(f"원본 보관: {backup}")
     typer.echo(
-        f"[{tab}] 시트 행 {stats.rows} / 공고 {stats.notices} / 수기사업 {stats.projects} / "
-        f"설비 {stats.energy} / 진행현황 {stats.status} / 부서 {stats.dept} / "
-        f"건너뜀 {stats.skipped}"
+        f"[{tab}] 시트 행 {stats.rows} / 처리 {stats.imported} / 신규 공고 {stats.notices} / "
+        f"신규 수기사업 {stats.projects} / 설비 {stats.energy} / 진행현황 {stats.status} / "
+        f"부서 {stats.dept} / 건너뜀 {stats.skipped}"
     )
-    accounted = stats.notices + stats.projects + stats.skipped
+    accounted = stats.imported + stats.skipped
     if accounted != stats.rows:
         typer.echo(
             f"대조 불일치 — 시트 {stats.rows}행인데 처리한 것은 {accounted}건이다. "
@@ -3313,7 +3344,9 @@ git commit -m "feat: 데이터 점검 명령"
 - [ ] **Step 1: 커버리지 확인**
 
 Run: `uv run pytest --cov=nara --cov-report=term-missing`
-Expected: 전체 통과, `nara` 커버리지 80% 이상. 80% 미만이면 빠진 줄에 테스트를 더한다
+Expected: 전체 통과, `nara` 커버리지 80% 이상.
+
+모자라면 십중팔구 `nara/cli.py`다. 다른 모듈은 Task마다 테스트를 붙였지만 CLI는 `version`만 덮여 있다. `--cov-report=term-missing`이 가리키는 줄을 보고 `tests/test_cli_commands.py`에 CliRunner 테스트를 더한다 — `tmp_path` DB와 `httpx.MockTransport`면 네트워크 없이 `collect`·`enrich award`·`doctor`를 돌릴 수 있다. **커버리지 설정에서 `cli.py`를 빼는 것으로 때우지 않는다.**
 
 - [ ] **Step 2: ruff 통과 확인**
 
