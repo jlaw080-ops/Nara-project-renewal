@@ -17,3 +17,7 @@ __pycache__/
 venv/
 .pytest_cache/
 .ruff_cache/
+
+# 커버리지 산출물
+.coverage
+htmlcov/
