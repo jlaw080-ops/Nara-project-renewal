@@ -11,6 +11,7 @@ from nara.collect import backfill as run_backfill
 from nara.collect import collect_range
 from nara.config import load_secrets, load_settings
 from nara.db import connect, migrate
+from nara.doctor import run_checks
 from nara.migrate_sheets import import_tab
 from nara.runlog import run_log
 
@@ -85,6 +86,20 @@ def backfill(
             )
     state = "완료" if result.done else f"진행 중 — {result.cursor}까지"
     typer.echo(f"소급 수집 {state} / 신규 {result.added}건")
+
+
+@app.command()
+def doctor(db: Path = typer.Option(DEFAULT_DB)) -> None:
+    """데이터가 서로 맞는지 점검한다."""
+    conn = _open_db(db)
+    findings = run_checks(conn, date.today().isoformat())
+    if not findings:
+        typer.echo("점검 통과 — 이상 없음")
+        return
+    for finding in findings:
+        typer.echo(f"[{finding.check}] {finding.detail}")
+    typer.echo(f"\n총 {len(findings)}건")
+    raise typer.Exit(code=1)
 
 
 enrich_app = typer.Typer(help="수집한 공고에 정보를 덧붙인다")
