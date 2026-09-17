@@ -89,9 +89,15 @@ def backfill(
 
 
 @app.command()
-def doctor(db: Path = typer.Option(DEFAULT_DB)) -> None:
-    """데이터가 서로 맞는지 점검한다."""
-    conn = _open_db(db)
+def doctor(db: Path = typer.Option(DEFAULT_DB, help="SQLite 경로")) -> None:
+    """데이터가 서로 맞는지 점검한다. 아무것도 고치지 않는다."""
+    # _open_db를 쓰지 않는다. 그건 migrate를 돌려 없는 파일을 만들어 버리므로,
+    # --db에 오타를 내면 빈 DB를 새로 만들고 "이상 없음"이라고 답한다.
+    # 문제를 시끄럽게 만드는 것이 이 명령의 존재 이유인데 정반대가 된다.
+    if not db.exists():
+        typer.echo(f"DB 파일이 없다: {db}", err=True)
+        raise typer.Exit(code=1)
+    conn = connect(db)
     findings = run_checks(conn, date.today().isoformat())
     if not findings:
         typer.echo("점검 통과 — 이상 없음")

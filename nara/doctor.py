@@ -44,21 +44,42 @@ def run_checks(conn: sqlite3.Connection, today: str) -> list[Finding]:
     ):
         findings.append(Finding("요일 그룹 없는 비관심 기관", row["name"]))
 
+    # 기관에 연결되지 않은 공고는 낙찰 대기 쿼리(org JOIN)에 영영 잡히지 않는다.
+    # 아래 적체 점검도 같은 JOIN을 쓰므로, 먼저 여기서 걸러 내지 않으면 사각지대가 된다.
+    for row in _rows(
+        conn,
+        "SELECT bid_no, title FROM notice WHERE org_id IS NULL",
+    ):
+        findings.append(
+            Finding("기관 연결 없는 공고", f"{row['bid_no']} {row['title']} — 낙찰 조회에서 빠진다")
+        )
+
     # 낙찰 대기는 성공해야만 줄어든다. 취소되거나 낙찰 공고가 안 뜬 건은 영영 대기에
     # 남아 한 회차 상한을 잡아먹고, 그런 건이 상한만큼 쌓이면 더 최근 공고는 매번
     # 뒤로 밀려 조회되지 않는다. 조용히 밀리므로 여기서 눈에 보이게 만든다.
-    backlog = conn.execute(
-        "SELECT COUNT(*) AS n, MIN(n.open_date) AS oldest FROM notice n "
+    #
+    # 실제 조회는 한 덩어리로 돌지 않는다 — 관심 기관은 하루 2회, 비관심 기관은
+    # 요일 그룹별로 주 1회다(스펙의 스케줄). 그래서 전체를 합쳐 상한과 비교하면
+    # 정상적인 주간 순환 대기까지 적체로 잡혀 헛경보가 된다. 실제로 도는 단위
+    # (tier, weekday_group)별로 나눠 센다.
+    for row in _rows(
+        conn,
+        "SELECT o.tier AS tier, o.weekday_group AS grp, COUNT(*) AS n, "
+        "MIN(n.open_date) AS oldest "
+        "FROM notice n JOIN org o ON o.id = n.org_id "
         "LEFT JOIN award a ON a.bid_no = n.bid_no "
-        "WHERE a.bid_no IS NULL AND n.open_date != '' AND n.open_date <= ?",
+        "WHERE a.bid_no IS NULL AND n.open_date != '' AND n.open_date <= ? "
+        "GROUP BY o.tier, o.weekday_group",
         (today,),
-    ).fetchone()
-    if backlog["n"] > AWARD_BATCH_LIMIT:
+    ):
+        if row["n"] <= AWARD_BATCH_LIMIT:
+            continue
+        where = "관심 기관" if row["tier"] == "focus" else f"비관심 기관 요일그룹 {row['grp']}"
         findings.append(
             Finding(
                 "낙찰 조회 적체",
-                f"개찰이 지났는데 낙찰 미확인인 공고가 {backlog['n']}건이다"
-                f"(가장 오래된 개찰일 {backlog['oldest']}). 한 회차 상한"
+                f"{where}: 개찰이 지났는데 낙찰 미확인인 공고가 {row['n']}건이다"
+                f"(가장 오래된 개찰일 {row['oldest']}). 한 회차 상한"
                 f" {AWARD_BATCH_LIMIT}건을 넘어 최근 공고가 계속 밀릴 수 있다."
                 " `nara enrich award --limit`를 키워 한 번 비우거나, 낙찰이 영영"
                 " 없을 건을 가려낼 방법이 필요하다.",

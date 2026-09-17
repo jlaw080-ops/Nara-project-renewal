@@ -1,7 +1,9 @@
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
+from nara.cli import app
 from nara.config import load_settings
 from nara.db import connect, migrate
 from nara.doctor import AWARD_BATCH_LIMIT, run_checks
@@ -22,10 +24,13 @@ def conn(tmp_path):
 def _notice(conn, bid_no, open_date):
     org_id = upsert_org(conn, "전북특별자치도 완주군", SETTINGS, NOW)
     project_id = ensure_project(conn, org_id, f"{bid_no} 사업", "g2b", NOW)
+    # org_id를 채워야 낙찰 조회 적체 점검(요일그룹별 partition)이 이 공고를 잡는다.
+    # 이전에는 빠져 있었는데, org_id가 NULL인 공고는 새 "기관 연결 없는 공고" 점검
+    # 대상이지 여기서 만들려는 정상 공고가 아니다.
     conn.execute(
-        "INSERT INTO notice (bid_no, project_id, org_name, title, open_date, collected_at) "
-        "VALUES (?, ?, '전북특별자치도 완주군', ?, ?, ?)",
-        (bid_no, project_id, f"{bid_no} 사업", open_date, NOW),
+        "INSERT INTO notice (bid_no, project_id, org_id, org_name, title, open_date, collected_at) "
+        "VALUES (?, ?, ?, '전북특별자치도 완주군', ?, ?, ?)",
+        (bid_no, project_id, org_id, f"{bid_no} 사업", open_date, NOW),
     )
     conn.commit()
     return project_id
@@ -87,3 +92,45 @@ def test_run_checks_flags_rest_org_without_weekday_group(conn):
     conn.commit()
     findings = run_checks(conn, TODAY)
     assert any(f.check == "요일 그룹 없는 비관심 기관" for f in findings)
+
+
+def test_run_checks_is_quiet_when_backlog_is_spread_across_weekday_groups(conn):
+    """관심 기관은 하루 2회, 비관심 기관은 요일그룹별 주 1회만 돈다(스펙 스케줄).
+    전체 합계는 상한을 넘어도 실제로 도는 단위(요일그룹)별로 상한 밑이면 정상이다."""
+    for group in range(1, 6):
+        cur = conn.execute(
+            "INSERT INTO org (name, tier, weekday_group, added_at) VALUES (?, 'rest', ?, ?)",
+            (f"비관심기관{group}", group, NOW),
+        )
+        org_id = cur.lastrowid
+        for i in range(100):
+            bid_no = f"G{group}-{i}"
+            project_id = ensure_project(conn, org_id, f"{bid_no} 사업", "g2b", NOW)
+            conn.execute(
+                "INSERT INTO notice (bid_no, project_id, org_id, org_name, title, open_date, "
+                "collected_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (bid_no, project_id, org_id, f"비관심기관{group}", f"{bid_no} 사업",
+                 "2026-09-10", NOW),
+            )
+    conn.commit()
+    assert not any(f.check == "낙찰 조회 적체" for f in run_checks(conn, TODAY))
+
+
+def test_run_checks_flags_notice_without_org(conn):
+    """org_id가 없는 공고는 낙찰 대기 partition 쿼리(org JOIN)에 영영 안 잡히므로 따로 걸러야 한다."""
+    conn.execute(
+        "INSERT INTO notice (bid_no, org_name, title, open_date, collected_at) "
+        "VALUES ('ORPHAN1', '알수없음', 'ORPHAN1 사업', '2026-09-10', ?)", (NOW,)
+    )
+    conn.commit()
+    hits = [f for f in run_checks(conn, TODAY) if f.check == "기관 연결 없는 공고"]
+    assert len(hits) == 1
+    assert "ORPHAN1" in hits[0].detail
+
+
+def test_doctor_command_refuses_to_create_missing_db(tmp_path):
+    """--db에 없는 경로를 주면 빈 DB를 만들지 않고 실패해야 한다."""
+    missing = tmp_path / "does-not-exist" / "nara.db"
+    result = CliRunner().invoke(app, ["doctor", "--db", str(missing)])
+    assert result.exit_code != 0
+    assert not missing.exists()
