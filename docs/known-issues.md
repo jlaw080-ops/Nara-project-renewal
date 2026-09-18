@@ -53,3 +53,15 @@
 - minor (deferred): award INSERT에 ON CONFLICT 없음. 한 회차 안에서는 도달 불가,
 - minor (deferred): 3연속 short line 테스트 없음(손 추적으로는 정상).
 - minor (deferred): estimate_cost가 round-half-even. 이 자릿수에선 도달 불가.
+
+## 계획 2 (진행현황 판정)에서 이월
+
+- **`nara doctor`가 cp949 콘솔에서 죽는다.** 출력에 쓰인 `—`를 Windows 기본
+  코드페이지가 인코딩하지 못해 UnicodeEncodeError가 난다. Git Bash에서는
+  나지 않는다. 우회: `PYTHONIOENCODING=utf-8 uv run nara doctor`.
+  `nara/cli.py` 출력 전반에 걸친 문제라 진행현황 작업의 범위 밖으로 두었다.
+- **뉴스 판정 경로는 실데이터로 검증되지 않았다.** 네이버·Claude 키가 없어
+  규칙 경로와 "건너뛰었다" 경로만 확인됐다. 키를 넣은 첫 회차는 결과를
+  사람이 직접 훑어야 한다.
+- **`read_signals`는 낱말 대조다.** "착공"이라는 낱말이 없는 착공 기사는
+  읽지 못한다. 실전에서 얼마나 맞는지는 돌려보기 전에는 알 수 없다.
