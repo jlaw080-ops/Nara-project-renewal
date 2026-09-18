@@ -192,7 +192,9 @@ def enrich_status(
 
     typer.echo(
         f"진행현황 — 확인 {run.checked}건 / 기록 {run.recorded}건 / "
-        f"변화 없음 {run.skipped}건 / 뉴스 근거 {run.searched}건 / LLM 판정 {run.asked_llm}건"
+        f"변화 없음 {run.skipped}건 / 뉴스 근거 {run.searched}건 / "
+        f"LLM 호출 {run.asked_llm}건 / 응답 {run.asked_llm - run.llm_unanswered}건 / "
+        f"실패 {counters.failed}건"
     )
     # 건너뛴 단계는 반드시 말한다. 조용히 넘어가면 규칙 판정만 돈 회차를
     # 완전한 판정으로 착각하게 된다.
@@ -212,6 +214,13 @@ def enrich_status(
             f"시간 예산 {budget}초를 넘겨 멈췄다. 다음 회차가 남은 대상을 이어받는다.",
             err=True,
         )
+    # 대상 전원의 판정이 죽으면 기록은 늘 0이다 — 바뀐 것 없는 정상적인
+    # 회차와 똑같이 보인다. enrich_award처럼 '기록 0건'을 기준으로 삼으면
+    # 안 된다 — 여기선 아무것도 안 바뀐 정상적인 회차도 기록 0건이다.
+    # '시도한 전부가 죽었다'만 실패다: checked한 만큼 failed일 때만 문다.
+    if counters.failed and counters.failed == counters.processed:
+        typer.echo("전체 판정 실패 — 사업 데이터나 판정 로직에 문제가 없는지 확인한다.", err=True)
+        raise typer.Exit(code=1)
 
 
 migrate_app = typer.Typer(help="외부 데이터를 가져온다")
