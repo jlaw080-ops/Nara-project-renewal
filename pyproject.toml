@@ -3,7 +3,11 @@ name = "nara"
 version = "0.1.0"
 description = "나라장터 설계용역 공고 수집·조사 도구"
 requires-python = ">=3.14"
-dependencies = ["typer", "httpx"]
+dependencies = [
+    "typer",
+    "httpx",
+    "anthropic>=1.6.0",
+]
 
 [project.scripts]
 nara = "nara.cli:app"
