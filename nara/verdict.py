@@ -25,14 +25,16 @@ def should_record(latest: dict | None, candidate: Judgment) -> tuple[bool, str]:
     if latest is None:
         return True, ""
 
-    if latest.get("verdict") == candidate.verdict:
-        return False, "판정이 그대로다 — 회차마다 같은 줄을 쌓지 않는다"
+    if latest.get("verdict") == candidate.verdict and latest.get("reason") == candidate.reason:
+        return False, "판정과 사유가 그대로다 — 회차마다 같은 줄을 쌓지 않는다"
 
-    bare_rule = candidate.decided_by == "rule" and not candidate.evidence_url.strip()
-    if bare_rule and latest.get("decided_by") in ("imported", "human", "news", "llm"):
+    # 앞선 판정이 규칙이 아니면 — 사람이든 이관이든 뉴스든 LLM이든, 또는
+    # 모르는 값(오타·대소문자 등)이든 — 규칙 판정은 그것을 밀어내지 못한다.
+    # 규칙 판정은 DB 사실로 내리는 것이라 뉴스 근거를 가질 일이 없다.
+    # evidence_url 유무로 여는 조건은 두지 않는다 — 그 조건이 우회로였다(F2).
+    if candidate.decided_by == "rule" and latest.get("decided_by") != "rule":
         return False, (
-            f"근거를 보고 내린 '{latest.get('verdict')}' 판정을 "
-            "근거 없는 규칙 판정으로 밀어내지 않는다"
+            f"근거를 보고 내린 '{latest.get('verdict')}' 판정을 규칙 판정으로 밀어내지 않는다"
         )
 
     return True, ""

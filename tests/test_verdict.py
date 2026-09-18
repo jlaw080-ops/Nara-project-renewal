@@ -301,8 +301,13 @@ def test_read_news_confirms_completion_despite_resident_suggestion_wording():
     assert got.verdict == DONE
 
 
-def _latest(verdict, decided_by, evidence_url=""):
-    return {"verdict": verdict, "decided_by": decided_by, "evidence_json": evidence_url}
+def _latest(verdict, decided_by, evidence_url="", reason=""):
+    return {
+        "verdict": verdict,
+        "decided_by": decided_by,
+        "evidence_json": evidence_url,
+        "reason": reason,
+    }
 
 
 def test_should_record_first_judgment():
@@ -311,8 +316,8 @@ def test_should_record_first_judgment():
 
 
 def test_should_record_skips_identical_repeat():
-    """같은 판정을 회차마다 다시 쌓지 않는다 — 이력이 못 읽을 것이 된다."""
-    latest = _latest(BEFORE, "rule")
+    """같은 판정 + 같은 사유를 회차마다 다시 쌓지 않는다 — 이력이 못 읽을 것이 된다."""
+    latest = _latest(BEFORE, "rule", reason="개찰 근거")
     ok, why = should_record(latest, Judgment(BEFORE, "개찰 근거", "rule", ""))
     assert ok is False
     assert why
@@ -321,6 +326,18 @@ def test_should_record_skips_identical_repeat():
 def test_should_record_when_verdict_changes():
     latest = _latest(BEFORE, "rule")
     ok, _ = should_record(latest, Judgment(BUILDING, "기공식 보도", "news", "https://n/1"))
+    assert ok is True
+
+
+def test_should_record_when_reason_changes_even_if_verdict_does_not():
+    """F3 — 판정은 같아도 사유가 바뀌면(새 사실 확인) 기록한다.
+
+    '개찰일이 지났고 낙찰업체 미확인' → '낙찰업체가 기록됨'은 둘 다 착공 전이지만
+    낙찰업체가 새로 확인됐다는 사실이 다르다. verdict만 비교하면 이 변화가
+    이력에서 영영 사라진다.
+    """
+    latest = _latest(BEFORE, "rule", reason="개찰일이 지났고 낙찰업체 미확인")
+    ok, _ = should_record(latest, Judgment(BEFORE, "낙찰업체가 기록됨", "rule", ""))
     assert ok is True
 
 
@@ -345,6 +362,31 @@ def test_evidenced_judgment_may_overturn_human_research():
     assert ok is True
 
 
+def test_should_record_guard_closes_on_unrecognized_decided_by_value():
+    """F1 — 대문자 오타 등 모르는 decided_by 값이 와도 가드가 열리면 안 된다.
+
+    'rule'이 아니면 전부 막는다 — 사람이든 이관이든, 우리가 모르는 값이든.
+    """
+    ok, _ = should_record(
+        {"verdict": BUILDING, "decided_by": "Imported", "reason": "x"},
+        Judgment(BEFORE, "개찰 근거", "rule", ""),
+    )
+    assert ok is False
+
+
+def test_should_record_guard_ignores_evidence_url_on_rule_candidate():
+    """F2 — 규칙 판정에 evidence_url이 붙어도 가드를 우회하지 못한다.
+
+    규칙 판정은 DB 사실로 내리는 것이라 뉴스 근거를 가질 일이 없다.
+    evidence_url 유무로 가드를 여는 조건 자체를 없앤다.
+    """
+    ok, _ = should_record(
+        {"verdict": BUILDING, "decided_by": "imported", "reason": "25.06.30 기공식"},
+        Judgment(BEFORE, "개찰 근거", "rule", "https://n/1"),
+    )
+    assert ok is False
+
+
 def test_conflict_when_before_construction_but_start_date_has_passed():
     """'착공 전'인데 시트의 착공일이 이미 지났다 — 둘 중 하나가 틀렸다."""
     note = date_conflict(BEFORE, ("2025-11-03", ""), "2026-09-18")
@@ -360,8 +402,18 @@ def test_conflict_when_completed_but_end_date_is_future():
     assert note and "준공" in note
 
 
-def test_no_conflict_when_dates_are_blank():
-    assert date_conflict(BUILDING, ("", ""), "2026-09-18") is None
+def test_no_conflict_when_before_construction_and_start_date_is_blank():
+    """F4 — 착공일이 비어 있으면 '착공 전' 판정과 비교할 것이 없다.
+
+    빈 문자열은 사전식 비교에서 어떤 날짜보다도 작아 '지났다'로 오판되기
+    쉽다. 이 가드(`and start`)를 지우면 이 테스트가 실패해야 한다.
+    """
+    assert date_conflict(BEFORE, ("", ""), "2026-09-18") is None
+
+
+def test_no_conflict_when_completed_and_end_date_is_blank():
+    """F4 — 준공일이 비어 있으면 '준공 완료' 판정과 비교할 것이 없다."""
+    assert date_conflict(DONE, ("", ""), "2026-09-18") is None
 
 
 def test_conflict_never_changes_the_dates():
