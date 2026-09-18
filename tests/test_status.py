@@ -442,6 +442,40 @@ def test_judge_demotes_an_llm_verdict_that_has_no_evidence_url(conn):
     assert "근거 URL이 없어" in got.reason
 
 
+def test_judge_keeps_why_the_news_was_doubted_when_the_llm_answers(conn):
+    """LLM이 답하면 무엇을 의심했는지가 기록에서 사라졌다.
+
+    연도 가드가 2006년 기사를 걷어내도 그 기사의 URL은 evidence_url에
+    남는다. URL이 비어 있지 않으니 근거 강등도 걸리지 않고, LLM이 답하면
+    reason이 통째로 갈리면서 '기사 연도가 어긋남'이 사라진다. 결과만
+    보면 왜 이 판정이 나왔는지 알 길이 없다 — 같은 오판이 'llm' 이름표를
+    달고 되돌아온다.
+    """
+    project_id = _project(conn, "전북특별자치도 진안군", "진안복합노인 복지센터")
+    conn.execute("UPDATE project SET start_date = '', end_date = '' WHERE id = ?", (project_id,))
+    conn.commit()
+    # 사업 날짜가 둘 다 비어 개찰일이 유일한 기준점이다 — 실데이터 249건 중
+    # 196건이 이 모양이고, 그중 152건이 개찰일을 갖고 있다.
+    _add_notice(conn, project_id, "R1", open_date="2026-03-02")
+    found = SearchResult(
+        articles=[Article("진안복합노인 복지센터 개원", "", "https://old/2006", "2006-05-01")],
+        searched=True,
+    )
+
+    got = judge_project(
+        conn,
+        _row(conn, project_id),
+        SECRETS,
+        "2026-09-18",
+        search=lambda *a, **k: found,
+        adjudicator=lambda *a, **k: (DONE, "준공했다고 본다"),
+    )
+
+    assert got.decided_by == "llm"
+    assert "준공했다고 본다" in got.reason
+    assert "어긋" in got.reason
+
+
 def test_judge_keeps_an_llm_verdict_that_has_a_real_evidence_url(conn):
     """반대 방향 — 근거 URL이 있으면 강등하지 않는다. 가드가 과해지면 안 된다."""
     project_id = _project(conn, "전북특별자치도 완주군", "완주군 다목적체육관")

@@ -127,6 +127,12 @@ def judge_project(
             if answer is not None:
                 verdict, reason = answer
                 decided_by = "llm"
+                # LLM이 무엇을 의심한 건에 답한 것인지 기록에 남긴다. 연도
+                # 가드가 걷어낸 기사의 URL은 evidence_url에 그대로 남아
+                # 강등도 걸리지 않는데, reason까지 통째로 갈리면 왜 이
+                # 판정이 나왔는지 알 길이 없다 — 같은 오판이 'llm' 이름표를
+                # 달고 되돌아온다.
+                reason = f"{reason} / {news.reason}"
                 # 뉴스 경로와 같은 강등을 LLM 답에도 건다(C2). LLM은
                 # evidence_url을 만들어 내지 못하고, 여기서 남는 것은 뉴스가
                 # 고른 URL이다 — 그게 비어 있으면 '준공 완료'·'시공 중'은
