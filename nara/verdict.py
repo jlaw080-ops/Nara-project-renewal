@@ -50,6 +50,10 @@ _DESIGN_WORDS = ("설계", "공모", "당선작")
 _PLANNED_WORDS = ("예정", "목표", "계획", "추진")
 # 취소·지연·임박·재촉 표현. "예정"과는 뜻이 다르다 — 예정은 미래 일정 표기이고,
 # 이건 확정된 줄 알았던 착공·준공이 실제로는 엎어졌거나 미뤄졌을 가능성이다(R9/F1).
+# "요구"·"건의"는 뺐다(R13/F4) — 너무 흔해 "주민 요구 수용해 설계 변경 뒤 기공식"
+# 같은 멀쩡한 기사까지 위임시킨다. "촉구"가 주장·요구 계열 신호를 이미 잡는다.
+# "중단"은 남긴다 — "공사 중단 없이 준공"처럼 부정형으로 쓰이는 경우가 위임되는
+# 것은 감수한다. 안전한 방향으로 실패하는 쪽이 낫다. 부정어 처리는 넣지 않는다.
 _HEDGE_WORDS = (
     "취소",
     "무산",
@@ -65,8 +69,6 @@ _HEDGE_WORDS = (
     "앞두고",
     "임박",
     "촉구",
-    "요구",
-    "건의",
 )
 
 
@@ -179,16 +181,14 @@ def read_news(articles: list[Article], project_dates: tuple[str, str]) -> NewsRe
                 "철거와 착공이 한 기사에 함께 쓰여 실제 착공인지 불분명",
             )
 
-    starts = [a for a, s in signals if SIGNAL_START in s]
-    dones = [a for a, s in signals if SIGNAL_DONE in s]
-    planned = {a.url for a, s in signals if SIGNAL_PLANNED in s}
-    hedged = {a.url for a, s in signals if SIGNAL_HEDGE in s}
+    starts = [(a, s) for a, s in signals if SIGNAL_START in s]
+    dones = [(a, s) for a, s in signals if SIGNAL_DONE in s]
 
     if starts and dones:
         return NewsRead(
             UNKNOWN,
             "착공 기사와 준공 기사가 함께 잡힘",
-            dones[0].url,
+            dones[0][0].url,
             True,
             "착공 기사와 준공 기사가 동시에 잡힘",
         )
@@ -196,12 +196,15 @@ def read_news(articles: list[Article], project_dates: tuple[str, str]) -> NewsRe
     for group, strong, label in ((dones, DONE, "준공"), (starts, BUILDING, "착공·기공식")):
         if not group:
             continue
-        article = _pick_with_evidence(group)
+        # 유보·예정 검사는 묶음 전체에 건다(F3/R12). 고른 기사 하나의 URL만
+        # 보면, 같은 묶음 안에 "착공 무산" 기사가 섞여 있어도 URL 있는 다른
+        # 기사 때문에 그 유보 신호가 통째로 사라져 확신에 찬 오판정이 된다.
         cues = []
-        if article.url in planned:
+        if any(SIGNAL_PLANNED in s for _, s in group):
             cues.append("예정 표기")
-        if article.url in hedged:
+        if any(SIGNAL_HEDGE in s for _, s in group):
             cues.append("유보·취소성 표현")
+        article = _pick_with_evidence([a for a, _ in group])
         if cues:
             cue = " · ".join(cues)
             return NewsRead(
@@ -209,7 +212,7 @@ def read_news(articles: list[Article], project_dates: tuple[str, str]) -> NewsRe
                 f"{label} {cue}",
                 article.url,
                 True,
-                f"{label} 기사에 {cue}이 함께 쓰여 실제인지 불분명",
+                f"{label} 기사 묶음에 {cue}이 함께 쓰여 실제인지 불분명",
             )
         verdict, note = demote_without_evidence(strong, article.url)
         return NewsRead(verdict, note or f"{label} 보도", article.url, False, "")

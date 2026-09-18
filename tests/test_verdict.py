@@ -247,3 +247,52 @@ def test_read_news_picks_article_with_evidence_url_over_urlless_first_match():
     got = read_news([first, second], ("", ""))
     assert got.verdict == DONE
     assert got.evidence_url == "https://news.example.com/good"
+
+
+def test_read_news_defers_when_hedge_is_only_on_one_article_in_start_group():
+    """R12/F3 — 유보 신호가 '고른 기사' 하나가 아니라 묶음 전체에 걸려야 한다.
+
+    URL 있는 '착공식 개최' 기사 뒤에 URL 없는 '착공 무산' 기사가 섞여 있어도,
+    _pick_with_evidence가 URL 있는 쪽을 고른다는 이유로 무산 신호를 지워선 안 된다.
+    """
+    got = read_news(
+        [
+            Article("주민 반발에 완주군 다목적체육관 착공 무산", "", "", "2026-08-01"),
+            Article(
+                "완주군 다목적체육관 착공식 개최",
+                "",
+                "https://news.example.com/ok",
+                "2026-08-02",
+            ),
+        ],
+        ("", ""),
+    )
+    assert got.needs_llm is True
+    assert got.verdict != BUILDING
+
+
+def test_read_news_defers_when_hedge_collides_regardless_of_missing_urls():
+    """URL이 둘 다 비어 있어도 묶음 안의 유보 신호는 그대로 걸려야 한다."""
+    got = read_news(
+        [
+            Article("주민 반발에 완주군 다목적체육관 착공 무산", "", "", "2026-08-01"),
+            Article("완주군 다목적체육관 착공식 개최", "", "", "2026-08-02"),
+        ],
+        ("", ""),
+    )
+    assert got.needs_llm is True
+    assert got.verdict != BUILDING
+
+
+def test_read_news_confirms_construction_despite_resident_demand_wording():
+    """'요구'는 유보 낱말에서 뺐다(F4) — 흔한 표현이라 멀쩡한 기사까지 위임시킨다."""
+    got = read_news([_a("주민 요구 수용해 설계 변경 뒤 기공식")], ("", ""))
+    assert got.needs_llm is False
+    assert got.verdict == BUILDING
+
+
+def test_read_news_confirms_completion_despite_resident_suggestion_wording():
+    """'건의'도 유보 낱말에서 뺐다(F4) — 같은 이유."""
+    got = read_news([_a("주민 건의 반영한 복지관 준공식")], ("", ""))
+    assert got.needs_llm is False
+    assert got.verdict == DONE
