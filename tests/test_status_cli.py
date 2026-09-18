@@ -7,6 +7,7 @@ from nara.cli import app
 from nara.config import Secrets, load_settings
 from nara.db import connect, migrate
 from nara.store import ensure_project, upsert_org
+from nara.verdict import Article
 
 SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
 NOW = "2026-09-18T09:00:00"
@@ -332,3 +333,38 @@ def test_enrich_status_stays_quiet_when_the_budget_was_enough(tmp_path, monkeypa
     result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path, projects=3))])
     assert result.exit_code == 0
     assert "시간 예산" not in result.output
+
+
+def test_enrich_status_label_says_it_counts_searches_not_news_verdicts(tmp_path, monkeypatch):
+    """'뉴스 근거 N건'은 뉴스로 판정한 건수가 아니라 검색이 돌아간 건수였다.
+
+    검색해서 아무 신호도 못 찾은 건까지 세므로, 라벨을 믿으면 뉴스 근거가
+    N건 있다고 읽는다. 숫자는 그대로 두고 라벨만 실제로 세는 것에 맞춘다.
+    """
+    from nara.naver import SearchResult
+
+    monkeypatch.setattr(
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x",
+            naver_client_id="id",
+            naver_client_secret="sec",
+            anthropic_api_key=None,
+        ),
+    )
+    # 검색은 성공하지만 판정에 쓸 신호가 없는 기사 — 뉴스로 판정한 건은 0이다.
+    monkeypatch.setattr(
+        cli,
+        "search_news",
+        lambda client, secrets_, query: SearchResult(
+            articles=[Article("완주군 군민 체육대회 성황", "", "https://n/x", "2026-08-01")],
+            searched=True,
+        ),
+    )
+
+    result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path))])
+
+    assert result.exit_code == 0
+    assert "뉴스 검색 1건" in result.output
+    assert "뉴스 근거" not in result.output

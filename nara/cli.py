@@ -192,7 +192,10 @@ def enrich_status(
 
     typer.echo(
         f"진행현황 — 확인 {run.checked}건 / 기록 {run.recorded}건 / "
-        f"변화 없음 {run.skipped}건 / 뉴스 근거 {run.searched}건 / "
+        # run.searched는 '검색이 돌아간 건수'다 — 뉴스로 판정한 건수가
+        # 아니다. 신호를 하나도 못 찾은 검색까지 세므로 '뉴스 근거'라는
+        # 라벨은 없는 근거가 있다고 읽히게 한다. 숫자는 그대로 둔다.
+        f"변화 없음 {run.skipped}건 / 뉴스 검색 {run.searched}건 / "
         f"LLM 호출 {run.asked_llm}건 / 응답 {run.asked_llm - run.llm_unanswered}건 / "
         f"실패 {counters.failed}건"
     )

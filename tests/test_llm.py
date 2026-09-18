@@ -105,3 +105,79 @@ def test_adjudicate_returns_none_when_truncated_by_max_tokens():
     response = _Response(f"{BUILDING}\n근거가 중간에")
     response.stop_reason = "max_tokens"
     assert adjudicate(KEYED, "사업", ARTICLES, "질문", client=_FakeClient(response)) is None
+
+
+# --- Fix round 2: Minor — 300건 회차가 클라이언트를 300개 만들면 안 된다 ---
+
+
+def test_adjudicate_reuses_one_client_across_calls(monkeypatch):
+    """호출마다 anthropic.Anthropic()을 새로 만들고 닫지도 않았다.
+
+    300건 회차면 클라이언트가 300개다 — 각자 연결 풀을 들고 아무도 닫지
+    않는다. 같은 키로 부르면 하나를 돌려 쓴다.
+    """
+    import nara.llm as llm
+
+    made = []
+
+    class _Recorder:
+        def __init__(self, **kwargs):
+            made.append(kwargs)
+            self.messages = self
+
+        def create(self, **kwargs):
+            return _Response(f"{BEFORE}\n근거")
+
+    llm._reset_clients()
+    monkeypatch.setattr(llm.anthropic, "Anthropic", _Recorder)
+    for _ in range(5):
+        assert adjudicate(KEYED, "사업", ARTICLES, "질문") == (BEFORE, "근거")
+    llm._reset_clients()
+
+    assert len(made) == 1
+
+
+def test_adjudicate_does_not_share_a_client_between_different_keys(monkeypatch):
+    """키가 다르면 클라이언트도 달라야 한다 — 남의 키로 부르면 안 된다."""
+    import nara.llm as llm
+
+    made = []
+
+    class _Recorder:
+        def __init__(self, **kwargs):
+            made.append(kwargs["api_key"])
+            self.messages = self
+
+        def create(self, **kwargs):
+            return _Response(f"{BEFORE}\n근거")
+
+    other = Secrets(
+        g2b_api_key="x",
+        naver_client_id=None,
+        naver_client_secret=None,
+        anthropic_api_key="sk-other",
+    )
+    llm._reset_clients()
+    monkeypatch.setattr(llm.anthropic, "Anthropic", _Recorder)
+    adjudicate(KEYED, "사업", ARTICLES, "질문")
+    adjudicate(other, "사업", ARTICLES, "질문")
+    llm._reset_clients()
+
+    assert made == ["sk-test", "sk-other"]
+
+
+def test_adjudicate_still_swallows_api_errors_when_reusing_a_client(monkeypatch):
+    """재사용이 오류 처리를 바꾸지 않는다 — 실패는 여전히 None이다."""
+    import nara.llm as llm
+
+    class _Broken:
+        def __init__(self, **kwargs):
+            self.messages = self
+
+        def create(self, **kwargs):
+            raise anthropic.APIConnectionError(request=None)
+
+    llm._reset_clients()
+    monkeypatch.setattr(llm.anthropic, "Anthropic", _Broken)
+    assert adjudicate(KEYED, "사업", ARTICLES, "질문") is None
+    llm._reset_clients()

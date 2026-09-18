@@ -34,6 +34,26 @@ def _prompt(project_name: str, articles: list[Article], question: str) -> str:
     return "\n".join(lines)
 
 
+# 키별로 클라이언트 하나씩 돌려 쓴다. 예전에는 호출마다 새로 만들고 닫지
+# 않아 300건 회차면 연결 풀을 든 클라이언트가 300개 생겼다. SDK 클라이언트는
+# 상태가 없고 스레드 안전하며 연결 풀을 재사용하도록 만들어진 물건이라,
+# 건마다 새로 만들 이유가 없다. 키를 섞지 않도록 키를 열쇠로 쓴다.
+_CLIENTS: dict[str, anthropic.Anthropic] = {}
+
+
+def _shared_client(api_key: str) -> anthropic.Anthropic:
+    api = _CLIENTS.get(api_key)
+    if api is None:
+        api = anthropic.Anthropic(api_key=api_key, timeout=30.0)
+        _CLIENTS[api_key] = api
+    return api
+
+
+def _reset_clients() -> None:
+    """테스트가 가짜 클라이언트를 끼울 수 있게 캐시를 비운다."""
+    _CLIENTS.clear()
+
+
 def adjudicate(
     secrets: Secrets,
     project_name: str,
@@ -44,7 +64,7 @@ def adjudicate(
     if not secrets.anthropic_api_key:
         return None
 
-    api = client or anthropic.Anthropic(api_key=secrets.anthropic_api_key, timeout=30.0)
+    api = client or _shared_client(secrets.anthropic_api_key)
     try:
         response = api.messages.create(
             model=MODEL,
