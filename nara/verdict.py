@@ -9,6 +9,36 @@ UNKNOWN = "미확인"
 
 
 @dataclass(frozen=True)
+class Judgment:
+    verdict: str
+    reason: str
+    decided_by: str  # 'rule' | 'news' | 'llm' | 'human' | 'imported'
+    evidence_url: str
+
+
+def should_record(latest: dict | None, candidate: Judgment) -> tuple[bool, str]:
+    """이 판정을 status_check에 쌓을지 정한다. (기록할지, 안 하는 이유).
+
+    status_check는 이력이고 화면은 최신 행만 본다. 그래서 '기록하지 않는다'는
+    선택이 곧 '앞선 판정을 그대로 둔다'는 뜻이다.
+    """
+    if latest is None:
+        return True, ""
+
+    if latest.get("verdict") == candidate.verdict:
+        return False, "판정이 그대로다 — 회차마다 같은 줄을 쌓지 않는다"
+
+    bare_rule = candidate.decided_by == "rule" and not candidate.evidence_url.strip()
+    if bare_rule and latest.get("decided_by") in ("imported", "human", "news", "llm"):
+        return False, (
+            f"근거를 보고 내린 '{latest.get('verdict')}' 판정을 "
+            "근거 없는 규칙 판정으로 밀어내지 않는다"
+        )
+
+    return True, ""
+
+
+@dataclass(frozen=True)
 class Facts:
     """공고에서 바로 읽히는 사실만 담는다. 추정한 값은 넣지 않는다."""
 

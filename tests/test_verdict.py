@@ -10,10 +10,12 @@ from nara.verdict import (
     UNKNOWN,
     Article,
     Facts,
+    Judgment,
     demote_without_evidence,
     read_news,
     read_signals,
     rule_verdict,
+    should_record,
 )
 
 
@@ -296,3 +298,47 @@ def test_read_news_confirms_completion_despite_resident_suggestion_wording():
     got = read_news([_a("주민 건의 반영한 복지관 준공식")], ("", ""))
     assert got.needs_llm is False
     assert got.verdict == DONE
+
+
+def _latest(verdict, decided_by, evidence_url=""):
+    return {"verdict": verdict, "decided_by": decided_by, "evidence_json": evidence_url}
+
+
+def test_should_record_first_judgment():
+    ok, _ = should_record(None, Judgment(BEFORE, "개찰 근거", "rule", ""))
+    assert ok is True
+
+
+def test_should_record_skips_identical_repeat():
+    """같은 판정을 회차마다 다시 쌓지 않는다 — 이력이 못 읽을 것이 된다."""
+    latest = _latest(BEFORE, "rule")
+    ok, why = should_record(latest, Judgment(BEFORE, "개찰 근거", "rule", ""))
+    assert ok is False
+    assert why
+
+
+def test_should_record_when_verdict_changes():
+    latest = _latest(BEFORE, "rule")
+    ok, _ = should_record(latest, Judgment(BUILDING, "기공식 보도", "news", "https://n/1"))
+    assert ok is True
+
+
+def test_rule_judgment_does_not_bury_human_research():
+    """사람이 보도를 읽고 넣은 '시공 중'을 규칙 판정이 밀어내면 안 된다."""
+    latest = _latest(BUILDING, "imported")
+    ok, why = should_record(latest, Judgment(BEFORE, "개찰일이 지났고 낙찰업체 미확인", "rule", ""))
+    assert ok is False
+    assert "근거" in why or "규칙" in why
+
+
+def test_rule_judgment_may_follow_another_rule_judgment_that_changed():
+    latest = _latest(UNKNOWN, "rule")
+    ok, _ = should_record(latest, Judgment(BEFORE, "낙찰업체가 기록됨", "rule", ""))
+    assert ok is True
+
+
+def test_evidenced_judgment_may_overturn_human_research():
+    """근거 URL을 들고 오면 사람 판정도 뒤집을 수 있다. 이력에 둘 다 남는다."""
+    latest = _latest(BUILDING, "imported")
+    ok, _ = should_record(latest, Judgment("준공 완료", "준공 보도", "news", "https://n/9"))
+    assert ok is True
