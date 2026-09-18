@@ -456,3 +456,71 @@ def test_conflict_never_changes_the_dates():
     dates = ("2025-11-03", "2026-01-01")
     date_conflict(BEFORE, dates, "2026-09-18")
     assert dates == ("2025-11-03", "2026-01-01")
+
+
+# --- Fix round 2: I4 — 공사는 거꾸로 가지 않는다 ---
+
+
+def test_news_judgment_does_not_walk_a_project_back_to_design_stage():
+    """버그 재현 — 이관된 '시공 중'을 뉴스발 '착공 전'이 밀어낸다.
+
+    착공 전 → 시공 중 → 준공 완료는 한 방향이다. 뒤로 가는 판정은 세상이
+    변한 게 아니라 기계가 틀린 것이다. 사람이 현장에서 확인한 '시공 중'이
+    설계 공모 시절 기사 한 건 때문에 화면에서 사라지면 순손실이다.
+    """
+    latest = _latest(BUILDING, "imported", reason="현장 확인")
+    ok, why = should_record(latest, Judgment(BEFORE, "설계·공모 단계 보도", "news", "https://n/d"))
+    assert ok is False
+    assert why
+
+
+def test_completed_project_is_not_walked_back_to_under_construction():
+    latest = _latest(DONE, "news", reason="준공 보도")
+    ok, _ = should_record(latest, Judgment(BUILDING, "기공식 보도", "news", "https://n/1"))
+    assert ok is False
+
+
+def test_backward_guard_does_not_care_who_decided_it():
+    """decided_by를 가리지 않는다 — LLM이든 사람이든 후퇴는 후퇴다."""
+    latest = _latest(DONE, "imported", reason="현장 확인")
+    ok, _ = should_record(latest, Judgment(BEFORE, "설계 단계로 본다", "llm", "https://n/x"))
+    assert ok is False
+
+
+def test_forward_moves_still_record_regardless_of_who_decided_them():
+    """반대 방향 — 앞으로 가는 판정은 그대로 기록된다. 가드가 과해지면 안 된다."""
+    forward = (
+        (BEFORE, BUILDING, "기공식 보도"),
+        (BUILDING, DONE, "준공 보도"),
+        (BEFORE, DONE, "준공 보도"),
+    )
+    for was, now, reason in forward:
+        for decided_by in ("news", "llm", "imported"):
+            latest = _latest(was, "imported", reason="앞선 판정")
+            ok, why = should_record(latest, Judgment(now, reason, decided_by, "https://n/1"))
+            assert ok is True, f"{was} → {now} ({decided_by})가 막혔다: {why}"
+
+
+def test_backward_guard_leaves_the_unknown_guard_alone():
+    """미확인은 단계가 아니다 — 8fc38f9의 가드가 그대로 처리한다."""
+    latest = _latest(BUILDING, "imported")
+    ok, why = should_record(latest, Judgment(UNKNOWN, "관련 신호 없음", "news", ""))
+    assert ok is False
+    assert "미확인" in why
+
+
+def test_a_project_may_move_off_unknown_in_either_direction():
+    """미확인은 순서 밖이라 미확인에서 나가는 길은 막지 않는다."""
+    for verdict in (BEFORE, BUILDING, DONE):
+        latest = _latest(UNKNOWN, "news", reason="관련 신호 없음")
+        ok, _ = should_record(latest, Judgment(verdict, "새 근거", "news", "https://n/1"))
+        assert ok is True
+
+
+def test_backward_guard_ignores_verdicts_outside_the_ordering():
+    """모르는 판정 문자열(오타 등)이 앞에 있으면 순서를 잴 수 없다 — 다른 가드에 맡긴다."""
+    ok, _ = should_record(
+        {"verdict": "시공중", "decided_by": "news", "reason": "오타"},
+        Judgment(BEFORE, "설계 보도", "news", "https://n/d"),
+    )
+    assert ok is True

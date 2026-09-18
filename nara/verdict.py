@@ -7,6 +7,15 @@ BUILDING = "시공 중"
 DONE = "준공 완료"
 UNKNOWN = "미확인"
 
+# 공사 단계의 순서. 미확인은 여기 없다 — 단계가 아니라 '모른다'는 말이라
+# 앞뒤를 잴 수 없다. 그 경우는 아래 미확인 가드가 따로 맡는다.
+_STAGES = (BEFORE, BUILDING, DONE)
+
+
+def _stage(verdict: str) -> int | None:
+    """단계 번호. 미확인이거나 모르는 문자열(오타 등)이면 None."""
+    return _STAGES.index(verdict) if verdict in _STAGES else None
+
 
 @dataclass(frozen=True)
 class Judgment:
@@ -45,6 +54,21 @@ def should_record(latest: dict | None, candidate: Judgment) -> tuple[bool, str]:
     # 애매하다는 이유로 이관된 '시공 중'이 화면에서 사라져선 안 된다.
     if candidate.verdict == UNKNOWN and latest.get("verdict") != UNKNOWN:
         return False, (f"'{latest.get('verdict')}' 판정이 있는데 '미확인'은 그것을 밀어내지 않는다")
+
+    # 공사는 거꾸로 가지 않는다. 착공 전 → 시공 중 → 준공 완료는 한
+    # 방향이라, 뒤로 가는 판정은 세상이 변한 게 아니라 기계가 틀린 것이다.
+    # decided_by를 가리지 않는다 — 누가 내렸든 후퇴는 후퇴다. 앞의 두
+    # 가드보다 뒤에 두는 이유: 셋 다 False만 돌려주므로 순서는 판단이
+    # 아니라 사유 문구만 바꾼다. 더 좁고 구체적인 앞의 두 가드가 먼저
+    # 제 문구로 답하게 두고, 이 가드는 그 둘이 안 잡은 후퇴만 받는다.
+    # 틀렸을 때의 대가: 사람이 잘못 넣은 앞 단계 판정이 뉴스로 교정되지
+    # 않는다 — doctor가 계속 잡고, 사람이 고칠 수 있다.
+    was, now = _stage(latest.get("verdict", "")), _stage(candidate.verdict)
+    if was is not None and now is not None and now < was:
+        return False, (
+            f"'{latest.get('verdict')}'에서 '{candidate.verdict}'로는 되돌아가지 않는다 "
+            f"— 공사는 거꾸로 가지 않는다"
+        )
 
     return True, ""
 

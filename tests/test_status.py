@@ -804,3 +804,37 @@ def test_update_statuses_does_not_count_a_successful_search_as_a_failure(conn):
     got = _run(conn, search=lambda *a, **k: found)
     assert got.searched == 1
     assert got.search_failed == 0
+
+
+# --- Fix round 2: I4 — 후퇴 판정은 화면의 최신 행이 되지 않는다 ---
+
+
+def test_update_statuses_does_not_let_news_walk_back_an_imported_verdict(conn):
+    """이관된 '시공 중'이 설계 시절 기사 한 건에 밀려 화면에서 사라지면 안 된다.
+
+    152건은 사람이 현장을 확인해 넣은 값이다. 화면은 최신 행만 보므로,
+    뒤로 간 판정이 한 줄 쌓이는 순간 그 조사 결과가 없어진 것과 같다.
+    """
+    project_id = _project(conn, "전북특별자치도 완주군", "완주군 종합사회복지관")
+    conn.execute(
+        "INSERT INTO status_check (project_id, verdict, reason, decided_by, checked_at) "
+        "VALUES (?, ?, '현장 확인', 'imported', '2026-09-16T10:00:00')",
+        (project_id, BUILDING),
+    )
+    conn.commit()
+    design_news = SearchResult(
+        articles=[
+            Article("완주군 종합사회복지관 설계 공모 당선작", "", "https://n/d", "2026-09-10")
+        ],
+        searched=True,
+    )
+
+    got = _run(conn, search=lambda *a, **k: design_news)
+
+    assert got.recorded == 0
+    assert got.skipped == 1
+    latest = conn.execute(
+        "SELECT verdict, decided_by FROM status_check ORDER BY checked_at DESC, id DESC LIMIT 1"
+    ).fetchone()
+    assert latest["verdict"] == BUILDING
+    assert latest["decided_by"] == "imported"
