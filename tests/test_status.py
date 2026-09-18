@@ -537,3 +537,126 @@ def test_update_statuses_reports_that_it_never_searched(conn):
 def test_update_statuses_rejects_nonpositive_limit(conn):
     with pytest.raises(ValueError):
         _run(conn, limit=0)
+
+
+# --- Fix round 1/5: R30/R31/R32 ---
+
+
+def test_update_statuses_isolates_a_failing_project_and_continues(conn):
+    """한 건이 터져도 회차 전체가 죽지 않는다(R30/F1).
+
+    셋 중 가운데(사업 1)가 터지는 상황을 그대로 재현한다. 나머지 둘은
+    판정되고 기록돼야 하고, 실패는 counters.failed로 드러나야 한다 —
+    조용히 죽어 뒤에 있는 건강한 사업들을 영영 건드리지 못하면 안 된다.
+    """
+    ids = [_project(conn, "전북특별자치도 완주군", f"사업 {i}") for i in range(3)]
+
+    def flaky_search(secrets, query):
+        if "사업 1" in query:
+            raise RuntimeError("boom")
+        return _no_search(secrets, query)
+
+    counters = RunCounters()
+    got = update_statuses(
+        conn,
+        SECRETS,
+        "2026-09-18",
+        tier=None,
+        limit=100,
+        counters=counters,
+        search=flaky_search,
+        adjudicator=_no_llm,
+    )
+
+    assert got.checked == 3
+    assert counters.failed == 1
+    recorded_ids = {
+        r["project_id"] for r in conn.execute("SELECT project_id FROM status_check").fetchall()
+    }
+    assert recorded_ids == {ids[0], ids[2]}
+
+
+def test_update_statuses_counts_a_search_that_ran_even_without_changing_the_verdict(conn):
+    """검색이 실제로 실행됐으면 판정이 안 바뀌어도 searched를 센다(R31/F2).
+
+    이전 버전은 decided_by가 'news'일 때만 셌다 — 검색은 했지만 무관한
+    기사라 규칙 판정을 그대로 둔 경우(judge_project의 F2 분기)는 세지
+    못했다. 실제로 일어난 일을 그대로 세야 한다."""
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+    _add_notice(conn, project_id, "R1", open_date="2026-08-01")
+    _add_award(conn, "R1", "가건축")
+    calls = []
+
+    def counting_search(*args, **kwargs):
+        calls.append(1)
+        return SearchResult(
+            articles=[
+                Article("완주군수 신년사", "새해 인사말씀 드립니다", "https://n/9", "2026-01-01")
+            ],
+            searched=True,
+        )
+
+    got = _run(conn, search=counting_search)
+
+    assert len(calls) == 1
+    assert got.searched == 1
+
+
+def test_update_statuses_counts_every_adjudicator_call_even_when_it_cannot_answer(conn):
+    """LLM을 실제로 불렀으면 답을 못 줘도 asked_llm을 센다(R31/F2)."""
+    _project(conn, "전북특별자치도 완주군", "완주군 다목적체육관")
+    found = SearchResult(
+        articles=[
+            Article("완주군 다목적체육관 2026년 9월 착공 예정", "", "https://n/2", "2026-08-01")
+        ],
+        searched=True,
+    )
+    calls = []
+
+    def counting_llm(*args, **kwargs):
+        calls.append(1)
+        return None
+
+    got = _run(conn, search=lambda *a, **k: found, adjudicator=counting_llm)
+
+    assert len(calls) == 1
+    assert got.asked_llm == 1
+
+
+def test_update_statuses_counts_llm_calls_that_return_no_answer(conn):
+    """adjudicator가 None을 돌려주면 llm_unanswered로 남는다(R32/F3).
+
+    CLI가 'LLM 판정 0건'(안 물어봤다)과 '물어봤지만 답을 못 받았다'를
+    구분할 수 있어야 요청 형태가 실제 API와 안 맞을 때 조용히 미확인으로
+    묻히지 않는다."""
+    _project(conn, "전북특별자치도 완주군", "완주군 다목적체육관")
+    found = SearchResult(
+        articles=[
+            Article("완주군 다목적체육관 2026년 9월 착공 예정", "", "https://n/2", "2026-08-01")
+        ],
+        searched=True,
+    )
+
+    got = _run(conn, search=lambda *a, **k: found, adjudicator=_no_llm)
+
+    assert got.asked_llm == 1
+    assert got.llm_unanswered == 1
+
+
+def test_update_statuses_does_not_count_llm_unanswered_when_it_answers(conn):
+    """답을 받았으면 llm_unanswered는 그대로 0이다 — 판정 변경 여부와 무관하다."""
+    _project(conn, "전북특별자치도 완주군", "완주군 다목적체육관")
+    found = SearchResult(
+        articles=[
+            Article("완주군 다목적체육관 2026년 9월 착공 예정", "", "https://n/2", "2026-08-01")
+        ],
+        searched=True,
+    )
+
+    def adjudicator(*args, **kwargs):
+        return BEFORE, "기사가 예정이라고 적었다"
+
+    got = _run(conn, search=lambda *a, **k: found, adjudicator=adjudicator)
+
+    assert got.asked_llm == 1
+    assert got.llm_unanswered == 0

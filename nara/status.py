@@ -155,7 +155,46 @@ class StatusRun:
     skipped: int = 0
     searched: int = 0
     asked_llm: int = 0
+    llm_unanswered: int = 0
     stopped_early: bool = False
+
+
+class _CallTracker:
+    """search·adjudicator가 실제로 불렸는지 셈한다(R31).
+
+    judge_project는 규칙 → 뉴스 → LLM 순으로 내려가며 필요할 때만 이
+    콜백을 부른다. run_log는 이 무인 시스템이 실제로 한 일에 대한 유일한
+    사후 기록이라, '판정이 바뀌었을 때'가 아니라 '실제로 호출됐을 때'를
+    세야 한다 — 그래야 검색·LLM 호출 건수가 실제 호출 횟수와 어긋나지
+    않는다.
+    """
+
+    def __init__(
+        self,
+        search: Callable[..., SearchResult],
+        adjudicator: Callable[..., tuple[str, str] | None],
+    ) -> None:
+        self._search = search
+        self._adjudicator = adjudicator
+        self.searched = False
+        self.llm_called = False
+        self.llm_unanswered = False
+
+    def search(self, *args, **kwargs) -> SearchResult:
+        result = self._search(*args, **kwargs)
+        # found.searched로 판단한다 — 이 콜백은 judge_project가 매 사업마다
+        # 무조건 부르므로, '불렸는가'가 아니라 '실제로 검색이 실행됐는가'를
+        # 봐야 한다(키가 없어 건너뛴 경우와 구분).
+        if result.searched:
+            self.searched = True
+        return result
+
+    def adjudicator(self, *args, **kwargs) -> tuple[str, str] | None:
+        self.llm_called = True
+        answer = self._adjudicator(*args, **kwargs)
+        if answer is None:
+            self.llm_unanswered = True
+        return answer
 
 
 def _latest(conn: sqlite3.Connection, project_id: int) -> dict | None:
@@ -189,6 +228,9 @@ def update_statuses(
 
     시간 예산을 넘기면 처리한 만큼 저장하고 멈춘다 — 다음 회차가 남은
     대상을 이어받는다. 행마다 커밋해 중간에 터져도 거기까지는 남는다.
+    사업 한 건이 죽어도(R30) 나머지는 계속 본다 — 그 건은 checked_at이
+    안 남으므로 '오래 안 본 사업부터' 정렬 덕에 다음 회차 맨 앞에서
+    다시 시도된다.
     """
     rows = pending_status_projects(conn, tier, limit)
     run = StatusRun()
@@ -201,11 +243,22 @@ def update_statuses(
 
         counters.processed += 1
         run.checked += 1
-        judgment = judge_project(conn, row, secrets, today, search, adjudicator)
-        if judgment.decided_by in ("news", "llm"):
+        tracker = _CallTracker(search, adjudicator)
+        try:
+            judgment = judge_project(conn, row, secrets, today, tracker.search, tracker.adjudicator)
+        except Exception:
+            # nara/award.py의 update_awards와 같은 모양이다 — 한 건이
+            # 터져도 나머지 대기 건을 계속 본다. KeyboardInterrupt·
+            # SystemExit은 Exception이 아니라 여기서 삼켜지지 않는다.
+            counters.failed += 1
+            continue
+
+        if tracker.searched:
             run.searched += 1
-        if judgment.decided_by == "llm":
+        if tracker.llm_called:
             run.asked_llm += 1
+            if tracker.llm_unanswered:
+                run.llm_unanswered += 1
 
         ok, _ = should_record(_latest(conn, row["id"]), judgment)
         if not ok:
