@@ -81,3 +81,82 @@ def test_search_news_falls_back_to_portal_link_when_original_is_missing():
     with _client(lambda r: httpx.Response(200, json=payload)) as client:
         got = search_news(client, KEYED, "q")
     assert got.articles[0].url == "https://n.news.naver.com/a"
+
+
+# --- Fix round 1: F1 — HTTP 200이어도 본문이 JSON이 아니면 예외가 새면 안 된다 ---
+
+
+def test_search_news_surfaces_non_json_body_without_raising():
+    """200인데 본문이 HTML(장애 안내 등)이면 예외를 던지지 않고 note로 알린다."""
+    with _client(lambda r: httpx.Response(200, text="<html>Service Unavailable</html>")) as client:
+        got = search_news(client, KEYED, "q")
+    assert got.searched is False
+    assert got.articles == []
+    assert "Service Unavailable" in got.note
+
+
+# --- Fix round 1: F2 — 200 + 오류/이상 페이로드가 진짜 0건과 구분돼야 한다 ---
+
+
+def test_search_news_reports_naver_error_payload_without_pretending_to_have_searched():
+    """키가 틀렸을 때 네이버가 돌려주는 200 + errorCode 페이로드는 검색 실패다."""
+    payload = {"errorCode": "024", "errorMessage": "Not Exist Client ID"}
+    with _client(lambda r: httpx.Response(200, json=payload)) as client:
+        got = search_news(client, KEYED, "q")
+    assert got.searched is False
+    assert got.articles == []
+    assert "024" in got.note
+    assert "Not Exist Client ID" in got.note
+
+
+def test_search_news_reports_null_items_without_pretending_to_have_searched():
+    """items가 null이면 '0건'이 아니라 '검색 안 됨'이다."""
+    with _client(lambda r: httpx.Response(200, json={"items": None})) as client:
+        got = search_news(client, KEYED, "q")
+    assert got.searched is False
+    assert got.articles == []
+    assert got.note
+
+
+def test_search_news_reports_missing_items_key_without_pretending_to_have_searched():
+    """items 키 자체가 없으면 '0건'이 아니라 '검색 안 됨'이다."""
+    payload = {"lastBuildDate": "Thu, 28 Aug 2026"}
+    with _client(lambda r: httpx.Response(200, json=payload)) as client:
+        got = search_news(client, KEYED, "q")
+    assert got.searched is False
+    assert got.articles == []
+    assert got.note
+
+
+def test_search_news_treats_genuinely_empty_items_as_a_real_zero_result():
+    """items가 빈 리스트인 진짜 0건은 위 세 경우와 달리 searched=True다."""
+    with _client(lambda r: httpx.Response(200, json={"items": []})) as client:
+        got = search_news(client, KEYED, "q")
+    assert got.searched is True
+    assert got.articles == []
+
+
+# --- Fix round 1: F3 — <b> 태그만 벗긴다. 다른 꺾쇠는 기사 내용이다 ---
+
+
+def test_search_news_still_strips_b_tags():
+    payload = {"items": [dict(PAYLOAD["items"][0], title="<b>기공식</b> 개최", description="")]}
+    with _client(lambda r: httpx.Response(200, json=payload)) as client:
+        got = search_news(client, KEYED, "q")
+    assert got.articles[0].title == "기공식 개최"
+
+
+def test_search_news_keeps_non_b_angle_brackets_as_article_content():
+    payload = {
+        "items": [
+            dict(
+                PAYLOAD["items"][0],
+                title="완주군 복지관 면적 <300㎡로 확장> 준공식",
+                description="예산 3억<원> 증액",
+            )
+        ]
+    }
+    with _client(lambda r: httpx.Response(200, json=payload)) as client:
+        got = search_news(client, KEYED, "q")
+    assert got.articles[0].title == "완주군 복지관 면적 <300㎡로 확장> 준공식"
+    assert got.articles[0].body == "예산 3억<원> 증액"

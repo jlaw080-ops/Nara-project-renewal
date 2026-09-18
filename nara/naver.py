@@ -11,7 +11,9 @@ from nara.config import Secrets
 from nara.verdict import Article
 
 ENDPOINT = "https://openapi.naver.com/v1/search/news.json"
-_TAG = re.compile(r"<[^>]+>")
+# 네이버가 실제로 섞어 보내는 건 검색어 강조용 <b> 태그뿐이다. 그 외 꺾쇠는
+# 기사 본문 내용일 수 있어(R20) 일반 태그 제거로 지우지 않는다.
+_B_TAG = re.compile(r"</?b>", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -22,8 +24,12 @@ class SearchResult:
 
 
 def _plain(raw: str) -> str:
-    """네이버는 <b> 태그와 HTML 엔티티를 섞어 보낸다. 둘 다 벗긴다."""
-    return html.unescape(_TAG.sub("", raw or "")).strip()
+    """네이버는 <b> 태그와 HTML 엔티티를 섞어 보낸다. 둘 다 벗긴다.
+
+    <b> 태그만 벗긴다 — 다른 꺾쇠(<원>, <300㎡로 확장> 등)는 기사 본문의
+    일부라 지우면 내용이 사라진다. 보이는 쪽이 사라지는 쪽보다 낫다.
+    """
+    return html.unescape(_B_TAG.sub("", raw or "")).strip()
 
 
 def _iso(pub_date: str) -> str:
@@ -56,7 +62,24 @@ def search_news(
     if response.status_code != 200:
         return SearchResult(note=f"뉴스 검색 실패: HTTP {response.status_code}")
 
-    items = response.json().get("items") or []
+    try:
+        payload = response.json()
+    except ValueError:
+        # HTTP 200이어도 본문이 JSON이 아닐 수 있다(예: 장애 안내 HTML).
+        # g2b/common.py의 check_response와 같은 방식으로 본문 앞부분을 남긴다.
+        return SearchResult(note=f"뉴스 검색 실패: 응답이 JSON이 아님: {response.text[:200]}")
+
+    if payload.get("errorCode") or payload.get("errorMessage"):
+        code = payload.get("errorCode", "")
+        message = payload.get("errorMessage", "")
+        return SearchResult(note=f"뉴스 검색 실패: {code} {message}".strip())
+
+    items = payload.get("items")
+    if not isinstance(items, list):
+        # items가 아예 없거나(필드 누락·None) 리스트가 아니면 '진짜 0건'과
+        # 구분할 수 없다(R21). 이때는 검색이 안 된 것으로 취급한다.
+        return SearchResult(note=f"뉴스 검색 실패: 응답에 items가 없음: {response.text[:200]}")
+
     articles = [
         Article(
             title=_plain(item.get("title", "")),
