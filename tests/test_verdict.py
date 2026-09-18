@@ -387,6 +387,41 @@ def test_should_record_guard_ignores_evidence_url_on_rule_candidate():
     assert ok is False
 
 
+def test_unknown_news_judgment_does_not_bury_imported_construction():
+    """버그 재현 — LLM 미응답으로 나온 뉴스발 '미확인'이 이관된 '시공 중'을 밀어내면 안 된다.
+
+    judge_project는 needs_llm=True인데 adjudicator가 None을 돌려주면
+    decided_by='news'·verdict=미확인인 채로 남는다. 그 한 건이 152건 중
+    사람이 현장 확인한 '시공 중'을 화면에서 지우는 것은 순손실이다.
+    """
+    latest = _latest(BUILDING, "imported")
+    ok, why = should_record(latest, Judgment(UNKNOWN, "관련 신호 없음", "news", ""))
+    assert ok is False
+    assert "미확인" in why
+
+
+def test_unknown_news_judgment_does_not_bury_previous_news_construction():
+    """규칙 판정 가드와 달리 decided_by를 가리지 않는다 — 뉴스가 뉴스를 덮을 때도 막는다."""
+    latest = _latest(BUILDING, "news")
+    ok, why = should_record(latest, Judgment(UNKNOWN, "관련 신호 없음", "news", ""))
+    assert ok is False
+    assert "미확인" in why
+
+
+def test_definite_news_judgment_still_overwrites_earlier_construction():
+    """반대 방향 — 근거 있는 확정 판정은 새 가드에 막히지 않고 그대로 갱신된다."""
+    latest = _latest(BUILDING, "news")
+    ok, _ = should_record(latest, Judgment(DONE, "준공 보도", "news", "https://n/9"))
+    assert ok is True
+
+
+def test_unknown_judgment_records_when_reason_changes():
+    """반대 방향 — 미확인끼리도 사유가 바뀌면(다른 애매함) 기록한다."""
+    latest = _latest(UNKNOWN, "news", reason="관련 신호 없음")
+    ok, _ = should_record(latest, Judgment(UNKNOWN, "기사 연도가 사업 일정과 어긋남", "news", ""))
+    assert ok is True
+
+
 def test_conflict_when_before_construction_but_start_date_has_passed():
     """'착공 전'인데 시트의 착공일이 이미 지났다 — 둘 중 하나가 틀렸다."""
     note = date_conflict(BEFORE, ("2025-11-03", ""), "2026-09-18")

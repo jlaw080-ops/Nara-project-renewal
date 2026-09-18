@@ -37,6 +37,15 @@ def should_record(latest: dict | None, candidate: Judgment) -> tuple[bool, str]:
             f"근거를 보고 내린 '{latest.get('verdict')}' 판정을 규칙 판정으로 밀어내지 않는다"
         )
 
+    # 미확인은 이미 있는 판정을 덮지 않는다 — 위 규칙 판정 가드와 달리
+    # decided_by를 가리지 않는다. '모른다'는 '안다'보다 정보가 적어서,
+    # 누가 내렸든 미확인이 알려진 판정 위에 쌓이면 순손실이다. 대표 사례:
+    # judge_project가 needs_llm=True인데 LLM이 응답하지 않아
+    # decided_by="news"·verdict=미확인을 돌려주는 경우 — 뉴스 한 건이
+    # 애매하다는 이유로 이관된 '시공 중'이 화면에서 사라져선 안 된다.
+    if candidate.verdict == UNKNOWN and latest.get("verdict") != UNKNOWN:
+        return False, (f"'{latest.get('verdict')}' 판정이 있는데 '미확인'은 그것을 밀어내지 않는다")
+
     return True, ""
 
 
