@@ -764,3 +764,43 @@ def test_update_statuses_does_not_count_llm_unanswered_when_it_answers(conn):
 
     assert got.asked_llm == 1
     assert got.llm_unanswered == 0
+
+
+# --- Fix round 2: I1 — 검색 실패 건수를 회차가 들고 나온다 ---
+
+
+def test_update_statuses_counts_searches_that_failed(conn):
+    """뉴스 검색이 실패한 건수를 회차가 들고 나와야 한다.
+
+    실패가 status_check.reason 안의 문자열 조각으로만 남으면 무인 실행에서
+    아무도 못 본다 — 호출부가 셀 수 있는 숫자로 내놓아야 stderr로 말할 수
+    있다.
+    """
+    for i in range(3):
+        _project(conn, "전북특별자치도 완주군", f"사업 {i}")
+
+    def failing_search(*args, **kwargs):
+        return SearchResult(note="뉴스 검색 실패: HTTP 401", failed=True)
+
+    got = _run(conn, search=failing_search)
+
+    assert got.checked == 3
+    assert got.search_failed == 3
+    assert got.searched == 0
+
+
+def test_update_statuses_does_not_count_a_skipped_search_as_a_failure(conn):
+    """키가 없어 건너뛴 회차는 실패 0건이다 — CLI가 이미 따로 안내한다."""
+    _project(conn, "전북특별자치도 완주군", "사업")
+    assert _run(conn).search_failed == 0
+
+
+def test_update_statuses_does_not_count_a_successful_search_as_a_failure(conn):
+    _project(conn, "전북특별자치도 완주군", "완주군 종합사회복지관")
+    found = SearchResult(
+        articles=[Article("완주군 종합사회복지관 기공식", "", "https://n/1", "2026-08-28")],
+        searched=True,
+    )
+    got = _run(conn, search=lambda *a, **k: found)
+    assert got.searched == 1
+    assert got.search_failed == 0

@@ -169,3 +169,56 @@ def test_enrich_status_warns_when_llm_answers_go_missing(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "LLM에 물었으나 답을 못 받은 건" in result.output
     assert "1건" in result.output
+
+
+# --- Fix round 2: I1 — 네이버 검색 실패는 화면에 나와야 한다 ---
+
+
+def test_enrich_status_warns_when_news_searches_failed(tmp_path, monkeypatch):
+    """I1: 401로 검색이 전부 실패해도 예전에는 stderr 한 줄 없었다.
+
+    유일한 흔적이 status_check.reason 안의 문자열 조각이었다 — 무인 스케줄
+    실행에서는 아무도 안 읽는다. LLM 무응답에는 R25 경고가 있는데 네이버에는
+    대칭이 없었다.
+
+    가짜 결과로 update_statuses를 통째로 바꿔치기하지 않는다. 진짜
+    파이프라인을 그대로 두고 search_news만 401로 만들어, 실패 건수가 실제로
+    만들어져 올라오는지까지 확인한다.
+    """
+    from nara.naver import SearchResult
+
+    monkeypatch.setattr(
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x",
+            naver_client_id="id",
+            naver_client_secret="sec",
+            anthropic_api_key=None,
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "search_news",
+        lambda client, secrets_, query: SearchResult(note="뉴스 검색 실패: HTTP 401", failed=True),
+    )
+
+    result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path, projects=2))])
+
+    assert result.exit_code == 0
+    assert "뉴스 검색에 실패한 건" in result.output
+    assert "2건" in result.output
+
+
+def test_enrich_status_stays_quiet_when_no_news_search_failed(tmp_path, monkeypatch):
+    """반대 방향 — 실패가 없으면 그 경고를 내지 않는다. 키가 없어 건너뛴 것은 실패가 아니다."""
+    monkeypatch.setattr(
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+        ),
+    )
+    result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path))])
+    assert result.exit_code == 0
+    assert "뉴스 검색에 실패한 건" not in result.output

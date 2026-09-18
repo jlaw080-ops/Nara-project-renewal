@@ -166,6 +166,7 @@ class StatusRun:
     recorded: int = 0
     skipped: int = 0
     searched: int = 0
+    search_failed: int = 0
     asked_llm: int = 0
     llm_unanswered: int = 0
     stopped_early: bool = False
@@ -189,6 +190,7 @@ class _CallTracker:
         self._search = search
         self._adjudicator = adjudicator
         self.searched = False
+        self.search_failed = False
         self.llm_called = False
         self.llm_unanswered = False
 
@@ -199,6 +201,10 @@ class _CallTracker:
         # 봐야 한다(키가 없어 건너뛴 경우와 구분).
         if result.searched:
             self.searched = True
+        # 실패는 따로 센다 — 이 값이 없으면 실패 흔적이 reason 문자열
+        # 조각으로만 남아 무인 실행에서 아무도 못 본다(I1).
+        if result.failed:
+            self.search_failed = True
         return result
 
     def adjudicator(self, *args, **kwargs) -> tuple[str, str] | None:
@@ -274,6 +280,8 @@ def update_statuses(
 
         if tracker.searched:
             run.searched += 1
+        if tracker.search_failed:
+            run.search_failed += 1
         if tracker.llm_called:
             run.asked_llm += 1
             if tracker.llm_unanswered:

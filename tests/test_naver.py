@@ -175,3 +175,41 @@ def test_search_news_keeps_non_b_angle_brackets_as_article_content():
         got = search_news(client, KEYED, "q")
     assert got.articles[0].title == "완주군 복지관 면적 <300㎡로 확장> 준공식"
     assert got.articles[0].body == "예산 3억<원> 증액"
+
+
+# --- Fix round 2: I1 — 검색 실패와 '키가 없어 건너뜀'은 서로 다른 일이다 ---
+
+
+def test_search_news_marks_an_http_failure_as_failed():
+    """실패는 failed로 표시한다 — 호출부가 note 문자열을 뒤지지 않게 한다."""
+    with _client(lambda r: httpx.Response(401, text="Unauthorized")) as client:
+        got = search_news(client, KEYED, "q")
+    assert got.searched is False
+    assert got.failed is True
+
+
+def test_search_news_does_not_mark_a_missing_key_as_a_failure():
+    """키가 없어 건너뛴 것은 실패가 아니다 — CLI가 이미 따로 안내한다.
+
+    이걸 실패로 세면 키 없는 회차마다 경고가 두 번 나와, 진짜 실패한 회차와
+    구분이 안 된다.
+    """
+    with _client(lambda r: httpx.Response(200, json=PAYLOAD)) as client:
+        got = search_news(client, KEYLESS, "q")
+    assert got.searched is False
+    assert got.failed is False
+
+
+def test_search_news_does_not_mark_a_successful_search_as_failed():
+    with _client(lambda r: httpx.Response(200, json=PAYLOAD)) as client:
+        got = search_news(client, KEYED, "q")
+    assert got.searched is True
+    assert got.failed is False
+
+
+def test_search_news_marks_an_error_payload_as_failed():
+    """200 + errorCode도 실패다 — HTTP 코드만 보면 놓친다."""
+    payload = {"errorCode": "024", "errorMessage": "Not Exist Client ID"}
+    with _client(lambda r: httpx.Response(200, json=payload)) as client:
+        got = search_news(client, KEYED, "q")
+    assert got.failed is True

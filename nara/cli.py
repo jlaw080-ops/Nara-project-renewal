@@ -200,6 +200,14 @@ def enrich_status(
     # 완전한 판정으로 착각하게 된다.
     for note in skipped:
         typer.echo(note, err=True)
+    # I1: 뉴스 검색 실패도 LLM 무응답과 똑같이 말한다. 401 하나로 전건이
+    # 실패해도 예전에는 stdout의 "실패 0건"과 exit 0뿐이었다 — 유일한 흔적이
+    # status_check.reason 안의 문자열 조각이라 무인 실행에서 아무도 못 읽었다.
+    if run.search_failed:
+        typer.echo(
+            f"뉴스 검색에 실패한 건 {run.search_failed}건 — 네이버 키나 네트워크를 확인한다",
+            err=True,
+        )
     # R25: Claude 키가 있을 때만 이 숫자가 의미를 갖는다 — 키가 없어 못
     # 부른 경우는 위 skipped 안내로 이미 보고했다. 요청 모양이 실제
     # API로 검증된 적이 없어, 키를 넣은 뒤 400을 받으면 애매한 건이

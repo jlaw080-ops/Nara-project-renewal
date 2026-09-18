@@ -18,8 +18,17 @@ _B_TAG = re.compile(r"</?b>", re.IGNORECASE)
 
 @dataclass(frozen=True)
 class SearchResult:
+    """`searched`와 `failed`는 서로 다른 일을 뜻한다 — 둘 다 False일 수 있다.
+
+    키가 없어 아예 안 부른 것은 실패가 아니다. 그 건은 CLI가 회차 첫머리에
+    따로 안내하므로, 실패로 세면 같은 사실을 두 번 말하면서 진짜 실패한
+    회차와 구분이 안 된다. 호출부가 note 문자열을 뒤져 둘을 가르지 않도록
+    여기서 표시해 둔다.
+    """
+
     articles: list[Article] = field(default_factory=list)
     searched: bool = False
+    failed: bool = False
     note: str = ""
 
 
@@ -57,17 +66,19 @@ def search_news(
             timeout=10.0,
         )
     except httpx.HTTPError as exc:
-        return SearchResult(note=f"뉴스 검색 실패: {exc}")
+        return SearchResult(failed=True, note=f"뉴스 검색 실패: {exc}")
 
     if response.status_code != 200:
-        return SearchResult(note=f"뉴스 검색 실패: HTTP {response.status_code}")
+        return SearchResult(failed=True, note=f"뉴스 검색 실패: HTTP {response.status_code}")
 
     try:
         payload = response.json()
     except ValueError:
         # HTTP 200이어도 본문이 JSON이 아닐 수 있다(예: 장애 안내 HTML).
         # g2b/common.py의 check_response와 같은 방식으로 본문 앞부분을 남긴다.
-        return SearchResult(note=f"뉴스 검색 실패: 응답이 JSON이 아님: {response.text[:200]}")
+        return SearchResult(
+            failed=True, note=f"뉴스 검색 실패: 응답이 JSON이 아님: {response.text[:200]}"
+        )
 
     if payload.get("errorCode") or payload.get("errorMessage"):
         code = payload.get("errorCode", "")
@@ -75,13 +86,15 @@ def search_news(
         # 다른 두 경로(JSON 아님·items 없음)와 같은 방식으로 본문 앞부분만 남긴다.
         # 벤더가 실어 보내는 문자열을 그대로 DB 컬럼에 무제한으로 태우지 않는다.
         detail = f"{code} {message}".strip()[:200]
-        return SearchResult(note=f"뉴스 검색 실패: {detail}")
+        return SearchResult(failed=True, note=f"뉴스 검색 실패: {detail}")
 
     items = payload.get("items")
     if not isinstance(items, list):
         # items가 아예 없거나(필드 누락·None) 리스트가 아니면 '진짜 0건'과
         # 구분할 수 없다(R21). 이때는 검색이 안 된 것으로 취급한다.
-        return SearchResult(note=f"뉴스 검색 실패: 응답에 items가 없음: {response.text[:200]}")
+        return SearchResult(
+            failed=True, note=f"뉴스 검색 실패: 응답에 items가 없음: {response.text[:200]}"
+        )
 
     articles = [
         Article(
