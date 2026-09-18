@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 from nara.config import Secrets
 from nara.naver import SearchResult
-from nara.verdict import UNKNOWN, Facts, Judgment, date_conflict, read_news, rule_verdict
+from nara.verdict import Facts, Judgment, date_conflict, read_news, rule_verdict
 
 
 def pending_status_projects(
@@ -86,16 +86,6 @@ def judge_project(
         reason = f"{reason} ({found.note})"
 
     conflict = date_conflict(verdict, dates, today)
-    if not conflict and verdict == UNKNOWN:
-        # date_conflict는 '착공 전'·'준공 완료' 주장과 시트 날짜가 어긋나는
-        # 경우만 본다. 미확인은 주장 자체가 없어 그 함수로는 못 잡지만,
-        # 시트 착공일·준공일이 이미 지났는데 근거가 하나도 없는 것 자체가
-        # 확인이 필요한 신호다. 조용히 넘어가지 않는다.
-        start, end = dates
-        if start and start <= today:
-            conflict = f"시트 착공일 {start}이 지났는데 근거가 없어 미확인 — 확인 필요"
-        elif end and end <= today:
-            conflict = f"시트 준공일 {end}이 지났는데 근거가 없어 미확인 — 확인 필요"
     if conflict:
         reason = f"{reason} / {conflict}"
 

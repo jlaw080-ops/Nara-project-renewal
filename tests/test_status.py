@@ -4,9 +4,10 @@ import pytest
 
 from nara.config import Secrets, load_settings
 from nara.db import connect, migrate
+from nara.g2b.list_api import NoticeItem
 from nara.naver import SearchResult
 from nara.status import judge_project, pending_status_projects
-from nara.store import ensure_project, upsert_org
+from nara.store import ensure_project, upsert_notice, upsert_org
 from nara.verdict import BEFORE, BUILDING, UNKNOWN, Article
 
 SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
@@ -35,6 +36,33 @@ def _checked(conn, project_id, when, verdict="미확인"):
         (project_id, verdict, when),
     )
     conn.commit()
+
+
+def _add_notice(conn, project_id, bid_no, open_date):
+    """rule_verdict가 개찰 근거로 볼 수 있도록 공고를 하나 붙인다.
+
+    tests/test_award.py의 _add_notice와 같은 구성 — 판정에 필요한 필드만
+    채운다.
+    """
+    org_id = conn.execute("SELECT org_id FROM project WHERE id = ?", (project_id,)).fetchone()[0]
+    item = NoticeItem(
+        bid_no=bid_no,
+        bid_ord="0",
+        org_name="",
+        title="공고",
+        service_div="기술용역",
+        kind="등록공고",
+        notice_date=open_date,
+        open_date=open_date,
+        close_date=open_date,
+        url="",
+        budget_krw=None,
+        budget_basis="",
+        officer_name="",
+        officer_tel="",
+        raw={},
+    )
+    upsert_notice(conn, item, org_id, project_id, NOW)
 
 
 def test_pending_prefers_projects_never_checked(conn):
@@ -218,13 +246,31 @@ def test_judge_stays_unknown_when_the_llm_cannot_answer(conn):
 
 
 def test_judge_records_the_date_conflict_in_the_reason(conn):
+    """개찰일이 지나 규칙이 '착공 전'이라 판정했는데 시트 착공일도 지났으면
+    불일치를 사유에 남긴다(date_conflict의 BEFORE 분기)."""
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+    _add_notice(conn, project_id, "R1", open_date="2025-10-20")
+    conn.execute("UPDATE project SET start_date = '2025-11-03' WHERE id = ?", (project_id,))
+    conn.commit()
+    got = judge_project(
+        conn, _row(conn, project_id), SECRETS, "2026-09-18", search=_no_search, adjudicator=_no_llm
+    )
+    assert got.verdict == BEFORE
+    assert "2025-11-03" in got.reason
+
+
+def test_judge_records_no_conflict_when_verdict_stays_unknown_despite_a_past_start_date(conn):
+    """미확인엔 근거가 없다 — 대조할 보도가 없으면 시트 착공일이 지났어도
+    불일치를 만들지 않는다(R26). 공고가 아예 없는 사업은 개찰 근거도 없어
+    '착공 전' 자체를 주장하지 않으므로 date_conflict가 볼 것이 없다."""
     project_id = _project(conn, "전북특별자치도 완주군", "사업")
     conn.execute("UPDATE project SET start_date = '2025-11-03' WHERE id = ?", (project_id,))
     conn.commit()
     got = judge_project(
         conn, _row(conn, project_id), SECRETS, "2026-09-18", search=_no_search, adjudicator=_no_llm
     )
-    assert "2025-11-03" in got.reason
+    assert got.verdict == UNKNOWN
+    assert "2025-11-03" not in got.reason
 
 
 def test_judge_never_changes_the_project_dates(conn):
