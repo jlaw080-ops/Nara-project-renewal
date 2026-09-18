@@ -1,4 +1,5 @@
 import anthropic
+import httpx2
 
 from nara.config import Secrets
 from nara.llm import adjudicate
@@ -69,6 +70,13 @@ def test_adjudicate_returns_none_when_the_api_fails():
     assert adjudicate(KEYED, "사업", ARTICLES, "질문", client=fake) is None
 
 
+def test_adjudicate_returns_none_when_the_response_fails_schema_validation():
+    """APIError의 형제가 아니라 자손 — 사슬을 좁게 잡으면 이런 것들이 빠져나간다."""
+    response = httpx2.Response(status_code=200, request=httpx2.Request("POST", "https://x"))
+    fake = _FakeClient(raises=anthropic.APIResponseValidationError(response=response, body=None))
+    assert adjudicate(KEYED, "사업", ARTICLES, "질문", client=fake) is None
+
+
 def test_adjudicate_uses_opus_5_with_adaptive_thinking_and_no_budget_tokens():
     fake = _FakeClient(_Response(f"{BUILDING}\n기공식 기사"))
     adjudicate(KEYED, "사업", ARTICLES, "질문", client=fake)
@@ -89,4 +97,11 @@ def test_adjudicate_puts_the_articles_in_the_prompt():
 def test_adjudicate_returns_none_on_refusal():
     response = _Response(f"{BUILDING}\n근거")
     response.stop_reason = "refusal"
+    assert adjudicate(KEYED, "사업", ARTICLES, "질문", client=_FakeClient(response)) is None
+
+
+def test_adjudicate_returns_none_when_truncated_by_max_tokens():
+    """판정 줄은 멀쩡해도 근거가 잘렸을 수 있다 — end_turn만 화이트리스트로 받는다."""
+    response = _Response(f"{BUILDING}\n근거가 중간에")
+    response.stop_reason = "max_tokens"
     assert adjudicate(KEYED, "사업", ARTICLES, "질문", client=_FakeClient(response)) is None

@@ -54,12 +54,14 @@ def adjudicate(
             output_config={"effort": "low"},
             messages=[{"role": "user", "content": _prompt(project_name, articles, question)}],
         )
-    except anthropic.APIStatusError:
-        return None
-    except anthropic.APIConnectionError:
+    except anthropic.APIError:
         return None
 
-    if getattr(response, "stop_reason", "") == "refusal":
+    # 화이트리스트: 자연 종료(end_turn)만 받아들인다. tool·정지 시퀀스를
+    # 쓰지 않으니 end_turn이 유일한 정상 종료다. refusal은 물론
+    # max_tokens(중간에 잘린 근거를 그대로 판정으로 쓰게 됨) 같은 낯선
+    # stop_reason도 전부 닫힌 쪽으로 실패한다.
+    if getattr(response, "stop_reason", "") != "end_turn":
         return None
 
     text = "".join(b.text for b in response.content if getattr(b, "type", "") == "text")
