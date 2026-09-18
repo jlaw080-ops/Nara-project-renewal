@@ -11,6 +11,7 @@ from nara.verdict import (
     Article,
     Facts,
     Judgment,
+    date_conflict,
     demote_without_evidence,
     read_news,
     read_signals,
@@ -342,3 +343,29 @@ def test_evidenced_judgment_may_overturn_human_research():
     latest = _latest(BUILDING, "imported")
     ok, _ = should_record(latest, Judgment("준공 완료", "준공 보도", "news", "https://n/9"))
     assert ok is True
+
+
+def test_conflict_when_before_construction_but_start_date_has_passed():
+    """'착공 전'인데 시트의 착공일이 이미 지났다 — 둘 중 하나가 틀렸다."""
+    note = date_conflict(BEFORE, ("2025-11-03", ""), "2026-09-18")
+    assert note and "착공" in note
+
+
+def test_no_conflict_when_before_construction_and_start_date_is_future():
+    assert date_conflict(BEFORE, ("2027-03-01", ""), "2026-09-18") is None
+
+
+def test_conflict_when_completed_but_end_date_is_future():
+    note = date_conflict(DONE, ("", "2029-01-30"), "2026-09-18")
+    assert note and "준공" in note
+
+
+def test_no_conflict_when_dates_are_blank():
+    assert date_conflict(BUILDING, ("", ""), "2026-09-18") is None
+
+
+def test_conflict_never_changes_the_dates():
+    """이 함수는 문자열만 돌려준다. 값을 고치는 경로가 아예 없다."""
+    dates = ("2025-11-03", "2026-01-01")
+    date_conflict(BEFORE, dates, "2026-09-18")
+    assert dates == ("2025-11-03", "2026-01-01")

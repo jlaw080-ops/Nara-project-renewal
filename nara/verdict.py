@@ -38,6 +38,20 @@ def should_record(latest: dict | None, candidate: Judgment) -> tuple[bool, str]:
     return True, ""
 
 
+def date_conflict(verdict: str, project_dates: tuple[str, str], today: str) -> str | None:
+    """판정과 사람이 넣은 날짜가 어긋나면 그 사실만 문장으로 돌려준다.
+
+    **날짜를 고치지 않는다.** 시트 값은 사용자가 넣은 자료이고, 어느 쪽이
+    맞는지는 담당부서에 물어야 안다.
+    """
+    start, end = project_dates
+    if verdict == BEFORE and start and start <= today:
+        return f"시트 착공일 {start}이 지났는데 판정은 착공 전 — 확인 필요"
+    if verdict == DONE and end and end > today:
+        return f"시트 준공일 {end}이 아직인데 판정은 준공 완료 — 확인 필요"
+    return None
+
+
 @dataclass(frozen=True)
 class Facts:
     """공고에서 바로 읽히는 사실만 담는다. 추정한 값은 넣지 않는다."""
