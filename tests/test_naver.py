@@ -109,6 +109,21 @@ def test_search_news_reports_naver_error_payload_without_pretending_to_have_sear
     assert "Not Exist Client ID" in got.note
 
 
+def test_search_news_truncates_oversized_error_message_to_the_same_bound_as_siblings():
+    """errorMessage가 5000자여도 note는 다른 두 경로와 같은 200자 발췌 한도를 지킨다."""
+    message = "A" * 5000
+    payload = {"errorCode": "024", "errorMessage": message}
+    with _client(lambda r: httpx.Response(200, json=payload)) as client:
+        got = search_news(client, KEYED, "q")
+    assert got.searched is False
+    assert message not in got.note
+    # "024 " + "A"*196 == 200자 발췌("024 " + message를 [:200]으로 자른 결과).
+    prefix_len = len("뉴스 검색 실패: ")
+    assert len(got.note) == prefix_len + 200
+    assert got.note.endswith("A" * 196)
+    assert "A" * 197 not in got.note
+
+
 def test_search_news_reports_null_items_without_pretending_to_have_searched():
     """items가 null이면 '0건'이 아니라 '검색 안 됨'이다."""
     with _client(lambda r: httpx.Response(200, json={"items": None})) as client:

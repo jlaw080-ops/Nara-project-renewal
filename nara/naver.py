@@ -72,7 +72,10 @@ def search_news(
     if payload.get("errorCode") or payload.get("errorMessage"):
         code = payload.get("errorCode", "")
         message = payload.get("errorMessage", "")
-        return SearchResult(note=f"뉴스 검색 실패: {code} {message}".strip())
+        # 다른 두 경로(JSON 아님·items 없음)와 같은 방식으로 본문 앞부분만 남긴다.
+        # 벤더가 실어 보내는 문자열을 그대로 DB 컬럼에 무제한으로 태우지 않는다.
+        detail = f"{code} {message}".strip()[:200]
+        return SearchResult(note=f"뉴스 검색 실패: {detail}")
 
     items = payload.get("items")
     if not isinstance(items, list):
