@@ -15,6 +15,7 @@ from nara.verdict import (
     Facts,
     Judgment,
     date_conflict,
+    demote_without_evidence,
     read_news,
     rule_verdict,
     should_record,
@@ -126,6 +127,14 @@ def judge_project(
             if answer is not None:
                 verdict, reason = answer
                 decided_by = "llm"
+                # 뉴스 경로와 같은 강등을 LLM 답에도 건다(C2). LLM은
+                # evidence_url을 만들어 내지 못하고, 여기서 남는 것은 뉴스가
+                # 고른 URL이다 — 그게 비어 있으면 '준공 완료'·'시공 중'은
+                # 근거 없는 주장이다. 뉴스에는 걸고 LLM에는 안 거는 비대칭이
+                # 곧 근거 없는 확신이 화면에 닿는 구멍이었다.
+                verdict, note = demote_without_evidence(verdict, evidence_url)
+                if note:
+                    reason = f"{reason} / {note}"
         elif news.verdict != UNKNOWN:
             verdict, reason, evidence_url, decided_by = (
                 news.verdict,

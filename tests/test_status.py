@@ -10,7 +10,7 @@ from nara.naver import SearchResult
 from nara.runlog import RunCounters
 from nara.status import judge_project, pending_status_projects, update_statuses
 from nara.store import ensure_project, upsert_notice, upsert_org
-from nara.verdict import BEFORE, BUILDING, UNKNOWN, Article
+from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN, Article
 
 SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
 NOW = "2026-09-18T09:00:00"
@@ -412,6 +412,58 @@ def test_judge_prefers_the_most_recent_past_opening_over_a_future_retender(conn)
     assert got.verdict == BEFORE
     assert "개찰일이 지났고 낙찰업체 미확인 — 설계 단계" in got.reason
     assert "건너뛰" in got.reason
+
+
+def test_judge_demotes_an_llm_verdict_that_has_no_evidence_url(conn):
+    """C2 — 근거 URL 없는 LLM '준공 완료'는 화면에 그대로 뜨면 안 된다.
+
+    demote_without_evidence는 뉴스 경로에만 걸려 있었다. LLM이 답하면
+    judge_project가 verdict·reason만 갈아치우고 evidence_url은 뉴스가
+    고른 것을 그대로 둔다 — 뉴스가 URL 없는 기사를 골랐으면 확신에 찬
+    '준공 완료'가 근거 한 줄 없이 나간다.
+    """
+    project_id = _project(conn, "전북특별자치도 완주군", "완주군 다목적체육관")
+    found = SearchResult(
+        # URL이 빈 기사 — needs_llm을 세우되 근거 URL은 남기지 않는다.
+        articles=[Article("완주군 다목적체육관 2026년 9월 착공 예정", "", "", "2026-08-01")],
+        searched=True,
+    )
+
+    got = judge_project(
+        conn,
+        _row(conn, project_id),
+        SECRETS,
+        "2026-09-18",
+        search=lambda *a, **k: found,
+        adjudicator=lambda *a, **k: (DONE, "준공했다고 본다"),
+    )
+
+    assert got.verdict == BEFORE
+    assert "근거 URL이 없어" in got.reason
+
+
+def test_judge_keeps_an_llm_verdict_that_has_a_real_evidence_url(conn):
+    """반대 방향 — 근거 URL이 있으면 강등하지 않는다. 가드가 과해지면 안 된다."""
+    project_id = _project(conn, "전북특별자치도 완주군", "완주군 다목적체육관")
+    found = SearchResult(
+        articles=[
+            Article("완주군 다목적체육관 2026년 9월 착공 예정", "", "https://n/2", "2026-08-01")
+        ],
+        searched=True,
+    )
+
+    got = judge_project(
+        conn,
+        _row(conn, project_id),
+        SECRETS,
+        "2026-09-18",
+        search=lambda *a, **k: found,
+        adjudicator=lambda *a, **k: (DONE, "준공 기사가 확실하다"),
+    )
+
+    assert got.verdict == DONE
+    assert got.decided_by == "llm"
+    assert got.evidence_url == "https://n/2"
 
 
 def test_judge_hands_the_opening_date_to_the_news_reader_as_an_anchor(conn):
