@@ -37,6 +37,7 @@ SIGNAL_DONE = "준공"
 SIGNAL_DESIGN = "설계"
 SIGNAL_DEMOLITION = "철거"
 SIGNAL_PLANNED = "예정"
+SIGNAL_HEDGE = "유보"
 
 # "해체"는 위원회 해체처럼 철거가 아닌 문맥도 잡아서 뺐다. 철거·멸실만 남긴다.
 _DEMOLITION_WORDS = ("철거", "멸실")
@@ -47,6 +48,26 @@ _DONE_WORDS = ("준공", "개관", "준공식", "운영 개시", "개원")
 # "실시설계"·"기본설계"는 "설계"의 부분 문자열이라 이미 잡힌다.
 _DESIGN_WORDS = ("설계", "공모", "당선작")
 _PLANNED_WORDS = ("예정", "목표", "계획", "추진")
+# 취소·지연·임박·재촉 표현. "예정"과는 뜻이 다르다 — 예정은 미래 일정 표기이고,
+# 이건 확정된 줄 알았던 착공·준공이 실제로는 엎어졌거나 미뤄졌을 가능성이다(R9/F1).
+_HEDGE_WORDS = (
+    "취소",
+    "무산",
+    "백지화",
+    "철회",
+    "보류",
+    "연기",
+    "지연",
+    "중단",
+    "중지",
+    "반려",
+    "불발",
+    "앞두고",
+    "임박",
+    "촉구",
+    "요구",
+    "건의",
+)
 
 
 @dataclass(frozen=True)
@@ -76,6 +97,8 @@ def read_signals(article: Article) -> frozenset[str]:
         found.add(SIGNAL_DESIGN)
     if any(w in text for w in _PLANNED_WORDS):
         found.add(SIGNAL_PLANNED)
+    if any(w in text for w in _HEDGE_WORDS):
+        found.add(SIGNAL_HEDGE)
     return frozenset(found)
 
 
@@ -117,6 +140,18 @@ def _far_from(published: str, dates: tuple[str, str]) -> bool:
     return min(abs(published_year - y) for y in years) > _YEAR_GAP
 
 
+def _pick_with_evidence(group: list[Article]) -> Article:
+    """근거 URL이 있는 기사를 먼저 고른다. 하나도 없으면 첫 기사를 돌려준다(F2/R10).
+
+    'group[0]'만 보면, 그 뒤에 근거 URL이 멀쩡한 같은 판정 기사가 있어도
+    URL 없는 첫 기사 때문에 착공 전으로 잘못 강등된다.
+    """
+    for article in group:
+        if (article.url or "").strip():
+            return article
+    return group[0]
+
+
 def read_news(articles: list[Article], project_dates: tuple[str, str]) -> NewsRead:
     """기사 묶음에서 판정을 읽는다. 애매하면 판정하지 않고 넘긴다.
 
@@ -147,6 +182,7 @@ def read_news(articles: list[Article], project_dates: tuple[str, str]) -> NewsRe
     starts = [a for a, s in signals if SIGNAL_START in s]
     dones = [a for a, s in signals if SIGNAL_DONE in s]
     planned = {a.url for a, s in signals if SIGNAL_PLANNED in s}
+    hedged = {a.url for a, s in signals if SIGNAL_HEDGE in s}
 
     if starts and dones:
         return NewsRead(
@@ -160,14 +196,20 @@ def read_news(articles: list[Article], project_dates: tuple[str, str]) -> NewsRe
     for group, strong, label in ((dones, DONE, "준공"), (starts, BUILDING, "착공·기공식")):
         if not group:
             continue
-        article = group[0]
+        article = _pick_with_evidence(group)
+        cues = []
         if article.url in planned:
+            cues.append("예정 표기")
+        if article.url in hedged:
+            cues.append("유보·취소성 표현")
+        if cues:
+            cue = " · ".join(cues)
             return NewsRead(
                 UNKNOWN,
-                f"{label} 예정 표기",
+                f"{label} {cue}",
                 article.url,
                 True,
-                f"{label}과 예정이 함께 쓰여 실제인지 불분명",
+                f"{label} 기사에 {cue}이 함께 쓰여 실제인지 불분명",
             )
         verdict, note = demote_without_evidence(strong, article.url)
         return NewsRead(verdict, note or f"{label} 보도", article.url, False, "")

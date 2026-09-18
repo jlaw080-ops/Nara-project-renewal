@@ -202,3 +202,48 @@ def test_read_news_defers_when_demolition_and_construction_start_collide():
 def test_read_news_never_returns_strong_verdict_without_evidence_url():
     got = read_news([_a("체육관 준공", url="")], ("", ""))
     assert got.verdict not in (BUILDING, DONE)
+
+
+def test_read_news_defers_when_start_is_hedged_by_cancellation():
+    """무산은 예정이 아니다 — 착공이 엎어졌다는 뜻이라 확정하면 대상에서 영영 빠진다(F1)."""
+    got = read_news([_a("주민 반발에 완주군 다목적체육관 착공 무산")], ("", ""))
+    assert got.needs_llm is True
+    assert got.verdict != BUILDING
+
+
+def test_read_news_defers_when_completion_is_hedged_by_suspension():
+    got = read_news([_a("완주군 종합사회복지관 준공 지연, 공사 중단")], ("", ""))
+    assert got.needs_llm is True
+    assert got.verdict != DONE
+
+
+def test_read_news_defers_when_completion_is_hedged_by_imminent_wording():
+    got = read_news([_a("순창군 동계면 종합체육관, 10월 준공 앞두고 마무리 공사 한창")], ("", ""))
+    assert got.needs_llm is True
+
+
+def test_read_news_defers_when_start_is_hedged_by_postponement():
+    got = read_news([_a("완주군 다목적체육관 착공 연기")], ("", ""))
+    assert got.needs_llm is True
+
+
+def test_read_news_defers_when_start_is_hedged_by_public_demand():
+    """주민 촉구는 아직 착공하지 않았다는 신호다 — 확정하면 안 된다."""
+    got = read_news([_a("주민들 조속한 착공 촉구")], ("", ""))
+    assert got.needs_llm is True
+
+
+def test_read_news_still_confirms_clean_groundbreaking_report():
+    """유보 낱말이 없는 깨끗한 기공식 기사는 과교정 없이 그대로 확정해야 한다."""
+    got = read_news([_a("완주군 종합사회복지관 기공식 개최")], ("", ""))
+    assert got.verdict == BUILDING
+    assert got.needs_llm is False
+
+
+def test_read_news_picks_article_with_evidence_url_over_urlless_first_match():
+    """같은 판정 그룹 안에서 URL 없는 첫 기사 때문에 뒤의 근거 있는 기사를 놓치면 안 된다(F2)."""
+    first = Article("체육관 준공식", "", "", "2026-08-01")
+    second = Article("체육관 준공 확인", "", "https://news.example.com/good", "2026-08-01")
+    got = read_news([first, second], ("", ""))
+    assert got.verdict == DONE
+    assert got.evidence_url == "https://news.example.com/good"
