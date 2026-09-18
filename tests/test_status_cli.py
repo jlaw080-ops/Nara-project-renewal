@@ -222,3 +222,113 @@ def test_enrich_status_stays_quiet_when_no_news_search_failed(tmp_path, monkeypa
     result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path))])
     assert result.exit_code == 0
     assert "뉴스 검색에 실패한 건" not in result.output
+
+
+# --- Fix round 2: I3 — 무테스트로 살아남던 CLI 블록 두 개 ---
+
+
+def test_enrich_status_exits_nonzero_when_every_project_failed(tmp_path, monkeypatch):
+    """전건 실패는 exit 1이다 — 기록 0건은 조용한 정상 회차와 똑같이 보인다.
+
+    이 블록은 `if False:`로 막아도 288개 테스트가 전부 통과했다. 무인
+    스케줄이 이 종료 코드로 회차 실패를 알아차리므로, 여기가 조용해지면
+    판정 로직이 전부 죽은 날과 아무것도 안 바뀐 날이 구분되지 않는다.
+
+    update_statuses를 바꿔치기하지 않는다 — 진짜 파이프라인을 두고
+    search가 사업마다 터지게 해서 실패를 실제로 만든다.
+    """
+    monkeypatch.setattr(
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+        ),
+    )
+
+    def exploding_search(client, secrets_, query):
+        raise RuntimeError("판정이 죽었다")
+
+    monkeypatch.setattr(cli, "search_news", exploding_search)
+
+    result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path, projects=3))])
+
+    assert result.exit_code == 1
+    assert "전체 판정 실패" in result.output
+
+
+def test_enrich_status_exits_zero_when_only_some_projects_failed(tmp_path, monkeypatch):
+    """반대 방향 — 일부만 실패하면 회차는 성공이다. 나머지 판정은 쓸모가 있다."""
+    monkeypatch.setattr(
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+        ),
+    )
+
+    def flaky_search(client, secrets_, query):
+        if "사업 1" in query:
+            raise RuntimeError("한 건만 죽는다")
+        from nara.naver import SearchResult
+
+        return SearchResult(note="네이버 검색 키가 없어 뉴스 검색을 건너뛰었다")
+
+    monkeypatch.setattr(cli, "search_news", flaky_search)
+
+    result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path, projects=3))])
+
+    assert result.exit_code == 0
+    assert "전체 판정 실패" not in result.output
+
+
+def test_enrich_status_says_it_stopped_on_the_time_budget(tmp_path, monkeypatch):
+    """시간 예산으로 멈춘 회차는 그 사실을 말해야 한다.
+
+    이 안내도 `if False:`로 막아도 전부 통과했다. 말하지 않으면 예산에
+    걸려 절반만 본 회차가 전부 본 회차와 똑같아 보인다 — 남은 대상이
+    계속 밀리고 있어도 아무도 모른다.
+    """
+    monkeypatch.setattr(
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+        ),
+    )
+    # 진짜 update_statuses를 그대로 돌리고 시계만 갈아 끼운다. 가짜 결과로
+    # 바꿔치기하면 stopped_early가 실제로 만들어지는지 검증하지 못한다.
+    # now_fn은 기본값으로 import 시점에 묶여 있어 모듈 속성을 갈아도 안 먹는다.
+    real_update = cli.update_statuses
+    calls = {"n": -1}
+
+    def fake_now():
+        calls["n"] += 1
+        return calls["n"] * 100.0  # 0, 100, 200 — --budget 1초를 두 번째 호출에서 넘긴다
+
+    monkeypatch.setattr(
+        cli,
+        "update_statuses",
+        lambda *args, **kwargs: real_update(*args, **kwargs, now_fn=fake_now),
+    )
+
+    result = runner.invoke(
+        app,
+        ["enrich", "status", "--budget", "1", "--db", str(_db(tmp_path, projects=3))],
+    )
+
+    assert result.exit_code == 0
+    assert "시간 예산 1초를 넘겨 멈췄다" in result.output
+
+
+def test_enrich_status_stays_quiet_when_the_budget_was_enough(tmp_path, monkeypatch):
+    """반대 방향 — 예산 안에 다 봤으면 그 안내를 내지 않는다."""
+    monkeypatch.setattr(
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+        ),
+    )
+    result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path, projects=3))])
+    assert result.exit_code == 0
+    assert "시간 예산" not in result.output
