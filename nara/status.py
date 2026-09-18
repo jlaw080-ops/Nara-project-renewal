@@ -246,6 +246,13 @@ def update_statuses(
         tracker = _CallTracker(search, adjudicator)
         try:
             judgment = judge_project(conn, row, secrets, today, tracker.search, tracker.adjudicator)
+        except sqlite3.Error:
+            # award.py의 실패 하나하나는 독립된 네트워크 호출이지만, 여기는
+            # 모든 사업이 같은 conn을 공유한다. sqlite3.Error는 DB 파일
+            # 잠김·손상처럼 저장 계층 전체가 망가졌다는 신호라 개별 사업
+            # 실패로 세지 않고 그대로 터뜨린다(R33) — 그래야 run_log가
+            # 'partial'이 아니라 'error'로 정직하게 남는다.
+            raise
         except Exception:
             # nara/award.py의 update_awards와 같은 모양이다 — 한 건이
             # 터져도 나머지 대기 건을 계속 본다. KeyboardInterrupt·

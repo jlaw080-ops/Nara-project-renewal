@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -574,6 +575,22 @@ def test_update_statuses_isolates_a_failing_project_and_continues(conn):
         r["project_id"] for r in conn.execute("SELECT project_id FROM status_check").fetchall()
     }
     assert recorded_ids == {ids[0], ids[2]}
+
+
+def test_update_statuses_lets_a_storage_error_propagate(conn):
+    """sqlite3.Error는 개별 사업 실패로 삼키지 않고 그대로 터뜨린다(R33/F4).
+
+    한 사업의 판정 실패(RuntimeError 등)와 저장 계층 전체가 망가진 것은
+    다르다. DB 파일이 잠겼거나 손상됐다면 249건 전부가 각자 실패하는 게
+    아니라 회차 전체가 실패한 것이고, run_log.status는 'partial'이 아니라
+    'error'로 정직하게 남아야 한다."""
+    _project(conn, "전북특별자치도 완주군", "사업")
+
+    def broken_search(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    with pytest.raises(sqlite3.OperationalError):
+        _run(conn, search=broken_search)
 
 
 def test_update_statuses_counts_a_search_that_ran_even_without_changing_the_verdict(conn):
