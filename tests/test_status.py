@@ -6,7 +6,8 @@ from nara.config import Secrets, load_settings
 from nara.db import connect, migrate
 from nara.g2b.list_api import NoticeItem
 from nara.naver import SearchResult
-from nara.status import judge_project, pending_status_projects
+from nara.runlog import RunCounters
+from nara.status import judge_project, pending_status_projects, update_statuses
 from nara.store import ensure_project, upsert_notice, upsert_org
 from nara.verdict import BEFORE, BUILDING, UNKNOWN, Article
 
@@ -410,3 +411,129 @@ def test_judge_prefers_the_most_recent_past_opening_over_a_future_retender(conn)
     assert got.verdict == BEFORE
     assert "개찰일이 지났고 낙찰업체 미확인 — 설계 단계" in got.reason
     assert "건너뛰" in got.reason
+
+
+# --- update_statuses: 회차를 돌리고 흔적을 남긴다 (Task 11) ---
+
+
+def _run(conn, **kwargs):
+    kwargs.setdefault("search", _no_search)
+    kwargs.setdefault("adjudicator", _no_llm)
+    kwargs.setdefault("tier", None)
+    kwargs.setdefault("limit", 100)
+    return update_statuses(conn, SECRETS, "2026-09-18", counters=RunCounters(), **kwargs)
+
+
+def test_update_statuses_records_a_first_judgment(conn):
+    _project(conn, "전북특별자치도 완주군", "사업")
+    got = _run(conn)
+    assert got.checked == 1
+    assert got.recorded == 1
+    rows = conn.execute("SELECT verdict, decided_by FROM status_check").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["decided_by"] == "rule"
+
+
+def test_update_statuses_does_not_stack_the_same_verdict_twice(conn):
+    """두 번 돌려도 같은 판정이면 한 줄만 남는다."""
+    _project(conn, "전북특별자치도 완주군", "사업")
+    _run(conn)
+    second = _run(conn)
+    assert second.checked == 1
+    assert second.recorded == 0
+    assert second.skipped == 1
+    assert conn.execute("SELECT COUNT(*) FROM status_check").fetchone()[0] == 1
+
+
+def test_update_statuses_keeps_human_research_intact(conn):
+    """이관된 '시공 중'을 규칙 판정이 밀어내지 않는다."""
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+    conn.execute(
+        "INSERT INTO status_check (project_id, verdict, reason, decided_by, checked_at) "
+        "VALUES (?, ?, '25.06.30 기공식', 'imported', '2026-09-16T00:00:00')",
+        (project_id, BUILDING),
+    )
+    conn.commit()
+
+    got = _run(conn)
+
+    assert got.recorded == 0
+    latest = conn.execute(
+        "SELECT verdict FROM status_check ORDER BY checked_at DESC LIMIT 1"
+    ).fetchone()
+    assert latest["verdict"] == BUILDING
+
+
+def test_update_statuses_stores_the_evidence_url(conn):
+    _project(conn, "전북특별자치도 완주군", "완주군 종합사회복지관")
+    found = SearchResult(
+        articles=[Article("완주군 종합사회복지관 기공식", "", "https://n/1", "2026-08-28")],
+        searched=True,
+    )
+    _run(conn, search=lambda *a, **k: found)
+    row = conn.execute("SELECT verdict, evidence_json FROM status_check").fetchone()
+    assert row["verdict"] == BUILDING
+    assert "https://n/1" in row["evidence_json"]
+
+
+def test_update_statuses_counts_what_it_actually_did(conn):
+    for i in range(3):
+        _project(conn, "전북특별자치도 완주군", f"사업 {i}")
+    counters = RunCounters()
+    update_statuses(
+        conn,
+        SECRETS,
+        "2026-09-18",
+        tier=None,
+        limit=100,
+        counters=counters,
+        search=_no_search,
+        adjudicator=_no_llm,
+    )
+    assert counters.processed == 3
+    assert counters.updated == 3
+
+
+def test_update_statuses_stops_when_the_budget_runs_out(conn):
+    """예산을 넘기면 처리한 만큼 저장하고 멈춘다. 다음 회차가 이어받는다.
+
+    가짜 시계는 호출마다 증가하는 카운터다(R1) — now_fn을 몇 번 부르든
+    StopIteration으로 죽지 않는다. 검증하려는 것은 "예산을 넘기면 멈추고,
+    그때까지 쓴 것은 남는다"이지 now_fn 호출 횟수가 아니다.
+    """
+    for i in range(5):
+        _project(conn, "전북특별자치도 완주군", f"사업 {i}")
+
+    calls = {"n": -1}
+
+    def fake_now():
+        calls["n"] += 1
+        return calls["n"] * 25.0  # 0, 25, 50, 75, ... — budget_seconds=60을 세 번째 호출에서 넘긴다
+
+    got = update_statuses(
+        conn,
+        SECRETS,
+        "2026-09-18",
+        tier=None,
+        limit=100,
+        counters=RunCounters(),
+        search=_no_search,
+        adjudicator=_no_llm,
+        budget_seconds=60,
+        now_fn=fake_now,
+    )
+
+    assert got.stopped_early is True
+    assert got.checked < 5
+    assert conn.execute("SELECT COUNT(*) FROM status_check").fetchone()[0] == got.recorded
+
+
+def test_update_statuses_reports_that_it_never_searched(conn):
+    """키가 없어 뉴스를 한 번도 못 본 회차임을 호출부가 알 수 있어야 한다."""
+    _project(conn, "전북특별자치도 완주군", "사업")
+    assert _run(conn).searched == 0
+
+
+def test_update_statuses_rejects_nonpositive_limit(conn):
+    with pytest.raises(ValueError):
+        _run(conn, limit=0)

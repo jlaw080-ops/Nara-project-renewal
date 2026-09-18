@@ -1,11 +1,26 @@
 """진행현황 판정 파이프라인."""
 
+import json
 import sqlite3
+import time
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
 
 from nara.config import Secrets
 from nara.naver import SearchResult
-from nara.verdict import UNKNOWN, Facts, Judgment, date_conflict, read_news, rule_verdict
+from nara.runlog import RunCounters
+from nara.verdict import (
+    UNKNOWN,
+    Facts,
+    Judgment,
+    date_conflict,
+    read_news,
+    rule_verdict,
+    should_record,
+)
+
+BUDGET_SECONDS = 1200  # 스펙의 기본 시간 예산 20분
 
 
 def pending_status_projects(
@@ -131,3 +146,87 @@ def judge_project(
     return Judgment(
         verdict=verdict, reason=reason, decided_by=decided_by, evidence_url=evidence_url
     )
+
+
+@dataclass
+class StatusRun:
+    checked: int = 0
+    recorded: int = 0
+    skipped: int = 0
+    searched: int = 0
+    asked_llm: int = 0
+    stopped_early: bool = False
+
+
+def _latest(conn: sqlite3.Connection, project_id: int) -> dict | None:
+    """should_record가 비교할 수 있게 dict로 돌려준다.
+
+    sqlite3.Row에는 .get()이 없다 — should_record는 .get()으로 판정과
+    사유를 함께 비교하므로, Row를 그대로 넘기면 첫 실행에서
+    AttributeError로 죽는다(R18).
+    """
+    row = conn.execute(
+        "SELECT verdict, reason, decided_by, evidence_json FROM status_check "
+        "WHERE project_id = ? ORDER BY checked_at DESC, id DESC LIMIT 1",
+        (project_id,),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def update_statuses(
+    conn: sqlite3.Connection,
+    secrets: Secrets,
+    today: str,
+    tier: str | None,
+    limit: int,
+    counters: RunCounters,
+    search: Callable[..., SearchResult],
+    adjudicator: Callable[..., tuple[str, str] | None],
+    budget_seconds: int = BUDGET_SECONDS,
+    now_fn: Callable[[], float] = time.monotonic,
+) -> StatusRun:
+    """대상을 돌며 판정하고 달라진 것만 쌓는다.
+
+    시간 예산을 넘기면 처리한 만큼 저장하고 멈춘다 — 다음 회차가 남은
+    대상을 이어받는다. 행마다 커밋해 중간에 터져도 거기까지는 남는다.
+    """
+    rows = pending_status_projects(conn, tier, limit)
+    run = StatusRun()
+    started = now_fn()
+
+    for row in rows:
+        if now_fn() - started > budget_seconds:
+            run.stopped_early = True
+            break
+
+        counters.processed += 1
+        run.checked += 1
+        judgment = judge_project(conn, row, secrets, today, search, adjudicator)
+        if judgment.decided_by in ("news", "llm"):
+            run.searched += 1
+        if judgment.decided_by == "llm":
+            run.asked_llm += 1
+
+        ok, _ = should_record(_latest(conn, row["id"]), judgment)
+        if not ok:
+            run.skipped += 1
+            continue
+
+        conn.execute(
+            "INSERT INTO status_check (project_id, verdict, reason, decided_by, "
+            "evidence_json, checked_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                row["id"],
+                judgment.verdict,
+                judgment.reason,
+                judgment.decided_by,
+                json.dumps({"url": judgment.evidence_url}, ensure_ascii=False),
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+        # 행마다 커밋한다 — 중간에 터져도 거기까지는 남는다.
+        conn.commit()
+        run.recorded += 1
+        counters.updated += 1
+
+    return run
