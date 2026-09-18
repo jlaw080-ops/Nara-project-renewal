@@ -11,6 +11,7 @@ from nara.verdict import (
     Article,
     Facts,
     demote_without_evidence,
+    read_news,
     read_signals,
     rule_verdict,
 )
@@ -139,3 +140,65 @@ def test_demote_leaves_weak_verdicts_alone():
     """'착공 전'·'미확인'은 강등할 것이 없다. 헛되이 건드리지 않는다."""
     for weak in (BEFORE, UNKNOWN):
         assert demote_without_evidence(weak, "") == (weak, None)
+
+
+def test_read_news_reports_unknown_without_articles():
+    got = read_news([], ("", ""))
+    assert got.verdict == UNKNOWN
+    assert got.needs_llm is False
+
+
+def test_read_news_calls_construction_when_groundbreaking_is_reported():
+    got = read_news([_a("완주군 종합사회복지관 기공식 개최")], ("", ""))
+    assert got.verdict == BUILDING
+    assert got.evidence_url == "https://example.com/1"
+
+
+def test_read_news_calls_completion_when_opening_is_reported():
+    got = read_news([_a("순창군 동계면 종합체육관 준공식")], ("", ""))
+    assert got.verdict == DONE
+
+
+def test_read_news_defers_when_start_and_planned_collide():
+    """'2026년 9월 착공 예정' — 예정인지 실제인지 기계가 못 가른다."""
+    got = read_news([_a("완주군 다목적체육관 2026년 9월 착공 예정")], ("", ""))
+    assert got.needs_llm is True
+    assert got.llm_reason
+
+
+def test_read_news_defers_when_completion_and_start_collide():
+    """준공 기사와 착공 기사가 동시에 잡히는 경우 — 순창군 사례."""
+    first = _a("동계면 종합체육관 착공")
+    second = _a("동계면 종합체육관 준공", url="https://news.example.com/2")
+    assert read_news([first, second], ("", "")).needs_llm is True
+
+
+def test_read_news_defers_when_article_year_is_far_from_project_dates():
+    """진안복합노인 복지센터 — 2006년 개원 시설이 검색돼 들어왔다."""
+    got = read_news(
+        [_a("진안복합노인 복지센터 개원", published="2006-05-26")], ("2026-01-01", "2027-12-31")
+    )
+    assert got.needs_llm is True
+    assert "연도" in got.llm_reason
+
+
+def test_read_news_treats_demolition_as_before_construction():
+    """착공 낱말이 없는 순수 철거 기사만 확신을 갖고 착공 전으로 본다."""
+    got = read_news([_a("옛 청사 철거 현장 가림막 설치")], ("", ""))
+    assert got.verdict == BEFORE
+    assert got.needs_llm is False
+
+
+def test_read_news_defers_when_demolition_and_construction_start_collide():
+    """'철거 마치고 본공사 착공' — 철거 기사인지 착공 기사인지 기계가 못 가른다."""
+    got = read_news(
+        [_a("완주군 종합복지관, 철거 마치고 본공사 착공")],
+        ("", ""),
+    )
+    assert got.needs_llm is True
+    assert "철거" in got.llm_reason
+
+
+def test_read_news_never_returns_strong_verdict_without_evidence_url():
+    got = read_news([_a("체육관 준공", url="")], ("", ""))
+    assert got.verdict not in (BUILDING, DONE)

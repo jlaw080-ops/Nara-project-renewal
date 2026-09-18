@@ -90,3 +90,93 @@ def demote_without_evidence(verdict: str, evidence_url: str | None) -> tuple[str
     if verdict in _STRONG and not (evidence_url or "").strip():
         return BEFORE, f"근거 URL이 없어 '{verdict}' 주장을 착공 전으로 내림"
     return verdict, None
+
+
+_YEAR_GAP = 3  # 기사 연도가 사업 일정에서 이만큼 벗어나면 같은 사업인지 의심한다
+
+
+@dataclass(frozen=True)
+class NewsRead:
+    verdict: str
+    reason: str
+    evidence_url: str
+    needs_llm: bool
+    llm_reason: str
+
+
+def _year(iso: str) -> int | None:
+    head = (iso or "")[:4]
+    return int(head) if head.isdigit() else None
+
+
+def _far_from(published: str, dates: tuple[str, str]) -> bool:
+    published_year = _year(published)
+    years = [y for y in (_year(dates[0]), _year(dates[1])) if y]
+    if published_year is None or not years:
+        return False
+    return min(abs(published_year - y) for y in years) > _YEAR_GAP
+
+
+def read_news(articles: list[Article], project_dates: tuple[str, str]) -> NewsRead:
+    """기사 묶음에서 판정을 읽는다. 애매하면 판정하지 않고 넘긴다.
+
+    판정 순서(R5) — 철거+착공 충돌을 착공/준공 충돌보다 먼저 걸러낸다.
+    read_signals가 철거와 착공 낱말이 함께 있는 기사에서 두 신호를 모두
+    세우므로, 그런 기사를 착공 분기로 흘려보내면 확신에 찬 오판정이 된다.
+    """
+    if not articles:
+        return NewsRead(UNKNOWN, "검색 결과 없음", "", False, "")
+
+    for article in articles:
+        if _far_from(article.published, project_dates):
+            gap = f"기사 연도({article.published[:4]})가 사업 일정과 {_YEAR_GAP}년 넘게 어긋남"
+            return NewsRead(UNKNOWN, "기사 연도가 사업 일정과 어긋남", article.url, True, gap)
+
+    signals = [(a, read_signals(a)) for a in articles]
+
+    for article, sig in signals:
+        if SIGNAL_DEMOLITION in sig and SIGNAL_START in sig:
+            return NewsRead(
+                UNKNOWN,
+                "철거 기사와 착공 기사를 구분할 수 없음",
+                article.url,
+                True,
+                "철거와 착공이 한 기사에 함께 쓰여 실제 착공인지 불분명",
+            )
+
+    starts = [a for a, s in signals if SIGNAL_START in s]
+    dones = [a for a, s in signals if SIGNAL_DONE in s]
+    planned = {a.url for a, s in signals if SIGNAL_PLANNED in s}
+
+    if starts and dones:
+        return NewsRead(
+            UNKNOWN,
+            "착공 기사와 준공 기사가 함께 잡힘",
+            dones[0].url,
+            True,
+            "착공 기사와 준공 기사가 동시에 잡힘",
+        )
+
+    for group, strong, label in ((dones, DONE, "준공"), (starts, BUILDING, "착공·기공식")):
+        if not group:
+            continue
+        article = group[0]
+        if article.url in planned:
+            return NewsRead(
+                UNKNOWN,
+                f"{label} 예정 표기",
+                article.url,
+                True,
+                f"{label}과 예정이 함께 쓰여 실제인지 불분명",
+            )
+        verdict, note = demote_without_evidence(strong, article.url)
+        return NewsRead(verdict, note or f"{label} 보도", article.url, False, "")
+
+    for article, sig in signals:
+        if SIGNAL_DEMOLITION in sig:
+            return NewsRead(BEFORE, "철거 단계 — 본공사 착공 전", article.url, False, "")
+    for article, sig in signals:
+        if SIGNAL_DESIGN in sig:
+            return NewsRead(BEFORE, "설계·공모 단계 보도", article.url, False, "")
+
+    return NewsRead(UNKNOWN, "관련 신호 없음", "", False, "")
