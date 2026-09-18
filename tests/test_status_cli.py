@@ -1,0 +1,137 @@
+from pathlib import Path
+
+from typer.testing import CliRunner
+
+import nara.cli as cli
+from nara.cli import app
+from nara.config import Secrets, load_settings
+from nara.db import connect, migrate
+from nara.store import ensure_project, upsert_org
+
+SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
+NOW = "2026-09-18T09:00:00"
+runner = CliRunner()
+
+
+def _db(tmp_path, projects=1):
+    db = tmp_path / "test.db"
+    conn = connect(db)
+    migrate(conn)
+    org_id = upsert_org(conn, "전북특별자치도 완주군", SETTINGS, NOW)
+    for i in range(projects):
+        ensure_project(conn, org_id, f"사업 {i}", "manual", NOW)
+    conn.close()
+    return db
+
+
+def test_enrich_status_rejects_a_bad_tier(tmp_path):
+    result = runner.invoke(app, ["enrich", "status", "--tier", "oops", "--db", str(_db(tmp_path))])
+    assert result.exit_code == 1
+    assert "focus" in result.output
+
+
+def test_enrich_status_rejects_nonpositive_limit(tmp_path):
+    result = runner.invoke(app, ["enrich", "status", "--limit", "0", "--db", str(_db(tmp_path))])
+    assert result.exit_code != 0
+
+
+def test_enrich_status_says_which_steps_it_skipped(tmp_path, monkeypatch):
+    """키가 없으면 그 사실이 화면에 나와야 한다 — 스펙이 요구한다."""
+    monkeypatch.setattr(
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+        ),
+    )
+    result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path))])
+    assert result.exit_code == 0
+    assert "네이버" in result.output
+    assert "Claude" in result.output
+
+
+def test_enrich_status_reports_counts(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+        ),
+    )
+    result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path, projects=3))])
+    # R2: 출력 어디에든 3이 있으면 통과하는 느슨한 단언은 카운터가 망가져도
+    # 통과한다. 실제 문구로 좁혀 "확인 3건"이 무엇을 센 값인지 함께 확인한다.
+    assert "확인 3건" in result.output
+
+
+def test_enrich_status_writes_a_run_log_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+        ),
+    )
+    db = _db(tmp_path)
+    runner.invoke(app, ["enrich", "status", "--db", str(db)])
+    conn = connect(db)
+    row = conn.execute(
+        "SELECT command, processed, status FROM run_log ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert row["command"] == "enrich status"
+    assert row["processed"] == 1
+    assert row["status"] == "ok"
+
+
+def test_enrich_status_reports_llm_unanswered_when_key_present(tmp_path, monkeypatch):
+    """R25: 키가 있는데 LLM이 답을 못 준 건수는 CLI가 따로 보고해야 한다."""
+    monkeypatch.setattr(
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x",
+            naver_client_id=None,
+            naver_client_secret=None,
+            anthropic_api_key="fake-key",
+        ),
+    )
+
+    def fake_update_statuses(*args, **kwargs):
+        from nara.status import StatusRun
+
+        return StatusRun(
+            checked=1, recorded=0, skipped=1, searched=0, asked_llm=0, llm_unanswered=0
+        )
+
+    monkeypatch.setattr(cli, "update_statuses", fake_update_statuses)
+    result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path))])
+    assert result.exit_code == 0
+    # Claude 키가 있으니 "키가 없어…" 안내는 나오지 않는다.
+    assert "Claude API 키가 없어" not in result.output
+
+
+def test_enrich_status_warns_when_llm_answers_go_missing(tmp_path, monkeypatch):
+    """R25: LLM에 물었는데 답을 못 받은 건이 있으면 stderr로 경고한다."""
+    monkeypatch.setattr(
+        cli,
+        "load_secrets",
+        lambda path: Secrets(
+            g2b_api_key="x",
+            naver_client_id=None,
+            naver_client_secret=None,
+            anthropic_api_key="fake-key",
+        ),
+    )
+
+    def fake_update_statuses(*args, **kwargs):
+        from nara.status import StatusRun
+
+        return StatusRun(
+            checked=1, recorded=1, skipped=0, searched=1, asked_llm=1, llm_unanswered=1
+        )
+
+    monkeypatch.setattr(cli, "update_statuses", fake_update_statuses)
+    result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path))])
+    assert result.exit_code == 0
+    assert "LLM에 물었으나 답을 못 받은 건" in result.output
+    assert "1건" in result.output

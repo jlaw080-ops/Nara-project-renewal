@@ -12,8 +12,11 @@ from nara.collect import collect_range
 from nara.config import load_secrets, load_settings
 from nara.db import connect, migrate
 from nara.doctor import run_checks
+from nara.llm import adjudicate
 from nara.migrate_sheets import import_tab
+from nara.naver import search_news
 from nara.runlog import run_log
+from nara.status import update_statuses
 
 app = typer.Typer(help="나라장터 설계용역 수집·조사 도구")
 
@@ -146,6 +149,69 @@ def enrich_award(
     if counters.failed and not updated:
         typer.echo("전체 조회 실패 — API 키나 네트워크를 확인한다.", err=True)
         raise typer.Exit(code=1)
+
+
+@enrich_app.command("status")
+def enrich_status(
+    tier: str = typer.Option("all", help="focus | rest | all"),
+    limit: int = typer.Option(300, min=1, help="한 번에 볼 최대 사업 수"),
+    budget: int = typer.Option(1200, min=1, help="시간 예산(초). 넘기면 저장하고 멈춘다"),
+    db: Path = typer.Option(DEFAULT_DB),
+) -> None:
+    """진행현황을 판정해 쌓는다."""
+    if tier not in {"focus", "rest", "all"}:
+        typer.echo(f"--tier는 focus | rest | all 중 하나여야 한다: {tier!r}", err=True)
+        raise typer.Exit(code=1)
+
+    secrets = load_secrets(DEFAULT_ENV)
+    skipped = []
+    if not (secrets.naver_client_id and secrets.naver_client_secret):
+        skipped.append("네이버 검색 키가 없어 뉴스 검색을 건너뛴다 — 규칙 판정만 남는다")
+    if not secrets.anthropic_api_key:
+        skipped.append("Claude API 키가 없어 애매한 건을 미확인으로 남긴다")
+
+    conn = _open_db(db)
+    selected = None if tier == "all" else tier
+    with httpx.Client() as client:
+
+        def search(secrets_, query):
+            return search_news(client, secrets_, query)
+
+        with run_log(conn, "enrich status", f"--tier {tier}") as counters:
+            run = update_statuses(
+                conn,
+                secrets,
+                date.today().isoformat(),
+                selected,
+                limit,
+                counters,
+                search=search,
+                adjudicator=adjudicate,
+                budget_seconds=budget,
+            )
+
+    typer.echo(
+        f"진행현황 — 확인 {run.checked}건 / 기록 {run.recorded}건 / "
+        f"변화 없음 {run.skipped}건 / 뉴스 근거 {run.searched}건 / LLM 판정 {run.asked_llm}건"
+    )
+    # 건너뛴 단계는 반드시 말한다. 조용히 넘어가면 규칙 판정만 돈 회차를
+    # 완전한 판정으로 착각하게 된다.
+    for note in skipped:
+        typer.echo(note, err=True)
+    # R25: Claude 키가 있을 때만 이 숫자가 의미를 갖는다 — 키가 없어 못
+    # 부른 경우는 위 skipped 안내로 이미 보고했다. 요청 모양이 실제
+    # API로 검증된 적이 없어, 키를 넣은 뒤 400을 받으면 애매한 건이
+    # 전부 조용히 미확인이 되고 "LLM 판정 0건"과 구분이 안 된다.
+    if secrets.anthropic_api_key and run.llm_unanswered:
+        typer.echo(
+            f"LLM에 물었으나 답을 못 받은 건 {run.llm_unanswered}건 — 요청 모양이나 키를 확인한다",
+            err=True,
+        )
+    if run.stopped_early:
+        typer.echo(
+            f"시간 예산 {budget}초를 넘겨 멈췄다. 다음 회차가 남은 대상을 이어받는다.",
+            err=True,
+        )
 
 
 migrate_app = typer.Typer(help="외부 데이터를 가져온다")
