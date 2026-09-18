@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 from nara.config import Secrets
 from nara.naver import SearchResult
-from nara.verdict import Facts, Judgment, date_conflict, read_news, rule_verdict
+from nara.verdict import UNKNOWN, Facts, Judgment, date_conflict, read_news, rule_verdict
 
 
 def pending_status_projects(
@@ -38,6 +38,31 @@ def pending_status_projects(
     return list(conn.execute("\n".join(sql), params))
 
 
+def _project_open_date(conn: sqlite3.Connection, project_id: int, today: str) -> str:
+    """개찰일 하나를 고른다 — 이미 지난 개찰 중 가장 최근 것을 우선한다.
+
+    유찰 후 재공고가 흔한 도메인이라 MAX(open_date)로 고르면, 아직 열리지
+    않은 재공고의 미래 개찰일에 가려 이미 지난 개찰(과 그 유찰 사실)이
+    사라진다(R29). 지난 개찰이 하나도 없을 때만 가장 이른 미래 개찰로
+    대체한다. 빈 open_date는 둘 다에서 무시한다.
+    """
+    past = conn.execute(
+        "SELECT open_date FROM notice "
+        "WHERE project_id = ? AND open_date != '' AND open_date <= ? "
+        "ORDER BY open_date DESC LIMIT 1",
+        (project_id, today),
+    ).fetchone()
+    if past:
+        return past[0]
+    future = conn.execute(
+        "SELECT open_date FROM notice "
+        "WHERE project_id = ? AND open_date != '' AND open_date > ? "
+        "ORDER BY open_date ASC LIMIT 1",
+        (project_id, today),
+    ).fetchone()
+    return future[0] if future else ""
+
+
 def judge_project(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
@@ -58,31 +83,45 @@ def judge_project(
             (row["id"],),
         ).fetchone()
     )
-    open_date = (
-        conn.execute(
-            "SELECT MAX(open_date) FROM notice WHERE project_id = ?", (row["id"],)
-        ).fetchone()[0]
-        or ""
-    )
+    open_date = _project_open_date(conn, row["id"], today)
     dates = (row["start_date"] or "", row["end_date"] or "")
 
     verdict, reason = rule_verdict(Facts(has_winner=has_winner, open_date=open_date, today=today))
     decided_by, evidence_url = "rule", ""
 
     found = search(secrets, f"{row['name']} 착공 준공")
-    if found.searched and found.articles:
+    if found.searched:
+        # articles가 비어도 read_news에 넘긴다 — 진짜 0건은 UNKNOWN·"검색
+        # 결과 없음"으로 이미 처리된다(F1). 여기서 걸러내면 성공한 검색이
+        # 실패한 검색보다 못한 취급을 받는다.
         news = read_news(found.articles, dates)
-        verdict = news.verdict
-        reason = news.reason
-        evidence_url = news.evidence_url
-        decided_by = "news"
         if news.needs_llm:
+            # 유보·충돌은 진짜 질문이다 — 미확인으로 내려가는 것이 정직한
+            # 답이다. LLM이 답을 못 하면 이 뉴스 판정을 그대로 둔다.
+            verdict, reason, evidence_url, decided_by = (
+                news.verdict,
+                news.reason,
+                news.evidence_url,
+                "news",
+            )
             answer = adjudicator(secrets, row["name"], found.articles, news.llm_reason)
             if answer is not None:
                 verdict, reason = answer
                 decided_by = "llm"
-    elif not found.searched and found.note:
-        # 검색을 안 했다는 사실을 근거에 남긴다. 조용히 넘어가지 않는다.
+        elif news.verdict != UNKNOWN:
+            verdict, reason, evidence_url, decided_by = (
+                news.verdict,
+                news.reason,
+                news.evidence_url,
+                "news",
+            )
+        else:
+            # 뉴스가 아무 말도 못 했다(관련 기사 없음 또는 진짜 0건) — DB가
+            # 이미 아는 사실(규칙 판정)을 지우지 않는다(F2). 뉴스를
+            # 확인했다는 사실만 사유에 남긴다.
+            reason = f"{reason} (뉴스: {news.reason})"
+    elif found.note:
+        # 검색을 안 했거나 실패했다는 사실을 근거에 남긴다. 조용히 넘어가지 않는다.
         reason = f"{reason} ({found.note})"
 
     conflict = date_conflict(verdict, dates, today)

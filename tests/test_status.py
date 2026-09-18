@@ -65,6 +65,14 @@ def _add_notice(conn, project_id, bid_no, open_date):
     upsert_notice(conn, item, org_id, project_id, NOW)
 
 
+def _add_award(conn, bid_no, winner, award_date="2026-08-10"):
+    conn.execute(
+        "INSERT INTO award (bid_no, winner, award_date, checked_at) VALUES (?, ?, ?, ?)",
+        (bid_no, winner, award_date, NOW),
+    )
+    conn.commit()
+
+
 def test_pending_prefers_projects_never_checked(conn):
     old = _project(conn, "전북특별자치도 완주군", "본 적 있는 사업")
     fresh = _project(conn, "전북특별자치도 완주군", "한 번도 안 본 사업")
@@ -283,3 +291,122 @@ def test_judge_never_changes_the_project_dates(conn):
     )
     after = conn.execute("SELECT start_date FROM project WHERE id = ?", (project_id,)).fetchone()
     assert after["start_date"] == "2025-11-03"
+
+
+# --- F1/F2 (R27/R28): 진짜 0건 검색과 무관한 기사가 기존 판정을 지우면 안 된다 ---
+
+
+def test_judge_distinguishes_skip_zero_result_and_failure_in_the_reason(conn):
+    """검색을 안 한 것·검색했는데 진짜 0건·검색이 실패한 것은 사유에서 서로
+    다르게 보여야 한다(F1). 셋 다 '개찰일 없음'만 남으면 성공한 조회가
+    실패한 조회보다 못한 취급을 받는다."""
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+
+    skipped = judge_project(
+        conn, _row(conn, project_id), SECRETS, "2026-09-18", search=_no_search, adjudicator=_no_llm
+    )
+    zero_result = judge_project(
+        conn,
+        _row(conn, project_id),
+        SECRETS,
+        "2026-09-18",
+        search=lambda *a, **k: SearchResult(articles=[], searched=True),
+        adjudicator=_no_llm,
+    )
+    failed = judge_project(
+        conn,
+        _row(conn, project_id),
+        SECRETS,
+        "2026-09-18",
+        search=lambda *a, **k: SearchResult(note="뉴스 검색 실패: HTTP 429"),
+        adjudicator=_no_llm,
+    )
+
+    assert skipped.reason == "개찰일 없음 (네이버 검색 키가 없어 뉴스 검색을 건너뛰었다)"
+    assert zero_result.reason == "개찰일 없음 (뉴스: 검색 결과 없음)"
+    assert failed.reason == "개찰일 없음 (뉴스 검색 실패: HTTP 429)"
+    assert len({skipped.reason, zero_result.reason, failed.reason}) == 3
+
+
+def test_judge_keeps_the_rule_verdict_when_search_is_skipped(conn):
+    """DB가 이미 아는 사실(낙찰업체 기록됨)은 검색을 안 했다고 사라지지
+    않는다 — 회귀 확인용 대조군."""
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+    _add_notice(conn, project_id, "R1", open_date="2026-08-01")
+    _add_award(conn, "R1", "가건축")
+
+    got = judge_project(
+        conn, _row(conn, project_id), SECRETS, "2026-09-18", search=_no_search, adjudicator=_no_llm
+    )
+
+    assert got.verdict == BEFORE
+    assert got.decided_by == "rule"
+
+
+def test_judge_does_not_let_an_irrelevant_article_erase_a_known_fact(conn):
+    """무관한 기사 한 건 때문에 낙찰업체 기록이라는 사실이 미확인으로
+    지워지면 안 된다(F2). 뉴스가 아무 신호도 못 찾았으면 규칙 판정을
+    유지하되, 뉴스를 확인했다는 사실은 사유에 남긴다."""
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+    _add_notice(conn, project_id, "R1", open_date="2026-08-01")
+    _add_award(conn, "R1", "가건축")
+    found = SearchResult(
+        articles=[
+            Article("완주군수 신년사", "새해 인사말씀 드립니다", "https://n/9", "2026-01-01")
+        ],
+        searched=True,
+    )
+
+    got = judge_project(
+        conn,
+        _row(conn, project_id),
+        SECRETS,
+        "2026-09-18",
+        search=lambda *a, **k: found,
+        adjudicator=_no_llm,
+    )
+
+    assert got.verdict == BEFORE
+    assert got.decided_by == "rule"
+    assert "뉴스: 관련 신호 없음" in got.reason
+
+
+def test_judge_keeps_the_rule_verdict_on_a_genuine_zero_result_search(conn):
+    """진짜 0건도 마찬가지다 — 검색은 했지만 아무것도 안 나온 것이지, 이미
+    기록된 낙찰 사실을 뒤집을 근거가 아니다(F2)."""
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+    _add_notice(conn, project_id, "R1", open_date="2026-08-01")
+    _add_award(conn, "R1", "가건축")
+
+    got = judge_project(
+        conn,
+        _row(conn, project_id),
+        SECRETS,
+        "2026-09-18",
+        search=lambda *a, **k: SearchResult(articles=[], searched=True),
+        adjudicator=_no_llm,
+    )
+
+    assert got.verdict == BEFORE
+    assert got.decided_by == "rule"
+    assert "뉴스: 검색 결과 없음" in got.reason
+
+
+# --- F3 (R29): 재공고가 이미 지난 개찰을 가리면 안 된다 ---
+
+
+def test_judge_prefers_the_most_recent_past_opening_over_a_future_retender(conn):
+    """유찰 후 재공고는 흔하다. MAX(open_date)로 고르면 아직 열리지 않은
+    재공고의 미래 개찰일에 가려 이미 지난 개찰(그리고 그 유찰 사실)이
+    사라진다."""
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+    _add_notice(conn, project_id, "R1", open_date="2025-01-01")
+    _add_notice(conn, project_id, "R2", open_date="2026-12-01")
+
+    got = judge_project(
+        conn, _row(conn, project_id), SECRETS, "2026-09-18", search=_no_search, adjudicator=_no_llm
+    )
+
+    assert got.verdict == BEFORE
+    assert "개찰일이 지났고 낙찰업체 미확인 — 설계 단계" in got.reason
+    assert "건너뛰" in got.reason
