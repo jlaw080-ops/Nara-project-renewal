@@ -3,9 +3,22 @@
 import sqlite3
 from dataclasses import dataclass
 
+from nara.verdict import BEFORE, BUILDING, DONE
+
 # `nara enrich award --limit`의 기본값과 같아야 한다. 대기가 이 수를 넘으면
 # 한 회차가 대기를 다 비우지 못한다.
 AWARD_BATCH_LIMIT = 300
+
+# 사업별 최신 판정 한 줄만 본다. status_check는 이력이라 다 보면 뒤집힌 옛
+# 판정까지 잡혀 회차를 돌 때마다 경보가 쌓인다.
+_LATEST_STATUS = (
+    "SELECT s.project_id, s.verdict, s.evidence_json, p.name, p.start_date "
+    "FROM status_check s JOIN project p ON p.id = s.project_id "
+    "WHERE s.id = ("
+    "  SELECT id FROM status_check WHERE project_id = s.project_id "
+    "  ORDER BY checked_at DESC, id DESC LIMIT 1"
+    ")"
+)
 
 
 @dataclass(frozen=True)
@@ -85,5 +98,26 @@ def run_checks(conn: sqlite3.Connection, today: str) -> list[Finding]:
                 " 없을 건을 가려낼 방법이 필요하다.",
             )
         )
+
+    for row in _rows(conn, _LATEST_STATUS):
+        verdict = row["verdict"]
+        start = row["start_date"] or ""
+
+        # 판정이 '착공 전'이면 확정 착공일이 있을 수 없다. 낙찰일·심사일을 착공일
+        # 칸에 적는 실수가 잦아 이 모순이 실제로 생긴다.
+        if verdict == BEFORE and start and start <= today:
+            findings.append(
+                Finding(
+                    "판정과 착공일 모순",
+                    f"{row['name']} — 착공일 {start}이 지났는데 판정은 '{verdict}'",
+                )
+            )
+
+        # 근거 URL 없는 강한 판정. 판정 경로가 강등하지만 이관분·수기 입력은
+        # 그 경로를 타지 않아 여기서 잡아야 한다.
+        if verdict in (BUILDING, DONE) and '"url": "http' not in (row["evidence_json"] or ""):
+            findings.append(
+                Finding("근거 없는 강한 판정", f"{row['name']} — 근거 URL 없이 '{verdict}'")
+            )
 
     return findings

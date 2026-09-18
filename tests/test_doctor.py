@@ -8,6 +8,7 @@ from nara.config import load_settings
 from nara.db import connect, migrate
 from nara.doctor import AWARD_BATCH_LIMIT, run_checks
 from nara.store import ensure_project, upsert_org
+from nara.verdict import BEFORE, BUILDING, DONE
 
 SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
 NOW = "2026-09-17T09:00:00"
@@ -34,6 +35,20 @@ def _notice(conn, bid_no, open_date):
     )
     conn.commit()
     return project_id
+
+
+def _project(conn, org_name, project_name):
+    org_id = upsert_org(conn, org_name, SETTINGS, NOW)
+    return ensure_project(conn, org_id, project_name, "g2b", NOW)
+
+
+def _status(conn, project_id, verdict, evidence_json=None, when="2026-09-18T09:00:00"):
+    conn.execute(
+        "INSERT INTO status_check (project_id, verdict, decided_by, evidence_json, checked_at) "
+        "VALUES (?, ?, 'rule', ?, ?)",
+        (project_id, verdict, evidence_json, when),
+    )
+    conn.commit()
 
 
 def test_run_checks_is_quiet_on_clean_database(conn):
@@ -144,3 +159,56 @@ def test_doctor_command_refuses_to_create_missing_db(tmp_path):
     result = CliRunner().invoke(app, ["doctor", "--db", str(missing)])
     assert result.exit_code != 0
     assert not missing.exists()
+
+
+def test_doctor_flags_before_construction_with_a_confirmed_start_date(conn):
+    """'착공 전'인데 확정 착공일이 있으면 둘 중 하나가 틀렸다."""
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+    conn.execute("UPDATE project SET start_date = '2025-11-03' WHERE id = ?", (project_id,))
+    conn.commit()
+    _status(conn, project_id, BEFORE)
+
+    checks = [f.check for f in run_checks(conn, "2026-09-18")]
+
+    assert "판정과 착공일 모순" in checks
+
+
+def test_doctor_is_quiet_when_the_start_date_is_still_ahead(conn):
+    """착공 예정일이 미래면 '착공 전'과 어긋나지 않는다 — 헛경보를 내지 않는다."""
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+    conn.execute("UPDATE project SET start_date = '2027-03-01' WHERE id = ?", (project_id,))
+    conn.commit()
+    _status(conn, project_id, BEFORE)
+
+    checks = [f.check for f in run_checks(conn, "2026-09-18")]
+
+    assert "판정과 착공일 모순" not in checks
+
+
+def test_doctor_flags_a_strong_verdict_without_evidence(conn):
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+    _status(conn, project_id, DONE, evidence_json=None)
+
+    checks = [f.check for f in run_checks(conn, "2026-09-18")]
+
+    assert "근거 없는 강한 판정" in checks
+
+
+def test_doctor_accepts_a_strong_verdict_with_an_evidence_url(conn):
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+    _status(conn, project_id, BUILDING, evidence_json='{"url": "https://news.example.com/1"}')
+
+    checks = [f.check for f in run_checks(conn, "2026-09-18")]
+
+    assert "근거 없는 강한 판정" not in checks
+
+
+def test_doctor_only_looks_at_the_latest_verdict(conn):
+    """뒤집힌 옛 판정까지 잡으면 이력을 쌓을수록 경보가 늘어난다."""
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+    _status(conn, project_id, DONE, when="2026-09-01T09:00:00")
+    _status(conn, project_id, BEFORE, when="2026-09-18T09:00:00")
+
+    checks = [f.check for f in run_checks(conn, "2026-09-18")]
+
+    assert "근거 없는 강한 판정" not in checks
