@@ -414,6 +414,41 @@ def test_judge_prefers_the_most_recent_past_opening_over_a_future_retender(conn)
     assert "건너뛰" in got.reason
 
 
+def test_judge_hands_the_opening_date_to_the_news_reader_as_an_anchor(conn):
+    """C1 — 사업 날짜가 둘 다 비어도 기사 연도 가드가 살아 있어야 한다.
+
+    실데이터 249건 중 196건이 착공일·준공일을 둘 다 갖고 있지 않고, 그중
+    152건은 공고 개찰일을 갖고 있다. judge_project는 규칙 판정에 쓰려고
+    `_project_open_date`로 그 개찰일을 이미 손에 쥐고 있으면서 read_news에
+    넘기지 않았다 — 근거가 있는데 안 쓴 것이다. 그 결과 2006년 개원 기사
+    한 건이 2026년 사업의 '준공 완료'가 됐다.
+    """
+    project_id = _project(conn, "전북특별자치도 완주군", "진안복합노인 복지센터")
+    _add_notice(conn, project_id, "R1", open_date="2026-03-02")
+    found = SearchResult(
+        articles=[Article("진안복합노인 복지센터 개원", "", "https://n/old", "2006-05-26")],
+        searched=True,
+    )
+    asked = []
+
+    def adjudicator(*args, **kwargs):
+        asked.append(True)
+        return None
+
+    got = judge_project(
+        conn,
+        _row(conn, project_id),
+        SECRETS,
+        "2026-09-18",
+        search=lambda *a, **k: found,
+        adjudicator=adjudicator,
+    )
+
+    assert got.verdict == UNKNOWN
+    # 애매하다고 판단했으면 LLM에 물어봐야 한다 — 조용히 확정하지 않는다.
+    assert asked
+
+
 # --- update_statuses: 회차를 돌리고 흔적을 남긴다 (Task 11) ---
 
 

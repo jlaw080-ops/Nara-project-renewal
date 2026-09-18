@@ -109,7 +109,10 @@ def judge_project(
         # articles가 비어도 read_news에 넘긴다 — 진짜 0건은 UNKNOWN·"검색
         # 결과 없음"으로 이미 처리된다(F1). 여기서 걸러내면 성공한 검색이
         # 실패한 검색보다 못한 취급을 받는다.
-        news = read_news(found.articles, dates)
+        # 개찰일도 함께 넘긴다 — 사업 날짜가 둘 다 빈 실데이터 196/249건에서
+        # 기사 연도 가드가 기댈 유일한 기준점이다(C1). 규칙 판정에 쓰려고 이미
+        # 손에 쥔 값이라 새로 읽는 질의가 늘지 않는다.
+        news = read_news(found.articles, dates, open_date)
         if news.needs_llm:
             # 유보·충돌은 진짜 질문이다 — 미확인으로 내려가는 것이 정직한
             # 답이다. LLM이 답을 못 하면 이 뉴스 판정을 그대로 둔다.

@@ -46,6 +46,30 @@ def test_jinan_senior_center_2006_article_does_not_decide_a_2026_project():
     assert got.verdict != DONE
 
 
+def test_jinan_senior_center_is_still_guarded_when_only_the_opening_date_is_known():
+    """같은 사고, 실데이터의 모양 그대로 — 사업 날짜 두 칸이 모두 비어 있다.
+
+    실데이터 249건 중 196건이 착공일·준공일을 둘 다 갖고 있지 않다. 위
+    테스트처럼 두 날짜를 넣어야만 통과하는 가드는 그 196건에서 통째로
+    죽어 있다 — 2006년 개원 기사 한 건이 확신에 찬 '준공 완료'가 된다.
+    공고 개찰일은 그 196건 중 152건이 갖고 있는 유일한 시간 기준점이다.
+    """
+    got = read_news(
+        [
+            Article(
+                "진안복합노인 복지센터 개원",
+                "",
+                "https://news.example.com/jinan",
+                "2006-05-26",
+            )
+        ],
+        ("", ""),
+        open_date="2026-03-02",
+    )
+    assert got.needs_llm is True
+    assert got.verdict != DONE
+
+
 def test_sunchang_gym_completion_and_start_articles_collide():
     """순창군 동계면 종합체육관 — 시트 착공 2025.07.17, 보도는 2020 착공·2025.06.25 준공."""
     got = read_news(

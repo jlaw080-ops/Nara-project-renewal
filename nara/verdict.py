@@ -189,10 +189,20 @@ def _year(iso: str) -> int | None:
     return int(head) if head.isdigit() else None
 
 
-def _far_from(published: str, dates: tuple[str, str]) -> bool:
+def _far_from(published: str, dates: tuple[str, str], open_date: str) -> bool:
+    """개찰일은 사업 날짜가 하나도 없을 때만 쓰는 **대체** 기준점이다.
+
+    사업 날짜가 하나라도 있으면 그쪽이 공사 일정에 직접 붙은 값이라 더
+    가깝다. 개찰일을 언제나 함께 세면 min() 때문에 허용 폭이 넓어져,
+    지금 걸러내고 있는 기사까지 통과시킨다 — 기존 동작이 조용히 느슨해진다.
+    """
     published_year = _year(published)
+    if published_year is None:
+        return False
     years = [y for y in (_year(dates[0]), _year(dates[1])) if y]
-    if published_year is None or not years:
+    if not years:
+        years = [y for y in (_year(open_date),) if y]
+    if not years:
         return False
     return min(abs(published_year - y) for y in years) > _YEAR_GAP
 
@@ -209,8 +219,14 @@ def _pick_with_evidence(group: list[Article]) -> Article:
     return group[0]
 
 
-def read_news(articles: list[Article], project_dates: tuple[str, str]) -> NewsRead:
+def read_news(
+    articles: list[Article], project_dates: tuple[str, str], open_date: str = ""
+) -> NewsRead:
     """기사 묶음에서 판정을 읽는다. 애매하면 판정하지 않고 넘긴다.
+
+    `open_date`는 공고 개찰일이다 — 사업의 착공일·준공일이 둘 다 비었을 때
+    기사 연도를 견줄 대체 기준점으로 쓴다(C1). 기본값이 ""라 이 인자를 안
+    넘기는 호출부의 동작은 그대로다.
 
     판정 순서(R5) — 철거+착공 충돌을 착공/준공 충돌보다 먼저 걸러낸다.
     read_signals가 철거와 착공 낱말이 함께 있는 기사에서 두 신호를 모두
@@ -220,7 +236,7 @@ def read_news(articles: list[Article], project_dates: tuple[str, str]) -> NewsRe
         return NewsRead(UNKNOWN, "검색 결과 없음", "", False, "")
 
     for article in articles:
-        if _far_from(article.published, project_dates):
+        if _far_from(article.published, project_dates, open_date):
             gap = f"기사 연도({article.published[:4]})가 사업 일정과 {_YEAR_GAP}년 넘게 어긋남"
             return NewsRead(UNKNOWN, "기사 연도가 사업 일정과 어긋남", article.url, True, gap)
 
