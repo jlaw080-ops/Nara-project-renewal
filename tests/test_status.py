@@ -370,7 +370,9 @@ def test_judge_does_not_let_an_irrelevant_article_erase_a_known_fact(conn):
 
     assert got.verdict == BEFORE
     assert got.decided_by == "rule"
-    assert "뉴스: 관련 신호 없음" in got.reason
+    # 기사를 받았지만 그 사업 기사가 아니어서 걸러낸 것이다. '검색 결과
+    # 없음'으로 적으면 검색이 헛돈 것과 구분이 안 된다.
+    assert "뉴스: 그 사업을 가리키는 기사 없음(1건 걸러냄)" in got.reason
 
 
 def test_judge_keeps_the_rule_verdict_on_a_genuine_zero_result_search(conn):

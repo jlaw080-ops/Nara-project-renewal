@@ -15,6 +15,7 @@ from nara.verdict import (
     demote_without_evidence,
     read_news,
     read_signals,
+    relevant_articles,
     rule_verdict,
     should_record,
 )
@@ -524,3 +525,59 @@ def test_backward_guard_ignores_verdicts_outside_the_ordering():
         Judgment(BEFORE, "설계 보도", "news", "https://n/d"),
     )
     assert ok is True
+
+
+def test_relevant_articles_drops_an_article_about_another_building():
+    """실측 오판 — 같은 동네 다른 건물이 '시공 중'을 만들었다.
+
+    사업은 '정자동 아동복합문화센터', 기사는 '정자1·수내2동 행정복지센터'다.
+    검색 엔진은 늘 뭔가를 돌려주므로 돌려받은 것을 그대로 믿으면 안 된다.
+    """
+    article = Article(
+        "성남시 정자1·수내2동 행정복지센터 신축… 22일 동시 착공", "", "https://n/1", "2021-02-19"
+    )
+    assert relevant_articles([article], "정자동 아동복합문화센터 건립공사") == []
+
+
+def test_relevant_articles_drops_an_article_about_another_region():
+    """실측 오판 — 강원도 정선의 13년 전 공원이 고창의 센터를 '준공 완료'로 만들었다."""
+    article = Article("정선 아라리 공원, 아리랑 문화공원으로 준공", "", "https://n/2", "2013-04-10")
+    assert relevant_articles([article], "고창갯벌 세계유산 지역센터") == []
+
+
+def test_relevant_articles_keeps_the_article_that_names_the_project():
+    """실측 정답 — 이걸 버리면 검사가 과한 것이다."""
+    article = Article("성남시, 여수동 복합문화시설 건립 착공", "", "https://n/3", "2026-02-12")
+    got = relevant_articles([article], "여수동 복합문화시설 건립공사")
+    assert got == [article]
+
+
+def test_relevant_articles_keeps_a_partial_but_real_match():
+    """'국민체육센터'와 '체육센터'처럼 조금 달라도 핵심 둘이 겹치면 같은 사업이다."""
+    article = Article(
+        "고창군 '유아친화형 체육센터' 공모 선정 국비 30억 확보", "", "https://n/4", "2024-10-10"
+    )
+    got = relevant_articles([article], "고창군 유아친화형 국민체육센터 건립사업")
+    assert got == [article]
+
+
+def test_relevant_articles_is_not_fooled_by_a_shared_city_name():
+    """지자체명 하나만 겹치는 건 같은 사업이라는 근거가 못 된다."""
+    article = Article("성남시 체육관 건립사업 착공", "", "https://n/5", "2026-03-01")
+    assert relevant_articles([article], "성남시 도서관 건립공사") == []
+
+
+def test_relevant_articles_needs_the_whole_name_when_it_is_one_word():
+    """낱말이 하나뿐인 사업명은 그 하나가 겹쳐야 한다."""
+    hit = Article("무장면문화체육센터 준공식", "", "https://n/6", "2026-05-01")
+    miss = Article("무장면 도로 확포장 공사 착공", "", "https://n/7", "2026-05-01")
+    assert relevant_articles([hit, miss], "무장면문화체육센터") == [hit]
+
+
+def test_relevant_articles_reads_the_body_when_there_is_one():
+    """네이버처럼 본문이 오는 소스에서는 본문도 근거가 된다."""
+    article = Article(
+        "성남시, 복합문화시설 건립 착공", "여수동 복합문화시설이다", "https://n/8", ""
+    )
+    got = relevant_articles([article], "여수동 복합문화시설 건립공사")
+    assert got == [article]

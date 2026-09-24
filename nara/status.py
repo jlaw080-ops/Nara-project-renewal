@@ -18,6 +18,7 @@ from nara.verdict import (
     date_conflict,
     demote_without_evidence,
     read_news,
+    relevant_articles,
     rule_verdict,
     should_record,
 )
@@ -146,7 +147,12 @@ def judge_project(
     verdict, reason = rule_verdict(Facts(has_winner=has_winner, open_date=open_date, today=today))
     decided_by, evidence_url = "rule", ""
 
-    found = search(secrets, f"{news_query(row['name'])} 착공 준공")
+    query = news_query(row["name"])
+    found = search(secrets, f"{query} 착공 준공")
+    # 검색 엔진은 늘 뭔가를 돌려준다. 그 사업을 가리키지 않는 기사를 먼저
+    # 걷어낸다 — LLM에게도 거른 뒤의 기사만 보인다. 안 그러면 같은 오판이
+    # 한 단계 아래로 옮겨갈 뿐이다.
+    articles = relevant_articles(found.articles, query)
     if found.searched:
         # articles가 비어도 read_news에 넘긴다 — 진짜 0건은 UNKNOWN·"검색
         # 결과 없음"으로 이미 처리된다(F1). 여기서 걸러내면 성공한 검색이
@@ -154,7 +160,7 @@ def judge_project(
         # 개찰일도 함께 넘긴다 — 사업 날짜가 둘 다 빈 실데이터 196/249건에서
         # 기사 연도 가드가 기댈 유일한 기준점이다(C1). 규칙 판정에 쓰려고 이미
         # 손에 쥔 값이라 새로 읽는 질의가 늘지 않는다.
-        news = read_news(found.articles, dates, open_date)
+        news = read_news(articles, dates, open_date)
         if news.needs_llm:
             # 유보·충돌은 진짜 질문이다 — 미확인으로 내려가는 것이 정직한
             # 답이다. LLM이 답을 못 하면 이 뉴스 판정을 그대로 둔다.
@@ -164,7 +170,7 @@ def judge_project(
                 news.evidence_url,
                 "news",
             )
-            answer = adjudicator(secrets, row["name"], found.articles, news.llm_reason)
+            answer = adjudicator(secrets, row["name"], articles, news.llm_reason)
             if answer is not None:
                 verdict, reason = answer
                 decided_by = "llm"
@@ -193,7 +199,17 @@ def judge_project(
             # 뉴스가 아무 말도 못 했다(관련 기사 없음 또는 진짜 0건) — DB가
             # 이미 아는 사실(규칙 판정)을 지우지 않는다(F2). 뉴스를
             # 확인했다는 사실만 사유에 남긴다.
-            reason = f"{reason} (뉴스: {news.reason})"
+            #
+            # 기사를 받았는데 전부 걸러냈으면 '검색 결과 없음'이 아니다.
+            # 그렇게 적으면 검색이 헛돌았는지 그 사업 기사가 없었는지
+            # 구분이 안 된다 — 걸러냈다는 사실을 그대로 적는다.
+            dropped = len(found.articles) - len(articles)
+            note = (
+                f"그 사업을 가리키는 기사 없음({dropped}건 걸러냄)"
+                if dropped and not articles
+                else news.reason
+            )
+            reason = f"{reason} (뉴스: {note})"
     elif found.note:
         # 검색을 안 했거나 실패했다는 사실을 근거에 남긴다. 조용히 넘어가지 않는다.
         reason = f"{reason} ({found.note})"

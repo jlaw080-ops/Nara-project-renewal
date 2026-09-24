@@ -243,6 +243,66 @@ def _pick_with_evidence(group: list[Article]) -> Article:
     return group[0]
 
 
+# 사업명에 흔히 붙는 일반 낱말. 이것만 겹치는 건 같은 사업이라는 근거가
+# 못 된다 — '성남시 도서관'이 '성남시 체육관 건립사업 착공'에 걸린다.
+_GENERIC_WORDS = (
+    "건립사업",
+    "건립공사",
+    "건립",
+    "조성사업",
+    "조성",
+    "구축사업",
+    "구축",
+    "신축공사",
+    "신축",
+    "증축",
+    "리모델링공사",
+    "리모델링",
+    "보수",
+    "정비",
+    "확충",
+    "사업",
+    "공사",
+)
+
+
+def _key_words(name: str) -> list[str]:
+    """사업명에서 그 사업을 가리키는 낱말만 남긴다.
+
+    전부 일반 낱말이면 골라낼 것이 없으니 원래 낱말을 그대로 쓴다 —
+    빈 목록을 돌려주면 모든 기사가 걸러진다.
+    """
+    words = [w for w in (name or "").split() if w]
+    keys = [w for w in words if w not in _GENERIC_WORDS]
+    return keys or words
+
+
+def relevant_articles(articles: list[Article], project_name: str) -> list[Article]:
+    """그 사업을 실제로 가리키는 기사만 남긴다.
+
+    검색 엔진은 늘 뭔가를 돌려준다. 돌려받은 것을 그대로 믿으면 같은
+    동네의 다른 건물이나 다른 지역의 옛 시설이 판정을 만든다 — 실측에서
+    확신 판정 4건 중 2건이 그랬다.
+
+    핵심 낱말 둘이 겹쳐야 한다. 핵심 낱말이 하나뿐인 사업명은 그 하나가
+    겹쳐야 한다. 지자체명 하나만 겹치는 것으로는 모자란다.
+
+    거르다 남는 게 없으면 뉴스가 아무 말도 못 한 것이 된다 — 호출부가
+    규칙 판정을 그대로 두므로 근거 없는 판정이 나가지 않는다.
+    """
+    keys = _key_words(project_name)
+    if not keys:
+        return list(articles)
+    need = 1 if len(keys) == 1 else 2
+
+    kept = []
+    for article in articles:
+        text = f"{article.title} {article.body}"
+        if sum(1 for k in keys if k in text) >= need:
+            kept.append(article)
+    return kept
+
+
 def read_news(
     articles: list[Article], project_dates: tuple[str, str], open_date: str = ""
 ) -> NewsRead:
