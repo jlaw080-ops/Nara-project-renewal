@@ -12,6 +12,7 @@ from nara.verdict import (
     Facts,
     Judgment,
     date_conflict,
+    demote_premature_completion,
     demote_without_evidence,
     read_news,
     read_signals,
@@ -581,3 +582,37 @@ def test_relevant_articles_reads_the_body_when_there_is_one():
     )
     got = relevant_articles([article], "여수동 복합문화시설 건립공사")
     assert got == [article]
+
+
+def test_demote_premature_completion_rejects_a_done_before_the_planned_date():
+    """준공예정일이 2년 남았는데 준공 완료일 수 없다 — 실측 오판.
+
+    시흥시 해양레저관광 클럽하우스: 시트 준공일 2028-05-19인데 기사
+    한 건으로 '준공 완료'가 찍혔다. 준공 완료는 마지막 단계라 후퇴
+    금지 가드 때문에 한번 찍히면 뉴스로는 되돌릴 수 없다.
+    """
+    verdict, note = demote_premature_completion(DONE, ("", "2028-05-19"), "2026-09-24")
+    assert verdict == UNKNOWN
+    assert note and "2028-05-19" in note
+
+
+def test_demote_premature_completion_accepts_a_done_after_the_planned_date():
+    """예정일이 지났으면 준공 보도를 의심할 근거가 없다."""
+    verdict, note = demote_premature_completion(DONE, ("", "2026-03-01"), "2026-09-24")
+    assert verdict == DONE
+    assert note is None
+
+
+def test_demote_premature_completion_accepts_a_done_with_no_planned_date():
+    """비교할 날짜가 없으면 의심하지 않는다 — 가드가 과하면 진짜 준공을 놓친다."""
+    verdict, note = demote_premature_completion(DONE, ("", ""), "2026-09-24")
+    assert verdict == DONE
+    assert note is None
+
+
+def test_demote_premature_completion_leaves_other_verdicts_alone():
+    """시공 중·착공 전은 예정일보다 이른 게 당연하다."""
+    for other in (BEFORE, BUILDING, UNKNOWN):
+        verdict, note = demote_premature_completion(other, ("", "2028-05-19"), "2026-09-24")
+        assert verdict == other
+        assert note is None

@@ -370,9 +370,10 @@ def test_judge_does_not_let_an_irrelevant_article_erase_a_known_fact(conn):
 
     assert got.verdict == BEFORE
     assert got.decided_by == "rule"
-    # 기사를 받았지만 그 사업 기사가 아니어서 걸러낸 것이다. '검색 결과
-    # 없음'으로 적으면 검색이 헛돈 것과 구분이 안 된다.
-    assert "뉴스: 그 사업을 가리키는 기사 없음" in got.reason
+    # 사업명이 '사업' 한 낱말이라 핵심 낱말이 지자체('완주군')뿐이다.
+    # 신년사 기사도 '완주군'을 담고 있어 관련성 검사는 통과하고, 그 다음
+    # 신호 검사에서 걸린다. 어느 쪽에서 걸리든 규칙 판정은 지켜진다.
+    assert "뉴스: 관련 신호 없음" in got.reason
 
 
 def test_judge_keeps_the_rule_verdict_on_a_genuine_zero_result_search(conn):
@@ -916,3 +917,23 @@ def test_news_query_falls_back_rather_than_return_a_stub():
     질의를 만드는 것보다 0건이 낫다."""
     assert news_query("설계용역") == "설계용역"
     assert news_query("") == ""
+
+
+def test_news_query_adds_the_municipality_when_the_name_lacks_it():
+    """실측 오판 — '장애인회관 건립사업'은 전국 어디에나 있다.
+
+    지자체가 빠지면 산청군·김천시·충북도 기사가 전부 같은 사업으로
+    읽힌다. 기관명의 마지막 낱말(시·군·구)이 기사에 쓰이는 이름이다.
+    """
+    assert news_query("장애인회관 건립사업", "경상남도 산청군") == "산청군 장애인회관 건립사업"
+
+
+def test_news_query_does_not_repeat_a_municipality_already_in_the_name():
+    """'고창군 고창군 …'이 되면 질의가 망가진다."""
+    got = news_query("고창군 유아친화형 국민체육센터 건립사업", "전북특별자치도 고창군")
+    assert got == "고창군 유아친화형 국민체육센터 건립사업"
+
+
+def test_news_query_works_without_an_org():
+    """기관명이 없어도 예전처럼 동작한다."""
+    assert news_query("무장면문화체육센터") == "무장면문화체육센터"

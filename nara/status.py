@@ -16,6 +16,7 @@ from nara.verdict import (
     Facts,
     Judgment,
     date_conflict,
+    demote_premature_completion,
     demote_without_evidence,
     read_news,
     relevant_articles,
@@ -79,8 +80,13 @@ _QUERY_TAIL = ("기본", "및", "실시", "보완", "건축", "일괄", "기타"
 _QUERY_BRACKET = re.compile(r"^\s*[\[(（【][^\])）】]*[\])）】]\s*")
 
 
-def news_query(name: str) -> str:
-    """사업명에서 뉴스에 나올 리 없는 조달 용어를 떼어낸다.
+def news_query(name: str, org_name: str = "") -> str:
+    """사업명에서 뉴스에 나올 리 없는 조달 용어를 떼고, 없으면 지자체를 붙인다.
+
+    '장애인회관 건립사업' 같은 이름은 전국 어디에나 있다. 지자체가 빠지면
+    산청군·김천시·충북도 기사가 전부 같은 사업으로 읽힌다(실측). 기관명의
+    마지막 낱말(시·군·구)이 기사에 실제로 쓰이는 이름이다 — '경상남도
+    산청군'이 아니라 '산청군'.
 
     잘라서 남는 게 너무 짧으면 원래 이름을 그대로 쓴다 — 아무 사업이나
     걸리는 질의를 만드는 것보다 0건이 낫다.
@@ -92,8 +98,14 @@ def news_query(name: str) -> str:
     parts = text.split()
     while parts and parts[-1] in _QUERY_TAIL:
         parts.pop()
-    trimmed = " ".join(parts).strip(" ,-·")
-    return trimmed if len(trimmed) >= 4 else (name or "").strip()
+    trimmed = " ".join(parts).strip(" ,-·") or (name or "").strip()
+    if len(trimmed) < 4:
+        trimmed = (name or "").strip()
+
+    town = (org_name or "").split()[-1] if (org_name or "").split() else ""
+    if town and town not in trimmed:
+        trimmed = f"{town} {trimmed}".strip()
+    return trimmed
 
 
 def _project_open_date(conn: sqlite3.Connection, project_id: int, today: str) -> str:
@@ -147,7 +159,7 @@ def judge_project(
     verdict, reason = rule_verdict(Facts(has_winner=has_winner, open_date=open_date, today=today))
     decided_by, evidence_url = "rule", ""
 
-    query = news_query(row["name"])
+    query = news_query(row["name"], row["org_name"])
     found = search(secrets, f"{query} 착공 준공")
     # 검색 엔진은 늘 뭔가를 돌려준다. 그 사업을 가리키지 않는 기사를 먼저
     # 걷어낸다 — LLM에게도 거른 뒤의 기사만 보인다. 안 그러면 같은 오판이
@@ -213,6 +225,13 @@ def judge_project(
     elif found.note:
         # 검색을 안 했거나 실패했다는 사실을 근거에 남긴다. 조용히 넘어가지 않는다.
         reason = f"{reason} ({found.note})"
+
+    # 준공예정일이 아직인데 준공 보도가 왔으면 기계가 가릴 일이 아니다.
+    # '준공 완료'는 마지막 단계라 후퇴 금지 가드 때문에 한번 찍히면
+    # 되돌아오지 않는다 — 틀린 채로 영구히 남는다.
+    verdict, premature = demote_premature_completion(verdict, dates, today)
+    if premature:
+        reason = f"{reason} / {premature}"
 
     conflict = date_conflict(verdict, dates, today)
     if conflict:

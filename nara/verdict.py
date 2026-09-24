@@ -87,6 +87,28 @@ def date_conflict(verdict: str, project_dates: tuple[str, str], today: str) -> s
     return None
 
 
+def demote_premature_completion(
+    verdict: str, project_dates: tuple[str, str], today: str
+) -> tuple[str, str | None]:
+    """준공예정일이 아직인데 '준공 완료'라고 하면 판정하지 않는다.
+
+    스펙의 도메인 사실은 '준공예정일 경과 ≠ 준공'이다. 그 반대는 더
+    이상하다 — 예정일이 2년 남은 사업을 기사 한 건으로 준공이라 할 수는
+    없다. 대개 같은 이름의 다른 시설이거나 다른 공정의 준공이다.
+
+    이걸 막아야 하는 이유가 하나 더 있다. '준공 완료'는 마지막 단계라
+    후퇴 금지 가드 때문에 한번 찍히면 어떤 뉴스로도 되돌아오지 않는다.
+    틀린 채로 영구히 남는다.
+
+    미확인으로 내린다 — 미확인은 이미 있는 판정을 덮지 않으므로 사람이
+    확인해 둔 판정이 그대로 지켜진다.
+    """
+    _, end = project_dates
+    if verdict == DONE and end and end > today:
+        return UNKNOWN, f"시트 준공일 {end}이 아직이라 준공 보도를 그대로 받지 않음"
+    return verdict, None
+
+
 @dataclass(frozen=True)
 class Facts:
     """공고에서 바로 읽히는 사실만 담는다. 추정한 값은 넣지 않는다."""
