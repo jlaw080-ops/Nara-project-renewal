@@ -12,9 +12,9 @@ from nara.collect import collect_range
 from nara.config import load_secrets, load_settings
 from nara.db import connect, migrate
 from nara.doctor import run_checks
+from nara.google import search_news
 from nara.llm import adjudicate
 from nara.migrate_sheets import import_tab
-from nara.naver import search_news
 from nara.runlog import run_log
 from nara.status import update_statuses
 
@@ -165,8 +165,9 @@ def enrich_status(
 
     secrets = load_secrets(DEFAULT_ENV)
     skipped = []
-    if not (secrets.naver_client_id and secrets.naver_client_secret):
-        skipped.append("네이버 검색 키가 없어 뉴스 검색을 건너뛴다 — 규칙 판정만 남는다")
+    # 구글 뉴스 RSS는 키를 요구하지 않아 '건너뛴다' 안내가 없다. 대신 본문이
+    # 오지 않아 제목만으로 신호를 읽는다 — 그 사실은 회차마다 말해 둔다.
+    skipped.append("구글 뉴스는 기사 본문을 주지 않는다 — 제목만으로 읽어 미확인이 늘 수 있다")
     if not secrets.anthropic_api_key:
         skipped.append("Claude API 키가 없어 애매한 건을 미확인으로 남긴다")
 
@@ -208,7 +209,7 @@ def enrich_status(
     # status_check.reason 안의 문자열 조각이라 무인 실행에서 아무도 못 읽었다.
     if run.search_failed:
         typer.echo(
-            f"뉴스 검색에 실패한 건 {run.search_failed}건 — 네이버 키나 네트워크를 확인한다",
+            f"뉴스 검색에 실패한 건 {run.search_failed}건 — 네트워크나 구글 응답을 확인한다",
             err=True,
         )
     # R25: Claude 키가 있을 때만 이 숫자가 의미를 갖는다 — 키가 없어 못

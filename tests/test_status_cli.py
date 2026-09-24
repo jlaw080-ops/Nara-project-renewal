@@ -1,17 +1,33 @@
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 import nara.cli as cli
 from nara.cli import app
 from nara.config import Secrets, load_settings
 from nara.db import connect, migrate
+from nara.naver import SearchResult
 from nara.store import ensure_project, upsert_org
 from nara.verdict import Article
 
 SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
 NOW = "2026-09-18T09:00:00"
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """테스트가 실제 구글에 나가지 않게 막는다.
+
+    네이버 시절에는 키가 없으면 search_news가 일찍 돌아와 호출이 없었다.
+    구글 RSS는 키를 요구하지 않아 그 우연한 차단이 사라졌다 — 실제로
+    news.google.com에 9번 나가는 것을 확인하고 막았다. 망에 기대는
+    테스트는 오프라인에서 깨지고 느리고 들쭉날쭉하다.
+    """
+    monkeypatch.setattr(
+        cli, "search_news", lambda client, secrets, query: SearchResult(searched=True)
+    )
 
 
 def _db(tmp_path, projects=1):
@@ -37,7 +53,13 @@ def test_enrich_status_rejects_nonpositive_limit(tmp_path):
 
 
 def test_enrich_status_says_which_steps_it_skipped(tmp_path, monkeypatch):
-    """키가 없으면 그 사실이 화면에 나와야 한다 — 스펙이 요구한다."""
+    """줄어든 기능과 건너뛴 단계가 화면에 나와야 한다 — 스펙이 요구한다.
+
+    구글 뉴스는 키를 요구하지 않아 '검색을 건너뛴다'는 안내가 없다. 대신
+    본문이 오지 않는다는 사실을 말해야 한다 — 그게 판정을 약하게 만드는
+    줄어든 기능이고, 조용히 넘어가면 제목만 읽은 회차를 온전한 판정으로
+    착각하게 된다.
+    """
     monkeypatch.setattr(
         cli,
         "load_secrets",
@@ -47,7 +69,7 @@ def test_enrich_status_says_which_steps_it_skipped(tmp_path, monkeypatch):
     )
     result = runner.invoke(app, ["enrich", "status", "--db", str(_db(tmp_path))])
     assert result.exit_code == 0
-    assert "네이버" in result.output
+    assert "본문" in result.output
     assert "Claude" in result.output
 
 
