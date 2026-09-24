@@ -8,7 +8,7 @@ from nara.db import connect, migrate
 from nara.g2b.list_api import NoticeItem
 from nara.naver import SearchResult
 from nara.runlog import RunCounters
-from nara.status import judge_project, pending_status_projects, update_statuses
+from nara.status import judge_project, news_query, pending_status_projects, update_statuses
 from nara.store import ensure_project, upsert_notice, upsert_org
 from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN, Article
 
@@ -872,3 +872,45 @@ def test_update_statuses_does_not_let_news_walk_back_an_imported_verdict(conn):
     ).fetchone()
     assert latest["verdict"] == BUILDING
     assert latest["decided_by"] == "imported"
+
+
+def test_news_query_drops_the_tender_boilerplate():
+    """사업명은 입찰 공고 제목 그대로다 — 기사에 없는 낱말이 붙어 있다.
+
+    구글 뉴스는 모든 낱말을 AND로 묶는다. '설계의도구현'이 들어간 질의는
+    0건이 되고, 떼면 그 사업의 착공 기사가 바로 나온다. 실측으로 확인했다.
+    """
+    assert (
+        news_query("판교대장 종합사회복지관 건립공사 설계의도구현")
+        == "판교대장 종합사회복지관 건립공사"
+    )
+    assert (
+        news_query("고창읍성 풍류체험시설 조성사업 실시설계용역 입찰 공고")
+        == "고창읍성 풍류체험시설 조성사업"
+    )
+
+
+def test_news_query_does_not_leave_a_dangling_modifier():
+    """'기본 및 실시설계'를 '설계'에서만 자르면 '기본 및 실시'가 남는다."""
+    assert (
+        news_query("감염병 대응 관리센터 건립사업 기본 및 실시설계 용역")
+        == "감염병 대응 관리센터 건립사업"
+    )
+
+
+def test_news_query_survives_a_leading_bracket():
+    """머리에 붙은 '[수의시담]'에서 자르면 이름이 통째로 사라진다."""
+    got = news_query("[수의시담] 청주시 공공형 실내놀이터 리모델링공사 설계의도구현 용역")
+    assert got == "청주시 공공형 실내놀이터 리모델링공사"
+
+
+def test_news_query_keeps_a_name_that_has_no_boilerplate():
+    assert news_query("무장면문화체육센터") == "무장면문화체육센터"
+    assert news_query("진영권역 종합사회복지관 증축") == "진영권역 종합사회복지관 증축"
+
+
+def test_news_query_falls_back_rather_than_return_a_stub():
+    """잘라서 남는 게 없으면 원래 이름을 쓴다 — 아무 사업이나 걸리는
+    질의를 만드는 것보다 0건이 낫다."""
+    assert news_query("설계용역") == "설계용역"
+    assert news_query("") == ""

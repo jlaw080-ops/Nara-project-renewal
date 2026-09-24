@@ -1,6 +1,7 @@
 """진행현황 판정 파이프라인."""
 
 import json
+import re
 import sqlite3
 import time
 from collections.abc import Callable
@@ -54,6 +55,46 @@ def pending_status_projects(
     return list(conn.execute("\n".join(sql), params))
 
 
+# 사업명은 입찰 공고 제목 그대로라 조달 용어가 붙어 있다. 기사에는 그런
+# 낱말이 없고, 검색은 낱말을 AND로 묶는다 — '설계의도구현'이 들어간 질의는
+# 0건이 된다. 실측: 이관된 152건 중 109건이 이 꼬리를 달고 있었고, 떼자
+# 0건이던 질의들이 그 사업의 착공 기사를 바로 물어 왔다.
+_QUERY_MARKERS = (
+    "설계",
+    "용역",
+    "공모",
+    "공고",
+    "입찰",
+    "수의시담",
+    "사업수행능력",
+    "턴키",
+    "기술제안",
+    "적격심사",
+)
+# 마커에서 자르면 '기본 및 실시설계'가 '기본 및 실시'로 남는다. 꼬리에
+# 남는 수식어를 마저 뗀다.
+_QUERY_TAIL = ("기본", "및", "실시", "보완", "건축", "일괄", "기타", "변경", "추가")
+# 머리에 붙은 '[수의시담]'에서 자르면 이름이 통째로 사라진다. 먼저 걷어낸다.
+_QUERY_BRACKET = re.compile(r"^\s*[\[(（【][^\])）】]*[\])）】]\s*")
+
+
+def news_query(name: str) -> str:
+    """사업명에서 뉴스에 나올 리 없는 조달 용어를 떼어낸다.
+
+    잘라서 남는 게 너무 짧으면 원래 이름을 그대로 쓴다 — 아무 사업이나
+    걸리는 질의를 만드는 것보다 0건이 낫다.
+    """
+    text = _QUERY_BRACKET.sub("", name or "").strip()
+    cut = min((text.find(m) for m in _QUERY_MARKERS if m in text), default=-1)
+    if cut > 0:
+        text = text[:cut]
+    parts = text.split()
+    while parts and parts[-1] in _QUERY_TAIL:
+        parts.pop()
+    trimmed = " ".join(parts).strip(" ,-·")
+    return trimmed if len(trimmed) >= 4 else (name or "").strip()
+
+
 def _project_open_date(conn: sqlite3.Connection, project_id: int, today: str) -> str:
     """개찰일 하나를 고른다 — 이미 지난 개찰 중 가장 최근 것을 우선한다.
 
@@ -105,7 +146,7 @@ def judge_project(
     verdict, reason = rule_verdict(Facts(has_winner=has_winner, open_date=open_date, today=today))
     decided_by, evidence_url = "rule", ""
 
-    found = search(secrets, f"{row['name']} 착공 준공")
+    found = search(secrets, f"{news_query(row['name'])} 착공 준공")
     if found.searched:
         # articles가 비어도 read_news에 넘긴다 — 진짜 0건은 UNKNOWN·"검색
         # 결과 없음"으로 이미 처리된다(F1). 여기서 걸러내면 성공한 검색이
