@@ -202,13 +202,13 @@ def judge_project(
             #
             # 기사를 받았는데 전부 걸러냈으면 '검색 결과 없음'이 아니다.
             # 그렇게 적으면 검색이 헛돌았는지 그 사업 기사가 없었는지
-            # 구분이 안 된다 — 걸러냈다는 사실을 그대로 적는다.
-            dropped = len(found.articles) - len(articles)
-            note = (
-                f"그 사업을 가리키는 기사 없음({dropped}건 걸러냄)"
-                if dropped and not articles
-                else news.reason
-            )
+            # 구분이 안 된다 — 걸러냈다는 사실을 적는다.
+            #
+            # 걸러낸 건수는 적지 않는다. 구글이 회차마다 다른 건수를
+            # 돌려줘 사유가 흔들리고, should_record가 그걸 '달라진 판정'으로
+            # 보아 같은 말을 하는 줄이 계속 쌓인다(실측: 2회차에 1건).
+            dropped = len(found.articles) > len(articles) == 0
+            note = "그 사업을 가리키는 기사 없음" if dropped else news.reason
             reason = f"{reason} (뉴스: {note})"
     elif found.note:
         # 검색을 안 했거나 실패했다는 사실을 근거에 남긴다. 조용히 넘어가지 않는다.
