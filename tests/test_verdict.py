@@ -616,3 +616,53 @@ def test_demote_premature_completion_leaves_other_verdicts_alone():
         verdict, note = demote_premature_completion(other, ("", "2028-05-19"), "2026-09-24")
         assert verdict == other
         assert note is None
+
+
+def test_read_signals_reads_a_half_year_completion_as_planned():
+    """실측 오판 — 동백1동 행정복지센터.
+
+    '2025년 하반기 준공'은 2023년에 나온 계획 발표인데 '준공 완료'가 됐다.
+    준공을 보도할 때는 날짜를 쓴다 — '하반기'라고 쓰는 건 아직 안 됐다는
+    뜻이다.
+    """
+    signals = read_signals(
+        _a(title="용인시 분동된 동백1동 행정복지센터, 2025년 하반기 준공", published="2023-01-12")
+    )
+    assert SIGNAL_DONE in signals
+    assert SIGNAL_PLANNED in signals
+
+
+def test_read_signals_reads_other_period_words_as_planned():
+    for title in (
+        "체육관 상반기 준공",
+        "복지관 연내 준공",
+        "도서관 내년 착공",
+    ):
+        assert SIGNAL_PLANNED in read_signals(_a(title=title)), title
+
+
+def test_read_news_defers_a_half_year_completion():
+    """계획 발표 하나로 준공 완료가 나가지 않는다 — 끝까지 확인한다."""
+    got = read_news(
+        [
+            Article(
+                "용인시 분동된 동백1동 행정복지센터, 2025년 하반기 준공",
+                "",
+                "https://n/1",
+                "2023-01-12",
+            )
+        ],
+        ("", ""),
+    )
+    assert got.verdict == UNKNOWN
+    assert got.needs_llm is True
+
+
+def test_read_news_still_reads_a_dated_completion_as_done():
+    """반대 방향 — 날짜를 들고 온 준공 보도는 여전히 준공 완료다."""
+    got = read_news(
+        [Article("완주군 종합사회복지관 준공식 개최", "", "https://n/2", "2026-08-28")],
+        ("", ""),
+    )
+    assert got.verdict == DONE
+    assert got.needs_llm is False
