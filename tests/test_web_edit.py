@@ -36,7 +36,10 @@ def test_check_info_accepts_the_current_values_unchanged():
 
 
 def test_check_info_keeps_a_field_that_the_form_did_not_send():
-    """옛 화면을 열어 둔 채 저장하거나 손으로 만든 요청이면 칸이 빠진다. 빠진 칸을 지우면 안 된다."""
+    """옛 화면을 열어 둔 채 저장하거나 손으로 만든 요청이면 칸이 빠진다.
+
+    빠진 칸을 지우면 안 된다.
+    """
     form = _form()
     del form["note"]
     assert check_info(form, CURRENT, None).values["note"] == "예정공사비: 10억"
