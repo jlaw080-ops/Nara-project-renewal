@@ -10,7 +10,13 @@ from nara.config import load_settings
 from nara.db import connect, migrate
 from nara.store import ensure_project, upsert_org
 from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN
-from nara.web.data import DatabaseMissing, list_projects, open_readonly
+from nara.web.data import (
+    DatabaseMissing,
+    list_projects,
+    open_readonly,
+    project_detail,
+    safe_url,
+)
 from nara.web.query import NO_VERDICT, Filters
 
 
@@ -121,6 +127,11 @@ def _list(path, **kw):
 
 def _names(result):
     return [row["name"] for row in result.rows]
+
+
+def _detail(path, project_id):
+    with closing(open_readonly(path)) as conn:
+        return project_detail(conn, project_id)
 
 
 def test_open_readonly_refuses_writes(tmp_path):
@@ -293,3 +304,130 @@ def test_list_keeps_the_last_department_that_had_a_name(world):
     conn.close()
     row = next(r for r in _list(path).rows if r["id"] == ids["gym"])
     assert row["exec_dept"] == "체육진흥과"
+
+
+def test_project_detail_is_none_for_an_unknown_id(world):
+    assert _detail(world[0], 999999) is None
+
+
+def test_project_detail_lists_every_notice_newest_first_with_awards(world):
+    """재공고가 있으면 무슨 일이 있었는지 상세에서 다 보여야 한다. 목록은 최신 하나만 보인다."""
+    path, ids = world
+    d = _detail(path, ids["welfare"])
+    assert [n["bid_no"] for n in d.notices] == ["N2B", "N2A"]
+    assert d.notices[0]["winner"] == "가건축"
+    assert d.notices[1]["winner"] is None
+    assert d.project["org_name"] == "전북특별자치도 완주군"
+
+
+def test_project_detail_shows_the_whole_verdict_history_newest_first(world):
+    """status_check는 쌓이는 표인데 파이프라인은 최신 한 줄만 쓴다. 이력은 여기서 처음 보인다."""
+    path, ids = world
+    conn = connect(path)
+    _verdict(
+        conn,
+        ids["gym"],
+        BUILDING,
+        when="2026-09-25T09:00:00",
+        decided_by="news",
+        reason="착공·기공식 보도",
+    )
+    conn.commit()
+    conn.close()
+    d = _detail(path, ids["gym"])
+    assert [(h.verdict, h.decided_by) for h in d.history] == [(BUILDING, "뉴스"), (BEFORE, "규칙")]
+    assert d.history[0].reason == "착공·기공식 보도"
+
+
+def test_project_detail_shows_an_unfamiliar_decider_as_is(world):
+    """모르는 값을 지우지 않는다. 그대로 보여야 무엇이 들어왔는지 안다."""
+    path, ids = world
+    conn = connect(path)
+    _verdict(conn, ids["culture"], UNKNOWN, decided_by="robot")
+    conn.commit()
+    conn.close()
+    assert _detail(path, ids["culture"]).history[0].decided_by == "robot"
+
+
+def test_project_detail_reads_the_evidence_url(world):
+    path, ids = world
+    conn = connect(path)
+    _verdict(conn, ids["culture"], BUILDING, evidence_json='{"url": "https://news.example.com/1"}')
+    conn.commit()
+    conn.close()
+    assert _detail(path, ids["culture"]).history[0].evidence_url == "https://news.example.com/1"
+
+
+def test_project_detail_survives_broken_evidence_json(world):
+    """근거가 깨졌다고 상세 화면이 죽으면 그 사업의 나머지 자료까지 못 본다."""
+    path, ids = world
+    conn = connect(path)
+    for i, raw in enumerate(['{"url": ', '["https://x"]', '{"url": 3}', "{}", None]):
+        _verdict(
+            conn,
+            ids["culture"],
+            UNKNOWN,
+            when=f"2026-09-2{i}T09:00:00",
+            reason=f"r{i}",
+            evidence_json=raw,
+        )
+    conn.commit()
+    conn.close()
+    d = _detail(path, ids["culture"])
+    assert len(d.history) == 5
+    assert all(h.evidence_url == "" for h in d.history)
+
+
+def test_project_detail_never_links_a_script_url(world):
+    """자동 이스케이프는 href의 'javascript:'를 막지 못한다. 근거는 뉴스·LLM에서 온다."""
+    path, ids = world
+    conn = connect(path)
+    _verdict(conn, ids["culture"], BUILDING, evidence_json='{"url": "javascript:alert(1)"}')
+    conn.execute("UPDATE notice SET url = ? WHERE bid_no = 'N6'", (" JavaScript:alert(1)",))
+    conn.commit()
+    conn.close()
+    d = _detail(path, ids["culture"])
+    assert d.history[0].evidence_url == ""
+    assert d.notices[0]["url"] == ""
+
+
+def test_safe_url_keeps_web_addresses_only():
+    assert safe_url("https://a.kr/x") == "https://a.kr/x"
+    assert safe_url("HTTP://A.KR") == "HTTP://A.KR"
+    for bad in ("javascript:alert(1)", "data:text/html,x", "//evil.example", "ftp://x", "", None):
+        assert safe_url(bad) == "", bad
+
+
+def test_project_detail_prices_energy_and_names_what_it_could_not_price(world):
+    """estimate_cost는 단가표에 없는 에너지원을 빼고 합한다. 합계만 보이면 왜 적은지 모른다."""
+    path, ids = world
+    conn = connect(path)
+    for source, kw in (("PV", 20.0), ("풍력", 10.0)):
+        conn.execute(
+            "INSERT INTO energy_plan (project_id, source_type, capacity_kw, entered_by, "
+            "updated_at) VALUES (?, ?, ?, 'imported', ?)",
+            (ids["gym"], source, kw, NOW),
+        )
+    conn.commit()
+    conn.close()
+    d = _detail(path, ids["gym"])
+    assert [(e.source_type, e.cost) for e in d.energy] == [("PV", 50_000_000), ("풍력", None)]
+    assert d.energy_total == 50_000_000
+    assert d.energy_unpriced == ["풍력"]
+
+
+def test_project_detail_lists_departments_newest_first(world):
+    path, ids = world
+    conn = connect(path)
+    for when, dept in (
+        ("2026-09-01T00:00:00", "체육진흥과"),
+        ("2026-09-10T00:00:00", "문화체육과"),
+    ):
+        conn.execute(
+            "INSERT INTO dept_check (project_id, exec_dept, decided_by, checked_at) "
+            "VALUES (?, ?, 'imported', ?)",
+            (ids["gym"], dept, when),
+        )
+    conn.commit()
+    conn.close()
+    assert [r["exec_dept"] for r in _detail(path, ids["gym"]).depts] == ["문화체육과", "체육진흥과"]

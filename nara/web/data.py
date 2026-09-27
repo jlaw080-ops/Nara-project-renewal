@@ -1,10 +1,12 @@
 """웹 조회 화면이 읽는 자료. DB는 읽기 전용으로만 연다."""
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
+from nara.energy import EnergyItem, estimate_cost
 from nara.web.query import (
     Filters,
     build_count_query,
@@ -55,3 +57,142 @@ def list_projects(conn: sqlite3.Connection, f: Filters) -> ListResult:
     excluded_query = build_excluded_query(f)
     excluded = conn.execute(*excluded_query).fetchone()[0] if excluded_query else None
     return ListResult(rows, total, matched, excluded, matched > len(rows))
+
+
+DECIDED_BY_LABELS = {
+    "imported": "시트 이관",
+    "rule": "규칙",
+    "news": "뉴스",
+    "llm": "LLM",
+    "human": "사람",
+}
+
+
+@dataclass(frozen=True)
+class StatusEntry:
+    checked_at: str
+    verdict: str
+    decided_by: str
+    reason: str
+    evidence_url: str
+
+
+@dataclass(frozen=True)
+class EnergyLine:
+    source_type: str
+    capacity_kw: float
+    cost: int | None
+
+
+@dataclass(frozen=True)
+class ProjectDetail:
+    project: sqlite3.Row
+    notices: list[dict]
+    history: list[StatusEntry]
+    depts: list[sqlite3.Row]
+    energy: list[EnergyLine]
+    energy_total: int
+    energy_unpriced: list[str]
+
+
+def safe_url(url: str | None) -> str:
+    """http·https 주소만 링크로 쓴다.
+
+    자동 이스케이프는 'javascript:' 주소를 막지 못한다 — href에 들어가면
+    누르는 순간 실행된다. 근거 URL은 뉴스·LLM에서 오므로 믿지 않는다.
+    """
+    text = (url or "").strip()
+    return text if text.lower().startswith(("http://", "https://")) else ""
+
+
+def _evidence_url(raw: str | None) -> str:
+    """evidence_json의 url. 깨진 JSON이나 url 없음은 빈 문자열 — 화면이 죽지 않는다."""
+    if not raw:
+        return ""
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return ""
+    url = data.get("url") if isinstance(data, dict) else None
+    return safe_url(url) if isinstance(url, str) else ""
+
+
+def _history(conn: sqlite3.Connection, project_id: int) -> list[StatusEntry]:
+    rows = conn.execute(
+        "SELECT checked_at, verdict, decided_by, reason, evidence_json FROM status_check "
+        "WHERE project_id = ? ORDER BY checked_at DESC, id DESC",
+        (project_id,),
+    )
+    return [
+        StatusEntry(
+            checked_at=row["checked_at"],
+            verdict=row["verdict"],
+            decided_by=DECIDED_BY_LABELS.get(row["decided_by"], row["decided_by"]),
+            reason=row["reason"] or "",
+            evidence_url=_evidence_url(row["evidence_json"]),
+        )
+        for row in rows
+    ]
+
+
+def _energy(conn: sqlite3.Connection, project_id: int) -> tuple[list[EnergyLine], int, list[str]]:
+    """예상가는 기존 estimate_cost로 센다.
+
+    그 함수는 단가표에 없는 에너지원을 빼고 합한다. 빠진 에너지원을 따로 돌려줘
+    화면이 합계 옆에 적게 한다 — 합계만 보이면 금액이 왜 적은지 알 수 없다.
+    """
+    prices = {
+        row["source_type"]: row["price_per_kw"]
+        for row in conn.execute("SELECT source_type, price_per_kw FROM energy_unit_price")
+    }
+    items = [
+        EnergyItem(row["source_type"], row["capacity_kw"])
+        for row in conn.execute(
+            "SELECT source_type, capacity_kw FROM energy_plan WHERE project_id = ? ORDER BY id",
+            (project_id,),
+        )
+    ]
+    lines = [
+        EnergyLine(i.source_type, i.capacity_kw, estimate_cost([i], prices).get(i.source_type))
+        for i in items
+    ]
+    total = sum(estimate_cost(items, prices).values())
+    unpriced = sorted({i.source_type for i in items if i.source_type not in prices})
+    return lines, total, unpriced
+
+
+def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail | None:
+    """한 사업의 전부. 없는 id면 None."""
+    project = conn.execute(
+        "SELECT p.*, o.name AS org_name FROM project p JOIN org o ON o.id = p.org_id "
+        "WHERE p.id = ?",
+        (project_id,),
+    ).fetchone()
+    if project is None:
+        return None
+    notices = [
+        {**dict(row), "url": safe_url(row["url"])}
+        for row in conn.execute(
+            "SELECT n.bid_no, n.title, n.notice_date, n.open_date, n.close_date, "
+            "n.budget_krw, n.officer_name, n.officer_tel, n.url, a.winner, a.award_date "
+            "FROM notice n LEFT JOIN award a ON a.bid_no = n.bid_no "
+            "WHERE n.project_id = ? "
+            "ORDER BY COALESCE(n.notice_date, '') DESC, n.bid_no DESC",
+            (project_id,),
+        )
+    ]
+    depts = conn.execute(
+        "SELECT exec_dept, contract_dept, snippet, source_file, checked_at FROM dept_check "
+        "WHERE project_id = ? ORDER BY checked_at DESC, id DESC",
+        (project_id,),
+    ).fetchall()
+    energy, energy_total, energy_unpriced = _energy(conn, project_id)
+    return ProjectDetail(
+        project=project,
+        notices=notices,
+        history=_history(conn, project_id),
+        depts=depts,
+        energy=energy,
+        energy_total=energy_total,
+        energy_unpriced=energy_unpriced,
+    )
