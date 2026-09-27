@@ -6,7 +6,7 @@
 <p class="muted">{{ d.project.org_name }} · 출처 {{ d.project.source }}</p>
 
 <h2>사업</h2>
-<table>
+<div class="table-wrap"><table>
   <tr><th>주소</th><td>{{ d.project.address|dash }}</td></tr>
   <tr><th>착공일</th><td>{{ d.project.start_date|dash }}</td></tr>
   <tr><th>준공일</th><td>{{ d.project.end_date|dash }}</td></tr>
@@ -16,11 +16,11 @@
   <tr><th>기타 인증</th><td>{{ d.project.etc_cert|dash }}</td></tr>
   <tr><th>관급 장비</th><td>{{ d.project.guide_equip|dash }}</td></tr>
   <tr><th>비고</th><td>{{ d.project.note|dash }}</td></tr>
-</table>
+</table></div>
 
 <h2>공고 {{ d.notices|length }}건</h2>
 {% if d.notices %}
-<table>
+<div class="table-wrap"><table>
 <thead><tr><th>공고명</th><th>공고일</th><th>개찰일</th><th>마감일</th><th>예산</th><th>담당자</th><th>낙찰업체</th><th>낙찰일</th></tr></thead>
 <tbody>
 {% for n in d.notices %}
@@ -36,14 +36,14 @@
 </tr>
 {% endfor %}
 </tbody>
-</table>
+</table></div>
 {% else %}
 <p class="muted">공고가 없습니다{% if d.project.source == 'manual' %} — 시트에서 이관한 사업입니다{% endif %}</p>
 {% endif %}
 
 <h2>진행현황 이력 {{ d.history|length }}건</h2>
 {% if d.history %}
-<table>
+<div class="table-wrap"><table>
 <thead><tr><th>시각</th><th>판정</th><th>판정 주체</th><th>사유</th><th>근거</th></tr></thead>
 <tbody>
 {% for h in d.history %}
@@ -56,14 +56,14 @@
 </tr>
 {% endfor %}
 </tbody>
-</table>
+</table></div>
 {% else %}
 <p class="muted">판정 전입니다</p>
 {% endif %}
 
 <h2>실행부서</h2>
 {% if d.depts %}
-<table>
+<div class="table-wrap"><table>
 <thead><tr><th>실행부서</th><th>계약부서</th><th>근거 문장</th><th>출처</th><th>조회 시각</th></tr></thead>
 <tbody>
 {% for p in d.depts %}
@@ -76,21 +76,21 @@
 </tr>
 {% endfor %}
 </tbody>
-</table>
+</table></div>
 {% else %}
 <p class="muted">실행부서 조회 기록이 없습니다</p>
 {% endif %}
 
 <h2>신재생 계획</h2>
 {% if d.energy %}
-<table>
+<div class="table-wrap"><table>
 <thead><tr><th>에너지원</th><th>용량</th><th>예상가</th></tr></thead>
 <tbody>
 {% for e in d.energy %}
 <tr><td>{{ e.source_type }}</td><td>{{ e.capacity_kw }} kW</td><td>{{ e.cost|won }}</td></tr>
 {% endfor %}
 </tbody>
-</table>
+</table></div>
 <p>합계 {{ d.energy_total|won }}{% if d.energy_unpriced %}
 <span class="bad"> — 단가가 없어 합계에서 빠짐: {{ d.energy_unpriced|join(', ') }}</span>{% endif %}</p>
 {% else %}

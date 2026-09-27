@@ -17,8 +17,10 @@ cp .env.example .env   # G2B_API_KEY를 채운다
 uv run nara collect --days 3                          # 최근 3일 수집
 uv run nara backfill --days 365                        # 과거 1년 소급 (중단해도 이어짐)
 uv run nara enrich award --tier focus                   # 낙찰업체 조회
+uv run nara enrich status                               # 진행현황 판정 (구글 뉴스, 키 불필요)
 uv run nara migrate tsv <파일> --tab 전북특별자치도      # 기존 시트 이관
 uv run nara doctor                                      # 데이터 점검
+uv run nara serve                                       # 조회 화면 → http://127.0.0.1:8000
 ```
 
 ## 개발

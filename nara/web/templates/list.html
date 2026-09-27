@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block body %}
+{% macro sort_th(key, label) %}<th{% if f.sort == key %} aria-sort="{{ 'descending' if f.desc else 'ascending' }}"{% endif %}><a href="{{ sort_links[key] }}">{{ label }}</a>{% if f.sort == key %} <span aria-hidden="true">{{ '▼' if f.desc else '▲' }}</span>{% endif %}</th>{% endmacro %}
 <h1>사업 조회</h1>
 
 <p class="runs">
@@ -49,13 +50,13 @@
 <ul class="notes">{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul>
 {% endif %}
 
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
-  <th><a href="{{ sort_links.org }}">수요기관</a></th>
-  <th><a href="{{ sort_links.name }}">사업명</a></th>
-  <th><a href="{{ sort_links.notice_date }}">공고일</a></th>
-  <th><a href="{{ sort_links.open_date }}">개찰일</a></th>
-  <th><a href="{{ sort_links.verdict }}">진행현황</a></th>
+  {{ sort_th("org", "수요기관") }}
+  {{ sort_th("name", "사업명") }}
+  {{ sort_th("notice_date", "공고일") }}
+  {{ sort_th("open_date", "개찰일") }}
+  {{ sort_th("verdict", "진행현황") }}
   <th>낙찰업체</th>
   <th>실행부서</th>
   <th>ZEB</th>
@@ -77,5 +78,5 @@
 <tr><td colspan="8" class="muted">조건에 맞는 사업이 없습니다</td></tr>
 {% endfor %}
 </tbody>
-</table>
+</table></div>
 {% endblock %}

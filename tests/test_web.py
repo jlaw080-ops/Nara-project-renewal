@@ -8,7 +8,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from flask import Flask
+from typer.testing import CliRunner
 
+from nara.cli import app as cli_app
 from nara.config import load_settings
 from nara.db import connect, migrate
 from nara.store import ensure_project, upsert_org
@@ -609,3 +612,36 @@ def test_a_missing_database_is_reported_not_crashed(tmp_path):
     assert resp.status_code == 503
     assert "DB 파일이 없다" in _text(resp)
     assert not (tmp_path / "gone.db").exists()
+
+
+def test_serve_refuses_a_missing_database(tmp_path):
+    """오타 난 경로에 빈 DB를 만들고 '0건'을 보이면 안 된다."""
+    missing = tmp_path / "gone.db"
+    result = CliRunner().invoke(cli_app, ["serve", "--db", str(missing)])
+    assert result.exit_code == 1
+    assert "DB 파일이 없다" in result.output
+    assert not missing.exists()
+
+
+def test_serve_binds_to_this_computer_only_without_the_debugger(world, monkeypatch):
+    """127.0.0.1 밖에 열면 3단계 전에 외부에 노출된다.
+
+    debug=True는 브라우저에서 파이썬 코드를 실행하는 디버거를 연다.
+    """
+    seen = {}
+    monkeypatch.setattr(Flask, "run", lambda self, **kw: seen.update(kw))
+    result = CliRunner().invoke(cli_app, ["serve", "--db", str(world[0]), "--port", "8123"])
+    assert result.exit_code == 0, result.output
+    assert seen == {"host": "127.0.0.1", "port": 8123, "debug": False}
+
+
+def test_serve_rejects_an_out_of_range_port(world):
+    result = CliRunner().invoke(cli_app, ["serve", "--db", str(world[0]), "--port", "70000"])
+    assert result.exit_code != 0
+
+
+def test_list_page_marks_the_column_it_is_sorted_by(world):
+    """열 머리만 보고 지금 무엇으로 어느 방향 정렬 중인지 알 수 있어야 한다."""
+    text = _text(_client(world[0]).get("/?sort=name&desc=0"))
+    assert re.search(r'<th aria-sort="ascending"><a href="[^"]*">사업명</a>', text)
+    assert text.count("aria-sort=") == 1

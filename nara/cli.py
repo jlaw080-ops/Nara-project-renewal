@@ -17,6 +17,7 @@ from nara.llm import adjudicate
 from nara.migrate_sheets import import_tab
 from nara.runlog import run_log
 from nara.status import update_statuses
+from nara.web.app import create_app
 
 app = typer.Typer(help="나라장터 설계용역 수집·조사 도구")
 
@@ -107,6 +108,21 @@ def doctor(db: Path = typer.Option(DEFAULT_DB, help="SQLite 경로")) -> None:
         typer.echo(f"[{finding.check}] {finding.detail}")
     typer.echo(f"\n총 {len(findings)}건")
     raise typer.Exit(code=1)
+
+
+@app.command()
+def serve(
+    port: int = typer.Option(8000, min=1, max=65535, help="포트"),
+    db: Path = typer.Option(DEFAULT_DB, help="SQLite 경로"),
+) -> None:
+    """조회 화면을 띄운다. 이 컴퓨터(127.0.0.1)에서만 열리고 읽기 전용이다."""
+    # _open_db를 쓰지 않는다. migrate가 없는 파일을 새로 만든다 — doctor와 같은 이유.
+    if not db.exists():
+        typer.echo(f"DB 파일이 없다: {db}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"조회 화면: http://127.0.0.1:{port}  (끄려면 Ctrl+C)")
+    # debug=True는 브라우저에서 코드를 실행하는 디버거를 연다. 로컬이어도 켜지 않는다.
+    create_app(db).run(host="127.0.0.1", port=port, debug=False)
 
 
 enrich_app = typer.Typer(help="수집한 공고에 정보를 덧붙인다")
