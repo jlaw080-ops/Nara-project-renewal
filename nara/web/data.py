@@ -3,6 +3,7 @@
 import json
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -14,6 +15,8 @@ from nara.web.query import (
     build_excluded_query,
     build_list_query,
 )
+
+_SQLITE_MAX_INT = 2**63 - 1
 
 
 class DatabaseMissing(FileNotFoundError):
@@ -164,6 +167,9 @@ def _energy(conn: sqlite3.Connection, project_id: int) -> tuple[list[EnergyLine]
 
 def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail | None:
     """한 사업의 전부. 없는 id면 None."""
+    if project_id > _SQLITE_MAX_INT:
+        # URL의 정수는 상한이 없다. SQLite 범위를 넘기면 바인딩에서 터진다.
+        return None
     project = conn.execute(
         "SELECT p.*, o.name AS org_name FROM project p JOIN org o ON o.id = p.org_id "
         "WHERE p.id = ?",
@@ -199,12 +205,17 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
     )
 
 
+# 스케줄러가 도는 단계만 본다. 소급 수집은 사람이 한 번 돌리는 일이라 넣으면
+# 늘 빨갛게 떠서 경고를 무시하게 만든다.
 PIPELINE_STAGES = (
     ("collect", "수집"),
-    ("backfill", "소급 수집"),
     ("enrich award", "낙찰 조회"),
     ("enrich status", "진행현황"),
 )
+# 이보다 오래 새 실행이 없으면 멈춘 것으로 본다. 스케줄러가 멈추면 run_log에 새 줄이
+# 생기지 않아 마지막 '정상'이 계속 정상으로 보인다. 금요일 15시 뒤 월요일 9시(66시간)는
+# 멈춤이 아니다.
+STALE_AFTER = timedelta(hours=72)
 _STATUS_LABELS = {"ok": "정상", "partial": "일부 실패", "error": "실패"}
 
 
@@ -223,12 +234,21 @@ def _status_label(status: str | None) -> str:
     return _STATUS_LABELS.get(status, status)
 
 
-def last_runs(conn: sqlite3.Connection) -> list[StageRun]:
+def _is_stale(started_at: str, now: datetime) -> bool:
+    try:
+        return now - datetime.fromisoformat(started_at) > STALE_AFTER
+    except ValueError:
+        return False
+
+
+def last_runs(conn: sqlite3.Connection, now: datetime | None = None) -> list[StageRun]:
     """파이프라인 단계마다 가장 최근 실행.
 
     원 명세가 핵심 위험으로 꼽은 '자동 실행이 조용히 멈추는 것'을 목록 맨 위에
-    보이는 장치다. 한 번도 돌지 않은 단계도 빠뜨리지 않는다.
+    보이는 장치다. 한 번도 돌지 않은 단계도 빠뜨리지 않는다. 상태가 정상이어도
+    STALE_AFTER보다 오래 새 실행이 없으면 멈춘 것으로 표시한다.
     """
+    now = now or datetime.now()
     runs = []
     for command, label in PIPELINE_STAGES:
         row = last_run(conn, command)
@@ -236,7 +256,12 @@ def last_runs(conn: sqlite3.Connection) -> list[StageRun]:
             runs.append(StageRun(label, None, "실행 기록 없음", False))
         else:
             status = row["status"]
-            runs.append(StageRun(label, row["started_at"], _status_label(status), status == "ok"))
+            label_text = _status_label(status)
+            stale = _is_stale(row["started_at"], now)
+            if stale:
+                label_text += " · 3일 넘게 실행 없음"
+            healthy = status == "ok" and not stale
+            runs.append(StageRun(label, row["started_at"], label_text, healthy))
     return runs
 
 

@@ -4,6 +4,7 @@ import html
 import re
 import sqlite3
 from contextlib import closing
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -38,6 +39,7 @@ def _make_db(path: Path) -> Path:
 
 SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
 NOW = "2026-09-27T09:00:00"
+RUNS_NOW = datetime(2026, 9, 27, 9, 0, 0)
 
 
 def _org(conn, name, tier):
@@ -452,8 +454,8 @@ def _run(conn, command, status, started_at):
 def test_last_runs_names_every_stage_even_one_that_never_ran(world):
     """한 번도 돌지 않은 단계가 화면에서 사라지면 '멈춘 줄 모르는' 사고가 그대로다."""
     with closing(open_readonly(world[0])) as conn:
-        runs = last_runs(conn)
-    assert [r.label for r in runs] == ["수집", "소급 수집", "낙찰 조회", "진행현황"]
+        runs = last_runs(conn, now=RUNS_NOW)
+    assert [r.label for r in runs] == ["수집", "낙찰 조회", "진행현황"]
     for r in runs:
         assert (r.started_at, r.status_label, r.healthy) == (None, "실행 기록 없음", False)
 
@@ -464,24 +466,44 @@ def test_last_runs_reports_the_latest_run_of_each_stage(world):
     _run(conn, "collect", "ok", "2026-09-20T06:10:00")
     _run(conn, "collect", "partial", "2026-09-26T06:10:00")
     _run(conn, "enrich award", "ok", "2026-09-26T06:14:00")
-    _run(conn, "enrich status", "error", "2026-09-26T06:20:00")
-    _run(conn, "backfill", None, "2026-09-26T07:00:00")
+    _run(conn, "enrich status", None, "2026-09-26T06:20:00")
+    _run(conn, "backfill", "error", "2026-09-26T07:00:00")
     _run(conn, "migrate tsv", "ok", "2026-09-26T08:00:00")
     conn.commit()
     conn.close()
     with closing(open_readonly(path)) as conn:
-        runs = {r.label: r for r in last_runs(conn)}
+        runs = {r.label: r for r in last_runs(conn, now=RUNS_NOW)}
     assert (runs["수집"].started_at, runs["수집"].status_label) == (
         "2026-09-26T06:10:00",
         "일부 실패",
     )
     assert runs["수집"].healthy is False
     assert (runs["낙찰 조회"].status_label, runs["낙찰 조회"].healthy) == ("정상", True)
-    assert runs["진행현황"].status_label == "실패"
     # 프로세스가 죽으면 run_log의 마무리가 돌지 못해 status가 비어 남는다
-    assert runs["소급 수집"].status_label == "끝나지 않음"
-    # 이관은 파이프라인 단계가 아니다
-    assert set(runs) == {"수집", "소급 수집", "낙찰 조회", "진행현황"}
+    assert runs["진행현황"].status_label == "끝나지 않음"
+    # 이관은 파이프라인 단계가 아니다. 소급 수집은 사람이 한 번 돌리는 일이라
+    # 스케줄 감시 대상이 아니다 — 넣으면 늘 빨갛게 떠 경고를 무시하게 만든다
+    assert set(runs) == {"수집", "낙찰 조회", "진행현황"}
+
+
+def test_last_runs_flags_a_scheduled_stage_that_stopped_running(world):
+    """스케줄러가 멈추면 run_log에 새 줄이 안 생긴다. 상태만 보면 열흘 전 '정상'이 계속 정상이다.
+
+    72시간은 금요일 15시 뒤 월요일 9시(66시간)를 멈춤으로 잘못 알리지 않는 한계다.
+    """
+    path, _ = world
+    conn = connect(path)
+    _run(conn, "collect", "ok", "2026-09-17T18:10:54")
+    _run(conn, "enrich award", "ok", "2026-09-24T09:00:00")
+    _run(conn, "enrich status", "ok", "2026-09-24T08:59:00")
+    conn.commit()
+    conn.close()
+    with closing(open_readonly(path)) as conn:
+        runs = {r.label: r for r in last_runs(conn, now=RUNS_NOW)}
+    assert runs["수집"].healthy is False
+    assert runs["수집"].status_label == "정상 · 3일 넘게 실행 없음"
+    assert (runs["낙찰 조회"].healthy, runs["낙찰 조회"].status_label) == (True, "정상")
+    assert runs["진행현황"].healthy is False
 
 
 def test_org_options_puts_focus_orgs_first(world):
@@ -570,6 +592,8 @@ def test_detail_page_is_404_for_an_unknown_or_non_numeric_id(world):
     client = _client(world[0])
     assert client.get("/project/999999").status_code == 404
     assert client.get("/project/abc").status_code == 404
+    # SQLite 정수 범위를 넘으면 바인딩에서 터져 500이 된다
+    assert client.get("/project/99999999999999999999").status_code == 404
 
 
 def test_pages_escape_markup_that_comes_from_the_data(world):
