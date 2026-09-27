@@ -144,3 +144,151 @@ def to_args(f: Filters) -> dict[str, list[str]]:
     args["sort"] = [f.sort]
     args["desc"] = ["1" if f.desc else "0"]
     return args
+
+
+LIST_LIMIT = 1000
+
+# 사업마다 가장 최근 공고·판정·실행부서를 하나씩 고른다. 판정 순서는
+# 파이프라인 전체가 쓰는 규칙(checked_at 내림차순, 같으면 id)과 같다.
+# 실행부서는 이름이 있는 줄만 본다 — 최근 조회가 빈 값이어도 앞서 찾은 부서를
+# 지우지 않는다.
+_LATEST = """
+WITH ln AS (
+    SELECT n.project_id, n.bid_no, n.title, n.notice_date, n.open_date,
+           ROW_NUMBER() OVER (
+               PARTITION BY n.project_id
+               ORDER BY COALESCE(n.notice_date, '') DESC, n.bid_no DESC
+           ) AS rn
+    FROM notice n
+    WHERE n.project_id IS NOT NULL
+),
+ls AS (
+    SELECT s.project_id, s.verdict,
+           ROW_NUMBER() OVER (
+               PARTITION BY s.project_id ORDER BY s.checked_at DESC, s.id DESC
+           ) AS rn
+    FROM status_check s
+),
+ld AS (
+    SELECT d.project_id, d.exec_dept,
+           ROW_NUMBER() OVER (
+               PARTITION BY d.project_id ORDER BY d.checked_at DESC, d.id DESC
+           ) AS rn
+    FROM dept_check d
+    WHERE d.project_id IS NOT NULL AND COALESCE(d.exec_dept, '') != ''
+)
+"""
+
+_FROM = """
+FROM project p
+JOIN org o ON o.id = p.org_id
+LEFT JOIN ln ON ln.project_id = p.id AND ln.rn = 1
+LEFT JOIN ls ON ls.project_id = p.id AND ls.rn = 1
+LEFT JOIN ld ON ld.project_id = p.id AND ld.rn = 1
+LEFT JOIN award a ON a.bid_no = ln.bid_no
+"""
+
+_ORDER_EXPR = {
+    "org": "o.name",
+    "name": "p.name",
+    "notice_date": "NULLIF(ln.notice_date, '')",
+    "open_date": "NULLIF(ln.open_date, '')",
+    # 가나다순이면 '미확인·시공 중·준공 완료·착공 전'이 된다. 단계순으로 매긴다.
+    "verdict": "CASE ls.verdict WHEN ? THEN 1 WHEN ? THEN 2 WHEN ? THEN 3 WHEN ? THEN 4 END",
+}
+_STAGE_ORDER = (BEFORE, BUILDING, DONE, UNKNOWN)
+_ESCAPE = "ESCAPE '\\'"
+
+
+def like_pattern(text: str) -> str:
+    """LIKE용 '%…%'. 사용자가 친 %·_·\\는 글자 그대로 찾는다.
+
+    '100%'를 찾을 때 %가 와일드카드면 모든 행이 걸린다.
+    """
+    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def _where(f: Filters, include_dates: bool) -> tuple[str, list]:
+    clauses: list[str] = []
+    params: list = []
+    if f.orgs:
+        clauses.append(f"p.org_id IN ({', '.join('?' * len(f.orgs))})")
+        params.extend(f.orgs)
+    if f.focus_only:
+        clauses.append("o.tier = 'focus'")
+    if f.q:
+        # 공고명만 찾으면 시트에서 이관한 사업(공고 없음)은 이름으로 영영 못 찾는다.
+        clauses.append(f"(p.name LIKE ? {_ESCAPE} OR ln.title LIKE ? {_ESCAPE})")
+        params.extend([like_pattern(f.q)] * 2)
+    # 기간은 행에 보이는 그 공고의 공고일로 거른다. 공고 없는 사업은 여기서 빠진다.
+    if include_dates and f.date_from:
+        clauses.append("ln.notice_date >= ?")
+        params.append(f.date_from)
+    if include_dates and f.date_to:
+        clauses.append("ln.notice_date <= ?")
+        params.append(f.date_to)
+    if f.verdicts:
+        known = [v for v in f.verdicts if v != NO_VERDICT]
+        parts: list[str] = []
+        if known:
+            parts.append(f"ls.verdict IN ({', '.join('?' * len(known))})")
+            params.extend(known)
+        if NO_VERDICT in f.verdicts:
+            parts.append("ls.verdict IS NULL")
+        clauses.append(f"({' OR '.join(parts)})")
+    return (" WHERE " + " AND ".join(clauses)) if clauses else "", params
+
+
+def _order(f: Filters) -> tuple[str, list]:
+    # 정렬 값을 여기서도 믿지 않는다. Filters는 parse_filters 없이도 만들 수 있다.
+    key = f.sort if f.sort in _ORDER_EXPR else DEFAULT_SORT
+    expr = _ORDER_EXPR[key]
+    direction = "DESC" if f.desc else "ASC"
+    # 값이 없는 행은 방향과 관계없이 맨 뒤. 같으면 id로 순서를 고정한다 —
+    # 새로고침할 때마다 순서가 바뀌면 안 된다. expr이 두 번 나오므로 인자도 두 벌이다.
+    sql = f" ORDER BY ({expr}) IS NULL, {expr} {direction}, p.id"
+    params = list(_STAGE_ORDER) * 2 if key == "verdict" else []
+    return sql, params
+
+
+def build_list_query(f: Filters) -> tuple[str, list]:
+    """목록 SQL과 인자. 자리표시자의 순서와 인자의 순서가 같아야 한다."""
+    matched_sql, matched_params = "NULL", []
+    if f.q:
+        # 목록엔 사업명만 보인다. 공고명으로만 걸린 행은 그 공고명을 함께 돌려준다.
+        matched_sql = (
+            f"CASE WHEN p.name NOT LIKE ? {_ESCAPE} AND ln.title LIKE ? {_ESCAPE} THEN ln.title END"
+        )
+        matched_params = [like_pattern(f.q)] * 2
+    where_sql, where_params = _where(f, include_dates=True)
+    order_sql, order_params = _order(f)
+    sql = (
+        _LATEST
+        + "SELECT p.id, o.name AS org_name, p.name, ln.title AS notice_title, "
+        + "ln.notice_date, ln.open_date, ls.verdict, a.winner, ld.exec_dept, p.zeb_grade, "
+        + f"{matched_sql} AS matched_title"
+        + _FROM
+        + where_sql
+        + order_sql
+        + " LIMIT ?"
+    )
+    return sql, [*matched_params, *where_params, *order_params, LIST_LIMIT]
+
+
+def build_count_query(f: Filters) -> tuple[str, list]:
+    where_sql, params = _where(f, include_dates=True)
+    return _LATEST + "SELECT COUNT(*)" + _FROM + where_sql, params
+
+
+def build_excluded_query(f: Filters) -> tuple[str, list] | None:
+    """기간 조건 때문에 빠진 '공고 없는 사업' 수. 기간 조건이 없으면 None.
+
+    고정값 95가 아니다. 그때의 다른 조건에 걸리는 공고 없는 사업만 센다.
+    """
+    if not f.has_date:
+        return None
+    where_sql, params = _where(f, include_dates=False)
+    joiner = " AND " if where_sql else " WHERE "
+    sql = _LATEST + "SELECT COUNT(*)" + _FROM + where_sql + joiner + "ln.bid_no IS NULL"
+    return sql, params

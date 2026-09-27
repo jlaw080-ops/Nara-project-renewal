@@ -1,7 +1,17 @@
 """웹 조회 조건 — DB 없이 확인한다."""
 
 from nara.verdict import BEFORE, BUILDING, UNKNOWN
-from nara.web.query import DEFAULT_SORT, NO_VERDICT, Filters, parse_filters, to_args
+from nara.web.query import (
+    DEFAULT_SORT,
+    NO_VERDICT,
+    Filters,
+    build_count_query,
+    build_excluded_query,
+    build_list_query,
+    like_pattern,
+    parse_filters,
+    to_args,
+)
 
 
 def test_parse_filters_defaults_to_newest_notice_first():
@@ -97,3 +107,55 @@ def test_to_args_round_trips_through_parse_filters():
     ]
     for f in cases:
         assert parse_filters(to_args(f)) == (f, [])
+
+
+def test_like_pattern_takes_percent_and_underscore_literally():
+    """'100%'를 찾을 때 %가 와일드카드면 모든 행이 걸린다."""
+    assert like_pattern("100%") == "%100\\%%"
+    assert like_pattern("a_b") == "%a\\_b%"
+    assert like_pattern("c\\d") == "%c\\\\d%"
+
+
+def test_user_input_never_enters_the_sql_text():
+    """검색어는 전부 자리표시자로 넘어간다. 문장에 이어 붙이면 주입 구멍이다."""
+    evil = "'; DROP TABLE project; --"
+    f = Filters(q=evil, date_from="2026-01-01", verdicts=(BEFORE,))
+    for sql, params in (build_list_query(f), build_count_query(f), build_excluded_query(f)):
+        assert "DROP" not in sql
+        assert any(evil in str(p) for p in params)
+
+
+def test_sort_falls_back_even_when_filters_bypass_parsing():
+    """SQL을 만드는 쪽도 정렬 값을 믿지 않는다. Filters는 parse_filters 없이도 만들 수 있다."""
+    sql, _ = build_list_query(Filters(sort="name; DROP TABLE project"))
+    assert "DROP" not in sql
+
+
+def test_placeholders_and_params_line_up():
+    """'?' 개수와 인자 수가 어긋나면 값이 엉뚱한 자리에 묶인다 — 오류 없이."""
+    combos = [
+        Filters(),
+        Filters(q="체육", sort="verdict"),
+        Filters(
+            orgs=(1, 2),
+            focus_only=True,
+            q="관",
+            date_from="2026-01-01",
+            date_to="2026-12-31",
+            verdicts=(BEFORE, NO_VERDICT),
+            sort="verdict",
+            desc=False,
+        ),
+        Filters(verdicts=(NO_VERDICT,)),
+    ]
+    for f in combos:
+        for built in (build_list_query(f), build_count_query(f), build_excluded_query(f)):
+            if built is None:
+                continue
+            sql, params = built
+            assert sql.count("?") == len(params), f
+
+
+def test_excluded_query_exists_only_with_a_date_condition():
+    assert build_excluded_query(Filters(q="관")) is None
+    assert build_excluded_query(Filters(date_from="2026-01-01")) is not None
