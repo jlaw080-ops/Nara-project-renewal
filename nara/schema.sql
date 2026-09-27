@@ -127,6 +127,25 @@ CREATE TABLE IF NOT EXISTS app_state (
   value TEXT
 );
 
+CREATE TABLE IF NOT EXISTS edit_log (
+  id         INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES project(id),
+  field      TEXT NOT NULL,
+  old_value  TEXT,
+  new_value  TEXT,
+  edited_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_edit_project ON edit_log(project_id, field);
+
+-- 칸마다 지난 이관 때의 시트 값. 시트에서 실제로 바뀐 칸만 웹 입력을 덮게 한다.
+CREATE TABLE IF NOT EXISTS sheet_memory (
+  project_id  INTEGER NOT NULL REFERENCES project(id),
+  field       TEXT NOT NULL,
+  value       TEXT NOT NULL,
+  imported_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, field)
+);
+
 INSERT OR IGNORE INTO energy_unit_price (source_type, price_per_kw, effective_from) VALUES
   ('BIPV',   5000000,  '2026-09-16'),
   ('PV',     2500000,  '2026-09-16'),

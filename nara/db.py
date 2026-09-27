@@ -1,8 +1,11 @@
 """SQLite 연결과 스키마 적용."""
 
 import sqlite3
+from datetime import datetime
 from importlib import resources
 from pathlib import Path
+
+from nara.sheet_memory import seed as seed_sheet_memory
 
 SCHEMA_VERSION = 1
 
@@ -25,5 +28,7 @@ def migrate(conn: sqlite3.Connection) -> int:
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         (str(SCHEMA_VERSION),),
     )
+    # 2단계 도입 때 한 번. 이미 채웠으면 아무것도 하지 않는다.
+    seed_sheet_memory(conn, datetime.now().isoformat(timespec="seconds"))
     conn.commit()
     return SCHEMA_VERSION
