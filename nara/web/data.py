@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from nara.energy import EnergyItem, estimate_cost
+from nara.store import last_run
 from nara.web.query import (
     Filters,
     build_count_query,
@@ -196,3 +197,51 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
         energy_total=energy_total,
         energy_unpriced=energy_unpriced,
     )
+
+
+PIPELINE_STAGES = (
+    ("collect", "수집"),
+    ("backfill", "소급 수집"),
+    ("enrich award", "낙찰 조회"),
+    ("enrich status", "진행현황"),
+)
+_STATUS_LABELS = {"ok": "정상", "partial": "일부 실패", "error": "실패"}
+
+
+@dataclass(frozen=True)
+class StageRun:
+    label: str
+    started_at: str | None
+    status_label: str
+    healthy: bool
+
+
+def _status_label(status: str | None) -> str:
+    # run_log는 시작할 때 status 없이 넣고 끝날 때 채운다. 비어 있으면 끝나지 않은 실행이다.
+    if status is None:
+        return "끝나지 않음"
+    return _STATUS_LABELS.get(status, status)
+
+
+def last_runs(conn: sqlite3.Connection) -> list[StageRun]:
+    """파이프라인 단계마다 가장 최근 실행.
+
+    원 명세가 핵심 위험으로 꼽은 '자동 실행이 조용히 멈추는 것'을 목록 맨 위에
+    보이는 장치다. 한 번도 돌지 않은 단계도 빠뜨리지 않는다.
+    """
+    runs = []
+    for command, label in PIPELINE_STAGES:
+        row = last_run(conn, command)
+        if row is None:
+            runs.append(StageRun(label, None, "실행 기록 없음", False))
+        else:
+            status = row["status"]
+            runs.append(StageRun(label, row["started_at"], _status_label(status), status == "ok"))
+    return runs
+
+
+def org_options(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """수요기관 선택 목록. 관심기관을 먼저, 그 안에서는 이름순."""
+    return conn.execute(
+        "SELECT id, name, tier FROM org ORDER BY tier = 'focus' DESC, name"
+    ).fetchall()

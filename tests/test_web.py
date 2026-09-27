@@ -12,8 +12,10 @@ from nara.store import ensure_project, upsert_org
 from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN
 from nara.web.data import (
     DatabaseMissing,
+    last_runs,
     list_projects,
     open_readonly,
+    org_options,
     project_detail,
     safe_url,
 )
@@ -431,3 +433,51 @@ def test_project_detail_lists_departments_newest_first(world):
     conn.commit()
     conn.close()
     assert [r["exec_dept"] for r in _detail(path, ids["gym"]).depts] == ["문화체육과", "체육진흥과"]
+
+
+def _run(conn, command, status, started_at):
+    conn.execute(
+        "INSERT INTO run_log (command, started_at, status) VALUES (?, ?, ?)",
+        (command, started_at, status),
+    )
+
+
+def test_last_runs_names_every_stage_even_one_that_never_ran(world):
+    """한 번도 돌지 않은 단계가 화면에서 사라지면 '멈춘 줄 모르는' 사고가 그대로다."""
+    with closing(open_readonly(world[0])) as conn:
+        runs = last_runs(conn)
+    assert [r.label for r in runs] == ["수집", "소급 수집", "낙찰 조회", "진행현황"]
+    for r in runs:
+        assert (r.started_at, r.status_label, r.healthy) == (None, "실행 기록 없음", False)
+
+
+def test_last_runs_reports_the_latest_run_of_each_stage(world):
+    path, _ = world
+    conn = connect(path)
+    _run(conn, "collect", "ok", "2026-09-20T06:10:00")
+    _run(conn, "collect", "partial", "2026-09-26T06:10:00")
+    _run(conn, "enrich award", "ok", "2026-09-26T06:14:00")
+    _run(conn, "enrich status", "error", "2026-09-26T06:20:00")
+    _run(conn, "backfill", None, "2026-09-26T07:00:00")
+    _run(conn, "migrate tsv", "ok", "2026-09-26T08:00:00")
+    conn.commit()
+    conn.close()
+    with closing(open_readonly(path)) as conn:
+        runs = {r.label: r for r in last_runs(conn)}
+    assert (runs["수집"].started_at, runs["수집"].status_label) == (
+        "2026-09-26T06:10:00",
+        "일부 실패",
+    )
+    assert runs["수집"].healthy is False
+    assert (runs["낙찰 조회"].status_label, runs["낙찰 조회"].healthy) == ("정상", True)
+    assert runs["진행현황"].status_label == "실패"
+    # 프로세스가 죽으면 run_log의 마무리가 돌지 못해 status가 비어 남는다
+    assert runs["소급 수집"].status_label == "끝나지 않음"
+    # 이관은 파이프라인 단계가 아니다
+    assert set(runs) == {"수집", "소급 수집", "낙찰 조회", "진행현황"}
+
+
+def test_org_options_puts_focus_orgs_first(world):
+    with closing(open_readonly(world[0])) as conn:
+        names = [o["name"] for o in org_options(conn)]
+    assert names == ["전북특별자치도 완주군", "경기도 성남시"]
