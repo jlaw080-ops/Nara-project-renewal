@@ -5,14 +5,16 @@ from dataclasses import dataclass, field
 
 from nara.config import Settings
 from nara.dates import to_iso_date
-from nara.energy import parse_energy_plan
+from nara.energy import EnergyItem, parse_energy_plan
 from nara.runlog import RunCounters
 from nara.sheet_memory import (
     FIELD_LABELS,
     canonical,
     edited_on_web,
+    energy_value,
     last_value,
     remember,
+    verdict_value,
 )
 from nara.sheets_tsv import read_tsv_with_stats
 from nara.store import ensure_project, upsert_org
@@ -140,6 +142,99 @@ def _apply_project_fields(
         remember(conn, project_id, field_name, text, now)
 
 
+def _apply_verdict(
+    conn: sqlite3.Connection,
+    project_id: int,
+    title: str,
+    verdict: str,
+    reason: str,
+    now: str,
+    stats: ImportStats,
+) -> None:
+    """시트 판정이 바뀌었을 때만 imported 줄을 쌓는다. 사람 판정 위에 쌓이면 잠금도 풀린다."""
+    text = verdict_value(verdict, reason)
+    if not _sheet_changed(conn, project_id, "verdict", text):
+        return
+    latest = conn.execute(
+        "SELECT verdict, reason FROM status_check WHERE project_id = ? "
+        "ORDER BY checked_at DESC, id DESC LIMIT 1",
+        (project_id,),
+    ).fetchone()
+    if latest is None or verdict_value(latest["verdict"], latest["reason"]) != text:
+        if latest is not None and edited_on_web(conn, project_id, "verdict"):
+            stats.overwritten.append(f"{title} · 진행현황 · {latest['verdict']} → {verdict}")
+        conn.execute(
+            "INSERT INTO status_check (project_id, verdict, reason, decided_by, checked_at) "
+            "VALUES (?, ?, ?, 'imported', ?)",
+            (project_id, verdict, reason, now),
+        )
+        stats.status += 1
+    remember(conn, project_id, "verdict", text, now)
+
+
+def _apply_dept(
+    conn: sqlite3.Connection,
+    project_id: int,
+    title: str,
+    values: tuple[str | None, str, str | None, str | None],
+    now: str,
+    stats: ImportStats,
+) -> None:
+    """values = (bid_no, 부서, 전화, 근거). 시트 부서가 바뀌었을 때만 줄을 쌓는다."""
+    bid_no, dept, head_tel, snippet = values
+    if not _sheet_changed(conn, project_id, "exec_dept", dept):
+        return
+    latest = conn.execute(
+        "SELECT exec_dept FROM dept_check WHERE project_id = ? "
+        "AND COALESCE(exec_dept, '') != '' ORDER BY checked_at DESC, id DESC LIMIT 1",
+        (project_id,),
+    ).fetchone()
+    if latest is None or latest[0] != dept:
+        if latest is not None and edited_on_web(conn, project_id, "exec_dept"):
+            stats.overwritten.append(f"{title} · 실행부서 · {latest[0]} → {dept}")
+        conn.execute(
+            "INSERT INTO dept_check "
+            "(project_id, bid_no, exec_dept, head_tel, snippet, decided_by, checked_at) "
+            "VALUES (?, ?, ?, ?, ?, 'imported', ?)",
+            (project_id, bid_no, dept, head_tel, snippet, now),
+        )
+        stats.dept += 1
+    remember(conn, project_id, "exec_dept", dept, now)
+
+
+def _apply_energy(
+    conn: sqlite3.Connection,
+    project_id: int,
+    title: str,
+    items: list[EnergyItem],
+    now: str,
+    stats: ImportStats,
+) -> None:
+    """시트 설비가 바뀌었을 때만 목록을 시트 값으로 바꾼다.
+
+    바뀌지 않았으면 손대지 않는다 — 웹에서 지운 줄이 되살아나지 않는다.
+    """
+    text = energy_value(items)
+    if not _sheet_changed(conn, project_id, "energy", text):
+        return
+    rows = conn.execute(
+        "SELECT source_type, capacity_kw FROM energy_plan WHERE project_id = ?", (project_id,)
+    ).fetchall()
+    current = energy_value(EnergyItem(r[0], r[1]) for r in rows)
+    if current != text:
+        if rows and edited_on_web(conn, project_id, "energy"):
+            stats.overwritten.append(f"{title} · 신재생 · {current} → {text}")
+        conn.execute("DELETE FROM energy_plan WHERE project_id = ?", (project_id,))
+        for item in items:
+            conn.execute(
+                "INSERT INTO energy_plan (project_id, source_type, capacity_kw, "
+                "entered_by, updated_at) VALUES (?, ?, ?, 'imported', ?)",
+                (project_id, item.source_type, item.capacity_kw, now),
+            )
+        stats.energy += len(items)
+    remember(conn, project_id, "energy", text, now)
+
+
 def import_tab(
     conn: sqlite3.Connection,
     tab_name: str,
@@ -251,52 +346,26 @@ def import_tab(
                 )
 
         verdict, reason = _split_status(cell(row, "status"))
-        if (
-            verdict
-            and not conn.execute(
-                "SELECT 1 FROM status_check WHERE project_id = ? AND decided_by = 'imported'",
-                (project_id,),
-            ).fetchone()
-        ):
-            conn.execute(
-                "INSERT INTO status_check (project_id, verdict, reason, decided_by, checked_at) "
-                "VALUES (?, ?, ?, 'imported', ?)",
-                (project_id, verdict, reason, now),
-            )
-            stats.status += 1
+        if verdict:
+            _apply_verdict(conn, project_id, title, verdict, reason, now, stats)
 
         if dept := cell(row, "dept"):
-            if not conn.execute(
-                "SELECT 1 FROM dept_check WHERE project_id = ? AND decided_by = 'imported'",
-                (project_id,),
-            ).fetchone():
-                conn.execute(
-                    "INSERT INTO dept_check "
-                    "(project_id, bid_no, exec_dept, head_tel, snippet, decided_by, checked_at) "
-                    "VALUES (?, ?, ?, ?, ?, 'imported', ?)",
-                    (
-                        project_id,
-                        bid_no or None,
-                        dept,
-                        cell(row, "head_tel") or None,
-                        _dept_snippet(cell(row, "dept_head"), cell(row, "dept_position")),
-                        now,
-                    ),
-                )
-                stats.dept += 1
-
-        for item in parse_energy_plan(cell(row, "energy")):
-            if conn.execute(
-                "SELECT 1 FROM energy_plan WHERE project_id = ? AND source_type = ?",
-                (project_id, item.source_type),
-            ).fetchone():
-                continue
-            conn.execute(
-                "INSERT INTO energy_plan (project_id, source_type, capacity_kw, "
-                "entered_by, updated_at) VALUES (?, ?, ?, 'imported', ?)",
-                (project_id, item.source_type, item.capacity_kw, now),
+            _apply_dept(
+                conn,
+                project_id,
+                title,
+                (
+                    bid_no or None,
+                    dept,
+                    cell(row, "head_tel") or None,
+                    _dept_snippet(cell(row, "dept_head"), cell(row, "dept_position")),
+                ),
+                now,
+                stats,
             )
-            stats.energy += 1
+
+        if items := parse_energy_plan(cell(row, "energy")):
+            _apply_energy(conn, project_id, title, items, now, stats)
 
         conn.commit()
 

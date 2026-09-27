@@ -972,3 +972,122 @@ def test_migrate_tsv_prints_the_web_edits_it_replaced(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "웹에서 고친 칸을 시트 값으로 덮은 것 1건" in result.output
     assert f"{TITLE} · 착공일 · 2026-04-01 → 2026-05-01" in result.output
+
+
+LATER = "2026-09-25T09:00:00"  # 재이관은 사람 입력(09-20)보다 뒤에 돈다
+
+
+def _web_verdict(conn, verdict):
+    pid = _pid(conn)
+    old = conn.execute(
+        "SELECT verdict FROM status_check WHERE project_id = ? ORDER BY checked_at DESC, id DESC",
+        (pid,),
+    ).fetchone()
+    conn.execute(
+        "INSERT INTO status_check (project_id, verdict, reason, decided_by, checked_at) "
+        "VALUES (?, ?, '현장 확인', 'human', '2026-09-20T00:00:00')",
+        (pid, verdict),
+    )
+    conn.execute(
+        "INSERT INTO edit_log (project_id, field, old_value, new_value, edited_at) "
+        "VALUES (?, 'verdict', ?, ?, ?)",
+        (pid, old[0] if old else None, verdict, NOW),
+    )
+    conn.commit()
+
+
+def _latest_verdict(conn):
+    return conn.execute(
+        "SELECT verdict, decided_by FROM status_check WHERE project_id = ? "
+        "ORDER BY checked_at DESC, id DESC LIMIT 1",
+        (_pid(conn),),
+    ).fetchone()
+
+
+def _energy(conn):
+    return sorted(
+        (r[0], r[1])
+        for r in conn.execute(
+            "SELECT source_type, capacity_kw FROM energy_plan WHERE project_id = ?",
+            (_pid(conn),),
+        )
+    )
+
+
+def test_reimport_keeps_a_human_verdict_when_the_sheet_did_not_change(conn):
+    import_tab(conn, "완주", _sheet(**{"진행현황": "착공 전(설계 단계) - 낙찰"}), SETTINGS, NOW)
+    _web_verdict(conn, "시공 중")
+    stats = import_tab(
+        conn, "완주", _sheet(**{"진행현황": "착공 전(설계 단계) - 낙찰"}), SETTINGS, LATER
+    )
+    assert tuple(_latest_verdict(conn)) == ("시공 중", "human")
+    assert stats.status == 0
+
+
+def test_reimport_records_a_changed_sheet_verdict_over_a_human_one_and_says_so(conn):
+    import_tab(conn, "완주", _sheet(**{"진행현황": "착공 전(설계 단계) - 낙찰"}), SETTINGS, NOW)
+    _web_verdict(conn, "준공 완료")
+    stats = import_tab(conn, "완주", _sheet(**{"진행현황": "시공 중 - 기공식"}), SETTINGS, LATER)
+    assert tuple(_latest_verdict(conn)) == ("시공 중", "imported")
+    assert stats.overwritten == [f"{TITLE} · 진행현황 · 준공 완료 → 시공 중"]
+
+
+def test_reimport_does_not_bring_back_an_energy_line_deleted_on_web(conn):
+    import_tab(conn, "완주", _sheet(**{"설치계획내용": "PV: 20kW 지열: 10kW"}), SETTINGS, NOW)
+    pid = _pid(conn)
+    conn.execute("DELETE FROM energy_plan WHERE project_id = ? AND source_type = '지열'", (pid,))
+    conn.execute(
+        "INSERT INTO edit_log (project_id, field, old_value, new_value, edited_at) "
+        "VALUES (?, 'energy', 'PV 20, 지열 10', 'PV 20', ?)",
+        (pid, NOW),
+    )
+    conn.commit()
+    import_tab(conn, "완주", _sheet(**{"설치계획내용": "PV: 20kW 지열: 10kW"}), SETTINGS, NOW)
+    assert _energy(conn) == [("PV", 20.0)]
+
+
+def test_reimport_replaces_the_energy_plan_when_the_sheet_changed(conn):
+    import_tab(conn, "완주", _sheet(**{"설치계획내용": "PV: 20kW"}), SETTINGS, NOW)
+    pid = _pid(conn)
+    conn.execute(
+        "UPDATE energy_plan SET capacity_kw = 25, entered_by = 'human' WHERE project_id = ?",
+        (pid,),
+    )
+    conn.execute(
+        "INSERT INTO edit_log (project_id, field, old_value, new_value, edited_at) "
+        "VALUES (?, 'energy', 'PV 20', 'PV 25', ?)",
+        (pid, NOW),
+    )
+    conn.commit()
+    stats = import_tab(conn, "완주", _sheet(**{"설치계획내용": "PV: 30kW"}), SETTINGS, NOW)
+    assert _energy(conn) == [("PV", 30.0)]
+    assert stats.overwritten == [f"{TITLE} · 신재생 · PV 25 → PV 30"]
+
+
+def test_reimport_department_follows_the_same_rule(conn):
+    import_tab(conn, "완주", _sheet(**{"담당부서": "체육진흥과"}), SETTINGS, NOW)
+    pid = _pid(conn)
+    conn.execute(
+        "INSERT INTO dept_check (project_id, exec_dept, decided_by, checked_at) "
+        "VALUES (?, '문화체육과', 'human', '2026-09-20T00:00:00')",
+        (pid,),
+    )
+    conn.execute(
+        "INSERT INTO edit_log (project_id, field, old_value, new_value, edited_at) "
+        "VALUES (?, 'exec_dept', '체육진흥과', '문화체육과', ?)",
+        (pid, NOW),
+    )
+    conn.commit()
+
+    def latest_dept():
+        return conn.execute(
+            "SELECT exec_dept FROM dept_check WHERE project_id = ? "
+            "ORDER BY checked_at DESC, id DESC LIMIT 1",
+            (pid,),
+        ).fetchone()[0]
+
+    import_tab(conn, "완주", _sheet(**{"담당부서": "체육진흥과"}), SETTINGS, LATER)
+    assert latest_dept() == "문화체육과"
+    stats = import_tab(conn, "완주", _sheet(**{"담당부서": "시설과"}), SETTINGS, LATER)
+    assert latest_dept() == "시설과"
+    assert stats.overwritten == [f"{TITLE} · 실행부서 · 문화체육과 → 시설과"]
