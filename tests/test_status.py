@@ -937,3 +937,49 @@ def test_news_query_does_not_repeat_a_municipality_already_in_the_name():
 def test_news_query_works_without_an_org():
     """기관명이 없어도 예전처럼 동작한다."""
     assert news_query("무장면문화체육센터") == "무장면문화체육센터"
+
+
+def _decided(conn, project_id, when, by, verdict="시공 중"):
+    conn.execute(
+        "INSERT INTO status_check (project_id, verdict, decided_by, checked_at) "
+        "VALUES (?, ?, ?, ?)",
+        (project_id, verdict, by, when),
+    )
+    conn.commit()
+
+
+def _pending_ids(conn):
+    return {row["id"] for row in pending_status_projects(conn, tier=None, limit=100)}
+
+
+def test_pending_skips_a_project_whose_latest_verdict_is_human(conn):
+    """사람이 정한 판정은 뉴스·LLM이 덮지 못하게 잠근다. 검색 예산도 아낀다."""
+    locked = _project(conn, "전북특별자치도 완주군", "사람이 본 사업")
+    _decided(conn, locked, "2026-09-10T00:00:00", "news")
+    _decided(conn, locked, "2026-09-11T00:00:00", "human")
+    assert locked not in _pending_ids(conn)
+
+
+def test_pending_takes_a_project_again_after_release(conn):
+    released = _project(conn, "전북특별자치도 완주군", "다시 맡긴 사업")
+    _decided(conn, released, "2026-09-11T00:00:00", "human")
+    _decided(conn, released, "2026-09-12T00:00:00", "release")
+    assert released in _pending_ids(conn)
+
+
+def test_pending_takes_a_project_whose_human_verdict_was_replaced_by_the_sheet(conn):
+    """시트 이관이 새 판정을 쌓으면 그 판정이 최신이다. 잠금도 풀린다."""
+    replaced = _project(conn, "전북특별자치도 완주군", "시트가 바꾼 사업")
+    _decided(conn, replaced, "2026-09-11T00:00:00", "human")
+    _decided(conn, replaced, "2026-09-12T00:00:00", "imported")
+    assert replaced in _pending_ids(conn)
+
+
+def test_pending_still_filters_by_tier_with_the_lock(conn):
+    locked = _project(conn, "전북특별자치도 완주군", "잠긴 관심기관 사업")
+    _decided(conn, locked, "2026-09-11T00:00:00", "human")
+    open_one = _project(conn, "전북특별자치도 완주군", "열린 관심기관 사업")
+    conn.execute("UPDATE org SET tier = 'focus'")
+    conn.commit()
+    ids = {row["id"] for row in pending_status_projects(conn, tier="focus", limit=100)}
+    assert ids == {open_one}

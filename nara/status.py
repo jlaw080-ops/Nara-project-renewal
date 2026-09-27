@@ -46,9 +46,15 @@ def pending_status_projects(
         "LEFT JOIN status_check s ON s.project_id = p.id",
     ]
     params: list[object] = []
+    # 최신 판정이 사람 판정이면 건너뛴다(잠금). release·imported가 그 위에 쌓이면 다시 본다.
+    conditions = [
+        "COALESCE((SELECT l.decided_by FROM status_check l WHERE l.project_id = p.id "
+        "ORDER BY l.checked_at DESC, l.id DESC LIMIT 1), '') != 'human'"
+    ]
     if tier:
-        sql.append("WHERE o.tier = ?")
+        conditions.append("o.tier = ?")
         params.append(tier)
+    sql.append("WHERE " + " AND ".join(conditions))
     sql.append("GROUP BY p.id")
     # 한 번도 안 본 사업(NULL)이 맨 앞에 오게 한다.
     sql.append("ORDER BY last_checked IS NOT NULL, last_checked, p.id")
