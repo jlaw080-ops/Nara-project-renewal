@@ -284,6 +284,10 @@ def migrate_tsv(
         f"신규 수기사업 {stats.projects} / 설비 {stats.energy} / 진행현황 {stats.status} / "
         f"부서 {stats.dept} / 건너뜀 {stats.skipped}"
     )
+    if stats.overwritten:
+        typer.echo(f"웹에서 고친 칸을 시트 값으로 덮은 것 {len(stats.overwritten)}건:")
+        for line in stats.overwritten:
+            typer.echo(f"  {line}")
     if stats.skipped_with_data:
         typer.echo(
             f"내용이 있는데 수요기관·공고명이 비어 건너뛴 행 {len(stats.skipped_with_data)}건:",

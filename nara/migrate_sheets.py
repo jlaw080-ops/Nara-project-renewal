@@ -7,6 +7,13 @@ from nara.config import Settings
 from nara.dates import to_iso_date
 from nara.energy import parse_energy_plan
 from nara.runlog import RunCounters
+from nara.sheet_memory import (
+    FIELD_LABELS,
+    canonical,
+    edited_on_web,
+    last_value,
+    remember,
+)
 from nara.sheets_tsv import read_tsv_with_stats
 from nara.store import ensure_project, upsert_org
 
@@ -59,6 +66,8 @@ class ImportStats:
     physical_lines: int = 0
     merges: int = 0
     truncations: int = 0
+    # 팀원이 시트에서 고친 칸이 웹 입력을 덮은 것. "사업 · 칸 · 웹 값 → 시트 값"
+    overwritten: list[str] = field(default_factory=list)
 
 
 def _to_float(value: str) -> float | None:
@@ -90,6 +99,45 @@ def _split_status(text: str) -> tuple[str, str]:
         if head.strip().startswith(verdict):
             return verdict, tail.strip()
     return "미확인", s
+
+
+def _sheet_changed(conn: sqlite3.Connection, project_id: int, field_name: str, text: str) -> bool:
+    """시트 칸이 지난 이관 뒤 바뀌었나.
+
+    빈 칸은 바뀌지 않은 것으로 본다 — 빈 칸으로 값을 지우지 않는 기존 규칙이다.
+    기억이 없는 칸(새 사업, 새로 채운 칸)은 바뀐 것으로 본다.
+    """
+    if not text:
+        return False
+    return last_value(conn, project_id, field_name) != text
+
+
+def _apply_project_fields(
+    conn: sqlite3.Connection,
+    project_id: int,
+    title: str,
+    values: dict[str, object],
+    now: str,
+    stats: ImportStats,
+) -> None:
+    """시트에서 실제로 바뀐 칸만 덮는다. 웹에서 고친 칸을 덮으면 목록에 적는다."""
+    current = conn.execute("SELECT * FROM project WHERE id = ?", (project_id,)).fetchone()
+    for field_name, value in values.items():
+        text = canonical(value)
+        if not _sheet_changed(conn, project_id, field_name, text):
+            continue
+        old = canonical(current[field_name])
+        if old != text:
+            if edited_on_web(conn, project_id, field_name):
+                stats.overwritten.append(
+                    f"{title} · {FIELD_LABELS[field_name]} · {old or '(빈칸)'} → {text}"
+                )
+            # field_name은 아래 호출의 고정된 키에서만 온다 — 시트 헤더가 칸 이름이 되지 않는다.
+            conn.execute(
+                f"UPDATE project SET {field_name} = ?, updated_at = ? WHERE id = ?",
+                (value, now, project_id),
+            )
+        remember(conn, project_id, field_name, text, now)
 
 
 def import_tab(
@@ -153,29 +201,23 @@ def import_tab(
             stats.unparsed_numbers += 1
             if len(stats.unparsed_preview) < SKIPPED_PREVIEW_MAX:
                 stats.unparsed_preview.append(f"{title}: 연면적 {raw_floor}"[:120])
-        conn.execute(
-            "UPDATE project SET address = COALESCE(NULLIF(?, ''), address), "
-            "start_date = COALESCE(NULLIF(?, ''), start_date), "
-            "end_date = COALESCE(NULLIF(?, ''), end_date), "
-            "zeb_grade = COALESCE(NULLIF(?, ''), zeb_grade), "
-            "floor_area = COALESCE(?, floor_area), "
-            "re_ratio = COALESCE(NULLIF(?, ''), re_ratio), "
-            "etc_cert = COALESCE(NULLIF(?, ''), etc_cert), "
-            "guide_equip = COALESCE(NULLIF(?, ''), guide_equip), "
-            "note = COALESCE(NULLIF(?, ''), note), updated_at = ? WHERE id = ?",
-            (
-                cell(row, "address"),
-                to_iso_date(cell(row, "start_date")),
-                to_iso_date(cell(row, "end_date")),
-                cell(row, "zeb"),
-                floor_area,
-                cell(row, "re_ratio"),
-                cell(row, "etc_cert"),
-                cell(row, "guide_equip"),
-                note_value,
-                now,
-                project_id,
-            ),
+        _apply_project_fields(
+            conn,
+            project_id,
+            title,
+            {
+                "address": cell(row, "address"),
+                "start_date": to_iso_date(cell(row, "start_date")),
+                "end_date": to_iso_date(cell(row, "end_date")),
+                "zeb_grade": cell(row, "zeb"),
+                "floor_area": floor_area,
+                "re_ratio": cell(row, "re_ratio"),
+                "etc_cert": cell(row, "etc_cert"),
+                "guide_equip": cell(row, "guide_equip"),
+                "note": note_value,
+            },
+            now,
+            stats,
         )
 
         if bid_no:

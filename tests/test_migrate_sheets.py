@@ -1,7 +1,9 @@
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
+from nara import cli
 from nara.award import pending_award_bid_nos
 from nara.config import load_settings
 from nara.db import connect, migrate
@@ -882,3 +884,91 @@ def test_import_tab_does_not_report_blank_floor_area_as_unreadable(conn):
 
     assert stats.unparsed_numbers == 0
     assert stats.unparsed_preview == []
+
+
+ORG = "전북특별자치도 완주군"
+TITLE = "완주 체육관 증축"
+
+
+def _row(cells: dict[str, str]) -> list[str]:
+    """헤더 이름으로 칸을 채운 한 행. 적지 않은 칸은 빈칸."""
+    return [cells.get(name, "") for name in HEADER]
+
+
+def _sheet(**extra: str) -> str:
+    return _tsv([_row({"수요기관": ORG, "공고명": TITLE, **extra})])
+
+
+def _pid(conn):
+    return conn.execute("SELECT id FROM project WHERE name = ?", (TITLE,)).fetchone()[0]
+
+
+def _web_edit(conn, field, value):
+    """웹 저장이 하는 일을 흉내 낸다: 값을 바꾸고 edit_log를 남긴다."""
+    pid = _pid(conn)
+    old = conn.execute(f"SELECT {field} FROM project WHERE id = ?", (pid,)).fetchone()[0]
+    conn.execute(f"UPDATE project SET {field} = ? WHERE id = ?", (value, pid))
+    conn.execute(
+        "INSERT INTO edit_log (project_id, field, old_value, new_value, edited_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (pid, field, old, value, NOW),
+    )
+    conn.commit()
+
+
+def _project_value(conn, field):
+    return conn.execute(f"SELECT {field} FROM project WHERE id = ?", (_pid(conn),)).fetchone()[0]
+
+
+def test_reimport_keeps_a_web_edit_when_the_sheet_did_not_change(conn):
+    """옛 시트 값이 그대로 남아 있을 뿐이면 웹 입력을 되돌리지 않는다."""
+    import_tab(conn, "완주", _sheet(**{"착공일": "2026.03.01"}), SETTINGS, NOW)
+    _web_edit(conn, "start_date", "2026-04-01")
+    stats = import_tab(conn, "완주", _sheet(**{"착공일": "2026.03.01"}), SETTINGS, NOW)
+    assert _project_value(conn, "start_date") == "2026-04-01"
+    assert stats.overwritten == []
+
+
+def test_reimport_takes_a_sheet_change_and_reports_the_web_edit_it_replaced(conn):
+    """팀원이 시트를 고쳤으면 시트가 이긴다. 내 웹 입력이 사라진 사실은 알린다."""
+    import_tab(conn, "완주", _sheet(**{"착공일": "2026.03.01"}), SETTINGS, NOW)
+    _web_edit(conn, "start_date", "2026-04-01")
+    stats = import_tab(conn, "완주", _sheet(**{"착공일": "2026.05.01"}), SETTINGS, NOW)
+    assert _project_value(conn, "start_date") == "2026-05-01"
+    assert stats.overwritten == [f"{TITLE} · 착공일 · 2026-04-01 → 2026-05-01"]
+
+
+def test_reimport_takes_a_sheet_change_quietly_when_nobody_edited_on_web(conn):
+    import_tab(conn, "완주", _sheet(**{"연면적(㎡, jootek)": "1,000"}), SETTINGS, NOW)
+    stats = import_tab(conn, "완주", _sheet(**{"연면적(㎡, jootek)": "1,200"}), SETTINGS, NOW)
+    assert _project_value(conn, "floor_area") == 1200.0
+    assert stats.overwritten == []
+
+
+def test_unreadable_sheet_number_does_not_overwrite_a_web_value(conn):
+    """'약 1,000'은 숫자로 못 읽는다. 빈 칸과 같이 다뤄야 웹 값이 남는다."""
+    import_tab(conn, "완주", _sheet(**{"연면적(㎡, jootek)": "1,000"}), SETTINGS, NOW)
+    _web_edit(conn, "floor_area", 1500.0)
+    stats = import_tab(conn, "완주", _sheet(**{"연면적(㎡, jootek)": "약 1,000"}), SETTINGS, NOW)
+    assert _project_value(conn, "floor_area") == 1500.0
+    assert stats.overwritten == []
+    assert stats.unparsed_numbers == 1
+
+
+def test_migrate_tsv_prints_the_web_edits_it_replaced(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli, "BACKUP_DIR", tmp_path / "backup")
+    db = tmp_path / "n.db"
+    sheet = tmp_path / "s.tsv"
+    runner = CliRunner()
+    sheet.write_text(_sheet(**{"착공일": "2026.03.01"}), encoding="utf-8")
+    assert runner.invoke(cli.app, ["migrate", "tsv", str(sheet), "--tab", "완주", "--db", str(db)])
+    c = connect(db)
+    _web_edit(c, "start_date", "2026-04-01")
+    c.close()
+    sheet.write_text(_sheet(**{"착공일": "2026.05.01"}), encoding="utf-8")
+    result = runner.invoke(
+        cli.app, ["migrate", "tsv", str(sheet), "--tab", "완주", "--db", str(db)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "웹에서 고친 칸을 시트 값으로 덮은 것 1건" in result.output
+    assert f"{TITLE} · 착공일 · 2026-04-01 → 2026-05-01" in result.output
