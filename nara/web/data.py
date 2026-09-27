@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from nara.energy import EnergyItem, estimate_cost
+from nara.sheet_memory import FIELD_LABELS
 from nara.store import last_run
 from nara.web.query import (
     Filters,
@@ -88,6 +89,7 @@ DECIDED_BY_LABELS = {
     "news": "뉴스",
     "llm": "LLM",
     "human": "사람",
+    "release": "잠금 해제",
 }
 
 
@@ -116,6 +118,8 @@ class ProjectDetail:
     energy: list[EnergyLine]
     energy_total: int
     energy_unpriced: list[str]
+    locked: bool = False
+    edits: list[dict] = ()
 
 
 def safe_url(url: str | None) -> str:
@@ -208,11 +212,24 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
         )
     ]
     depts = conn.execute(
-        "SELECT exec_dept, contract_dept, snippet, source_file, checked_at FROM dept_check "
+        "SELECT id, exec_dept, contract_dept, snippet, source_file, checked_at FROM dept_check "
         "WHERE project_id = ? ORDER BY checked_at DESC, id DESC",
         (project_id,),
     ).fetchall()
     energy, energy_total, energy_unpriced = _energy(conn, project_id)
+    latest = conn.execute(
+        "SELECT decided_by FROM status_check WHERE project_id = ? "
+        "ORDER BY checked_at DESC, id DESC LIMIT 1",
+        (project_id,),
+    ).fetchone()
+    edits = [
+        {**dict(row), "label": FIELD_LABELS.get(row["field"], row["field"])}
+        for row in conn.execute(
+            "SELECT edited_at, field, old_value, new_value FROM edit_log "
+            "WHERE project_id = ? ORDER BY edited_at DESC, id DESC",
+            (project_id,),
+        )
+    ]
     return ProjectDetail(
         project=project,
         notices=notices,
@@ -221,6 +238,8 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
         energy=energy,
         energy_total=energy_total,
         energy_unpriced=energy_unpriced,
+        locked=latest is not None and latest["decided_by"] == "human",
+        edits=edits,
     )
 
 

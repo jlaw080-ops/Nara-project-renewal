@@ -69,7 +69,7 @@
     {% if r.matched_title %}<div class="muted">공고명: {{ r.matched_title }}</div>{% endif %}</td>
   <td>{{ r.notice_date|dash }}</td>
   <td>{{ r.open_date|dash }}</td>
-  <td>{{ r.verdict or no_verdict }}</td>
+  <td>{{ r.verdict or no_verdict }}{% if r.verdict_by == 'human' %} <span class="muted">(사람)</span>{% endif %}</td>
   <td>{{ r.winner|dash }}</td>
   <td>{{ r.exec_dept|dash }}</td>
   <td>{{ r.zeb_grade|dash }}</td>

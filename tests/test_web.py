@@ -669,3 +669,152 @@ def test_list_page_marks_the_column_it_is_sorted_by(world):
     text = _text(_client(world[0]).get("/?sort=name&desc=0"))
     assert re.search(r'<th aria-sort="ascending"><a href="[^"]*">사업명</a>', text)
     assert text.count("aria-sort=") == 1
+
+
+def _post(client, url, data, origin="http://localhost"):
+    headers = {"Origin": origin} if origin else {}
+    return client.post(url, data=data, headers=headers)
+
+
+def _info(**changes):
+    base = {
+        key: ""
+        for key in (
+            "address",
+            "start_date",
+            "end_date",
+            "floor_area",
+            "zeb_grade",
+            "re_ratio",
+            "etc_cert",
+            "guide_equip",
+            "note",
+        )
+    }
+    return {**base, **changes}
+
+
+def test_edit_link_opens_the_form_for_that_section_only(world):
+    path, ids = world
+    text = _text(_client(path).get(f"/project/{ids['culture']}?edit=info"))
+    assert 'name="floor_area"' in text
+    assert 'name="reason"' not in text
+
+
+def test_saving_info_redirects_and_says_what_changed(world):
+    path, ids = world
+    client = _client(path)
+    resp = _post(client, f"/project/{ids['culture']}/edit/info", _info(floor_area="1,234.5"))
+    assert resp.status_code == 302
+    text = _text(client.get(resp.headers["Location"]))
+    assert "바꾼 칸: 연면적" in text
+    assert "수정 이력 1건" in text
+
+
+def test_invalid_info_is_shown_again_with_the_input_and_the_reason(world):
+    path, ids = world
+    resp = _post(
+        _client(path),
+        f"/project/{ids['culture']}/edit/info",
+        _info(start_date="2026-05-01", end_date="2026-04-01"),
+    )
+    assert resp.status_code == 422
+    text = _text(resp)
+    assert "준공일이 착공일보다 빠릅니다" in text
+    assert 'value="2026-05-01"' in text
+
+
+def test_a_human_verdict_is_marked_locked_and_release_unlocks_it(world):
+    path, ids = world
+    client = _client(path)
+    url = f"/project/{ids['gym']}"
+    _post(client, f"{url}/edit/verdict", {"verdict": BUILDING, "reason": "현장 확인"})
+    assert "자동 판정이 이 사업을 건너뜁니다" in _text(client.get(url))
+    assert "(사람)" in _text(client.get("/?q=다목적체육관"))
+    assert _post(client, f"{url}/release", {}).status_code == 302
+    text = _text(client.get(url))
+    assert "자동 판정이 이 사업을 건너뜁니다" not in text
+    assert "잠금 해제" in text
+
+
+def test_department_can_be_picked_from_a_candidate(world):
+    path, ids = world
+    conn = connect(path)
+    cid = conn.execute(
+        "INSERT INTO dept_check (project_id, exec_dept, snippet, decided_by, checked_at) "
+        "VALUES (?, '체육진흥과', '부서장 홍길동', 'imported', ?)",
+        (ids["gym"], NOW),
+    ).lastrowid
+    conn.commit()
+    conn.close()
+    client = _client(path)
+    _post(client, f"/project/{ids['gym']}/edit/dept", {"pick": str(cid), "exec_dept": ""})
+    conn = connect(path)
+    row = conn.execute(
+        "SELECT exec_dept, decided_by FROM dept_check ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    assert tuple(row) == ("체육진흥과", "human")
+
+
+def test_energy_form_adds_and_removes_lines(world):
+    path, ids = world
+    client = _client(path)
+    url = f"/project/{ids['gym']}/edit/energy"
+    client.post(
+        url,
+        data={"source": ["PV", "지열", ""], "capacity": ["20", "10", ""]},
+        headers={"Origin": "http://localhost"},
+    )
+    client.post(
+        url,
+        data={"source": ["PV", ""], "capacity": ["20", ""]},
+        headers={"Origin": "http://localhost"},
+    )
+    conn = connect(path)
+    rows = conn.execute(
+        "SELECT source_type FROM energy_plan WHERE project_id = ?", (ids["gym"],)
+    ).fetchall()
+    conn.close()
+    assert [r[0] for r in rows] == ["PV"]
+
+
+def test_a_post_from_another_site_is_refused(world):
+    """다른 웹사이트가 내 브라우저로 127.0.0.1에 저장을 보내는 공격(CSRF)이다."""
+    path, ids = world
+    client = _client(path)
+    url = f"/project/{ids['culture']}/edit/info"
+    assert _post(client, url, _info(note="x"), origin="http://evil.example").status_code == 403
+    assert _post(client, url, _info(note="x"), origin=None).status_code == 403
+    same = client.post(url, data=_info(note="x"), headers={"Sec-Fetch-Site": "same-origin"})
+    assert same.status_code == 302
+
+
+def test_an_unknown_host_is_refused(world):
+    """DNS 리바인딩으로 외부 페이지가 이 화면을 읽는 것을 막는다."""
+    assert _client(world[0]).get("/", headers={"Host": "evil.example"}).status_code == 400
+
+
+def test_an_unknown_edit_section_is_404(world):
+    path, ids = world
+    assert _post(_client(path), f"/project/{ids['gym']}/edit/evil", {}).status_code == 404
+
+
+def test_saving_while_the_collector_writes_keeps_the_input(world):
+    path, ids = world
+    app = create_app(path)
+    app.testing = True
+    app.config["WRITE_TIMEOUT"] = 0.2
+    blocker = sqlite3.connect(path)
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        resp = _post(
+            app.test_client(), f"/project/{ids['culture']}/edit/info", _info(floor_area="777")
+        )
+    finally:
+        blocker.rollback()
+        blocker.close()
+    assert resp.status_code == 503
+    text = _text(resp)
+    assert "수집이 DB를 쓰고 있습니다" in text
+    assert 'value="777"' in text

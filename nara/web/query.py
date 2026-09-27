@@ -163,7 +163,7 @@ WITH ln AS (
     WHERE n.project_id IS NOT NULL
 ),
 ls AS (
-    SELECT s.project_id, s.verdict,
+    SELECT s.project_id, s.verdict, s.decided_by,
            ROW_NUMBER() OVER (
                PARTITION BY s.project_id ORDER BY s.checked_at DESC, s.id DESC
            ) AS rn
@@ -266,7 +266,8 @@ def build_list_query(f: Filters) -> tuple[str, list]:
     sql = (
         _LATEST
         + "SELECT p.id, o.name AS org_name, p.name, ln.title AS notice_title, "
-        + "ln.notice_date, ln.open_date, ls.verdict, a.winner, ld.exec_dept, p.zeb_grade, "
+        + "ln.notice_date, ln.open_date, ls.verdict, ls.decided_by AS verdict_by, a.winner, "
+        + "ld.exec_dept, p.zeb_grade, "
         + f"{matched_sql} AS matched_title"
         + _FROM
         + where_sql

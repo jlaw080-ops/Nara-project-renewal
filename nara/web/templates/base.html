@@ -33,6 +33,16 @@
   @media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
   /* 표가 좁은 화면을 넘으면 페이지 전체가 아니라 표 상자만 옆으로 민다. */
   .table-wrap { overflow-x: auto; }
+  .edit-link { font-size: 12px; font-weight: normal; margin-left: 8px; }
+  .edit-form { display: flex; flex-direction: column; gap: 12px; max-width: 40rem; }
+  .edit-form label { display: flex; flex-direction: column; gap: 4px; }
+  .edit-form textarea { font: inherit; border: 1px solid var(--field-line); padding: 8px; }
+  .edit-form fieldset { border: 1px solid var(--line); padding: 8px 12px; }
+  .edit-form .choice { flex-direction: row; align-items: baseline; gap: 8px; }
+  .energy-row { display: flex; flex-wrap: wrap; gap: 12px; }
+  .field-error { color: var(--bad); font-size: 12px; }
+  .saved { border-left: 4px solid var(--link); padding: 8px 12px; background: var(--head); }
+  form.inline { display: inline; }
   table { border-collapse: collapse; width: 100%; }
   th, td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
   th { background: var(--head); white-space: nowrap; }

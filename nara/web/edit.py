@@ -242,11 +242,17 @@ def save_dept(
     conn: sqlite3.Connection, project_id: int, exec_dept: str, snippet: str | None, now: str
 ) -> list[str]:
     latest = conn.execute(
-        "SELECT exec_dept, snippet FROM dept_check WHERE project_id = ? "
+        "SELECT exec_dept, snippet, decided_by FROM dept_check WHERE project_id = ? "
         "AND COALESCE(exec_dept, '') != '' ORDER BY checked_at DESC, id DESC LIMIT 1",
         (project_id,),
     ).fetchone()
-    if latest is not None and latest["exec_dept"] == exec_dept and latest["snippet"] == snippet:
+    # 후보를 사람이 확정한 것도 기록한다. 이미 사람이 같은 값으로 확정했을 때만 건너뛴다.
+    if (
+        latest is not None
+        and latest["decided_by"] == "human"
+        and latest["exec_dept"] == exec_dept
+        and latest["snippet"] == snippet
+    ):
         return []
     with conn:
         conn.execute(

@@ -1,22 +1,37 @@
 {% extends "base.html" %}
+{% macro err(key) %}{% if errors.get(key) %}<span class="field-error">{{ errors[key] }}</span>{% endif %}{% endmacro %}
+{% macro val(key, current) %}{{ form.get(key, current if current is not none else '') }}{% endmacro %}
+{% macro edit_link(section) %}{% if edit != section %}<a class="edit-link" href="{{ url_for('detail', project_id=d.project.id, edit=section) }}">고치기</a>{% endif %}{% endmacro %}
+{% macro buttons() %}<p><button type="submit">저장</button> <a href="{{ url_for('detail', project_id=d.project.id) }}">취소</a></p>{% endmacro %}
 {% block title %}{{ d.project.name }}{% endblock %}
 {% block body %}
 <p><a href="{{ url_for('index') }}">← 목록으로</a></p>
 <h1>{{ d.project.name }}</h1>
 <p class="muted">{{ d.project.org_name }} · 출처 {{ d.project.source }}</p>
+{% if saved == '-' %}<p class="saved">바뀐 값이 없습니다</p>
+{% elif saved %}<p class="saved">바꾼 칸: {{ saved }}</p>{% endif %}
+{% if released %}<p class="saved">자동 판정에 다시 맡겼습니다</p>{% endif %}
+{% if errors.get('_form') %}<p class="bad">{{ errors['_form'] }}</p>{% endif %}
 
-<h2>사업</h2>
+<h2>사업{{ edit_link('info') }}</h2>
+{% if edit == 'info' %}
+<form method="post" class="edit-form" action="{{ url_for('save', project_id=d.project.id, section='info') }}">
+  {% for key, label, kind in info_fields %}
+  <label>{{ label }}
+    {% if kind == 'long' %}<textarea name="{{ key }}" rows="4">{{ val(key, d.project[key]) }}</textarea>
+    {% else %}<input type="{{ 'date' if kind == 'date' else 'text' }}" name="{{ key }}" value="{{ val(key, d.project[key]) }}">{% endif %}
+    {{ err(key) }}
+  </label>
+  {% endfor %}
+  {{ buttons() }}
+</form>
+{% else %}
 <div class="table-wrap"><table>
-  <tr><th>주소</th><td>{{ d.project.address|dash }}</td></tr>
-  <tr><th>착공일</th><td>{{ d.project.start_date|dash }}</td></tr>
-  <tr><th>준공일</th><td>{{ d.project.end_date|dash }}</td></tr>
-  <tr><th>연면적</th><td>{{ d.project.floor_area|dash }}</td></tr>
-  <tr><th>ZEB 등급</th><td>{{ d.project.zeb_grade|dash }}</td></tr>
-  <tr><th>신재생 비율</th><td>{{ d.project.re_ratio|dash }}</td></tr>
-  <tr><th>기타 인증</th><td>{{ d.project.etc_cert|dash }}</td></tr>
-  <tr><th>관급 장비</th><td>{{ d.project.guide_equip|dash }}</td></tr>
-  <tr><th>비고</th><td>{{ d.project.note|dash }}</td></tr>
+  {% for key, label, kind in info_fields %}
+  <tr><th>{{ label }}</th><td>{{ d.project[key]|dash }}</td></tr>
+  {% endfor %}
 </table></div>
+{% endif %}
 
 <h2>공고 {{ d.notices|length }}건</h2>
 {% if d.notices %}
@@ -41,7 +56,26 @@
 <p class="muted">공고가 없습니다{% if d.project.source == 'manual' %} — 시트에서 이관한 사업입니다{% endif %}</p>
 {% endif %}
 
-<h2>진행현황 이력 {{ d.history|length }}건</h2>
+<h2>진행현황 이력 {{ d.history|length }}건{{ edit_link('verdict') }}</h2>
+{% if d.locked %}
+<div class="saved">사람 판정 — 자동 판정이 이 사업을 건너뜁니다.
+  <form method="post" class="inline" action="{{ url_for('release', project_id=d.project.id) }}"><button type="submit">자동 판정에 다시 맡기기</button></form>
+</div>
+{% endif %}
+{% if edit == 'verdict' %}
+<form method="post" class="edit-form" action="{{ url_for('save', project_id=d.project.id, section='verdict') }}">
+  <label>판정
+    <select name="verdict">
+      {% for v in verdict_choices %}
+      <option value="{{ v }}"{% if form.get('verdict', d.history[0].verdict if d.history else '') == v %} selected{% endif %}>{{ v }}</option>
+      {% endfor %}
+    </select>
+    {{ err('verdict') }}
+  </label>
+  <label>사유 <textarea name="reason" rows="3">{{ form.get('reason', '') }}</textarea>{{ err('reason') }}</label>
+  {{ buttons() }}
+</form>
+{% endif %}
 {% if d.history %}
 <div class="table-wrap"><table>
 <thead><tr><th>시각</th><th>판정</th><th>판정 주체</th><th>사유</th><th>근거</th></tr></thead>
@@ -61,7 +95,23 @@
 <p class="muted">판정 전입니다</p>
 {% endif %}
 
-<h2>실행부서</h2>
+<h2>실행부서{{ edit_link('dept') }}</h2>
+{% if edit == 'dept' %}
+<form method="post" class="edit-form" action="{{ url_for('save', project_id=d.project.id, section='dept') }}">
+  {% if dept_candidates %}
+  <fieldset><legend>후보에서 고르기</legend>
+    {% for c in dept_candidates %}
+    <label class="choice"><input type="radio" name="pick" value="{{ c.id }}"{% if form.get('pick') == c.id|string %} checked{% endif %}> {{ c.exec_dept }}{% if c.snippet %} <span class="muted">— {{ c.snippet }}</span>{% endif %}</label>
+    {% endfor %}
+  </fieldset>
+  {% endif %}
+  <label>실행부서 <span class="muted">직접 적으면 후보보다 먼저 씁니다</span>
+    <input type="text" name="exec_dept" value="{{ form.get('exec_dept', '') }}">{{ err('exec_dept') }}
+  </label>
+  <label>근거 문장 <textarea name="snippet" rows="3">{{ form.get('snippet', '') }}</textarea>{{ err('snippet') }}</label>
+  {{ buttons() }}
+</form>
+{% endif %}
 {% if d.depts %}
 <div class="table-wrap"><table>
 <thead><tr><th>실행부서</th><th>계약부서</th><th>근거 문장</th><th>출처</th><th>조회 시각</th></tr></thead>
@@ -81,7 +131,19 @@
 <p class="muted">실행부서 조회 기록이 없습니다</p>
 {% endif %}
 
-<h2>신재생 계획</h2>
+<h2>신재생 계획{{ edit_link('energy') }}</h2>
+{% if edit == 'energy' %}
+<form method="post" class="edit-form" action="{{ url_for('save', project_id=d.project.id, section='energy') }}">
+  <p class="muted">줄을 비우면 지워집니다. 빈 줄에 적으면 더해집니다.</p>
+  {% for source, capacity in energy_rows %}
+  <div class="energy-row">
+    <label>에너지원 <input type="text" name="source" value="{{ source }}">{{ err('source-' ~ loop.index0) }}</label>
+    <label>용량(kW) <input type="text" name="capacity" value="{{ capacity }}" inputmode="decimal">{{ err('capacity-' ~ loop.index0) }}</label>
+  </div>
+  {% endfor %}
+  {{ buttons() }}
+</form>
+{% endif %}
 {% if d.energy %}
 <div class="table-wrap"><table>
 <thead><tr><th>에너지원</th><th>용량</th><th>예상가</th></tr></thead>
@@ -95,5 +157,19 @@
 <span class="bad"> — 단가가 없어 합계에서 빠짐: {{ d.energy_unpriced|join(', ') }}</span>{% endif %}</p>
 {% else %}
 <p class="muted">신재생 계획이 없습니다</p>
+{% endif %}
+
+<h2>수정 이력 {{ d.edits|length }}건</h2>
+{% if d.edits %}
+<div class="table-wrap"><table>
+<thead><tr><th>시각</th><th>칸</th><th>이전 값</th><th>새 값</th></tr></thead>
+<tbody>
+{% for e in d.edits %}
+<tr><td>{{ e.edited_at }}</td><td>{{ e.label }}</td><td>{{ e.old_value|dash }}</td><td>{{ e.new_value|dash }}</td></tr>
+{% endfor %}
+</tbody>
+</table></div>
+{% else %}
+<p class="muted">웹에서 고친 기록이 없습니다</p>
 {% endif %}
 {% endblock %}
