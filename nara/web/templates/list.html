@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>사업 조회</h1>
+
+<p class="runs">
+{% for r in runs %}
+  <span class="{{ '' if r.healthy else 'bad' }}">{{ r.label }} {{ r.started_at|dash }} {{ r.status_label }}</span>{% if not loop.last %} · {% endif %}
+{% endfor %}
+</p>
+
+<form class="filters" method="get" action="{{ url_for('index') }}">
+  <label>수요기관
+    <select name="org" multiple size="6">
+      {% for o in orgs %}
+      <option value="{{ o.id }}"{% if o.id in f.orgs %} selected{% endif %}>{{ o.name }}{% if o.tier == 'focus' %} ★{% endif %}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>관심기관
+    <span><input type="checkbox" name="focus" value="1"{% if f.focus_only %} checked{% endif %}> 관심기관만</span>
+  </label>
+  <label>이름 검색
+    <input type="search" name="q" value="{{ f.q }}" placeholder="공고명 또는 사업명">
+  </label>
+  <label>공고일 시작 <input type="date" name="from" value="{{ f.date_from }}"></label>
+  <label>공고일 끝 <input type="date" name="to" value="{{ f.date_to }}"></label>
+  <label>진행현황
+    <select name="verdict" multiple size="5">
+      {% for v in verdict_choices %}
+      <option value="{{ v }}"{% if v in f.verdicts %} selected{% endif %}>{{ v }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <input type="hidden" name="sort" value="{{ f.sort }}">
+  <input type="hidden" name="desc" value="{{ '1' if f.desc else '0' }}">
+  <button type="submit">조회</button>
+  <a href="{{ url_for('index') }}">조건 지우기</a>
+</form>
+
+<p><strong>{{ result.total }}건 중 {{ result.matched }}건</strong>
+{% if conditions %}<span class="muted">조건: {{ conditions|join(' · ') }}</span>{% endif %}</p>
+{% if result.excluded_no_notice %}
+<p class="muted">공고일 조건이 걸려 공고가 없는 사업 {{ result.excluded_no_notice }}건이 제외되었습니다</p>
+{% endif %}
+{% if result.truncated %}
+<p class="bad">{{ result.rows|length }}건만 표시합니다. 조건을 좁혀 주세요</p>
+{% endif %}
+{% if notes %}
+<ul class="notes">{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul>
+{% endif %}
+
+<table>
+<thead><tr>
+  <th><a href="{{ sort_links.org }}">수요기관</a></th>
+  <th><a href="{{ sort_links.name }}">사업명</a></th>
+  <th><a href="{{ sort_links.notice_date }}">공고일</a></th>
+  <th><a href="{{ sort_links.open_date }}">개찰일</a></th>
+  <th><a href="{{ sort_links.verdict }}">진행현황</a></th>
+  <th>낙찰업체</th>
+  <th>실행부서</th>
+  <th>ZEB</th>
+</tr></thead>
+<tbody>
+{% for r in result.rows %}
+<tr>
+  <td>{{ r.org_name }}</td>
+  <td><a href="{{ url_for('detail', project_id=r.id) }}">{{ r.name }}</a>
+    {% if r.matched_title %}<div class="muted">공고명: {{ r.matched_title }}</div>{% endif %}</td>
+  <td>{{ r.notice_date|dash }}</td>
+  <td>{{ r.open_date|dash }}</td>
+  <td>{{ r.verdict or no_verdict }}</td>
+  <td>{{ r.winner|dash }}</td>
+  <td>{{ r.exec_dept|dash }}</td>
+  <td>{{ r.zeb_grade|dash }}</td>
+</tr>
+{% else %}
+<tr><td colspan="8" class="muted">조건에 맞는 사업이 없습니다</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

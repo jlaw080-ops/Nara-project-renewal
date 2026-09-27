@@ -1,8 +1,11 @@
 """웹 조회 화면 — DB가 필요한 테스트."""
 
+import html
+import re
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -10,6 +13,7 @@ from nara.config import load_settings
 from nara.db import connect, migrate
 from nara.store import ensure_project, upsert_org
 from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN
+from nara.web.app import create_app, get_conn
 from nara.web.data import (
     DatabaseMissing,
     last_runs,
@@ -481,3 +485,127 @@ def test_org_options_puts_focus_orgs_first(world):
     with closing(open_readonly(world[0])) as conn:
         names = [o["name"] for o in org_options(conn)]
     assert names == ["전북특별자치도 완주군", "경기도 성남시"]
+
+
+def _client(path):
+    app = create_app(path)
+    app.testing = True
+    return app.test_client()
+
+
+def _text(resp):
+    return resp.get_data(as_text=True)
+
+
+def _header_link(text, label):
+    """열 머리 링크의 쿼리 인자. 템플릿은 &를 &amp;로 이스케이프한다."""
+    href = re.search(rf'href="([^"]*)">{label}</a>', text).group(1)
+    return parse_qs(urlsplit(html.unescape(href)).query)
+
+
+def test_list_page_shows_every_project_and_the_counts(world):
+    resp = _client(world[0]).get("/")
+    assert resp.status_code == 200
+    text = _text(resp)
+    assert "6건 중 6건" in text
+    for name in (
+        "완주군 다목적체육관",
+        "완주군 종합사회복지관",
+        "성남시 박물관",
+        "완주 풍류체험관",
+        "여수동 100% 친환경 센터",
+        "성남시 문화복합시설",
+    ):
+        assert name in text
+
+
+def test_list_page_shows_why_a_row_matched_by_notice_title(world):
+    """목록엔 사업명만 보인다. 공고명으로만 걸린 행은 왜 걸렸는지 적어야 한다."""
+    assert "공고명: 성남시 체육관 리모델링" in _text(_client(world[0]).get("/?q=체육"))
+
+
+def test_list_page_says_how_many_sheet_projects_a_date_filter_dropped(world):
+    text = _text(_client(world[0]).get("/?from=2026-01-01"))
+    assert "6건 중 3건" in text
+    assert "공고가 없는 사업 2건이 제외되었습니다" in text
+
+
+def test_list_page_explains_ignored_input_instead_of_failing(world):
+    resp = _client(world[0]).get("/?from=어제&sort=evil&org=abc")
+    assert resp.status_code == 200
+    text = _text(resp)
+    assert "시작일 형식이 맞지 않아 무시했습니다" in text
+    assert "쓸 수 없어 공고일로 바꿨습니다" in text
+    assert "쓸 수 없어 무시했습니다" in text
+
+
+def test_sort_links_keep_the_conditions_and_flip_the_current_column(world):
+    """URL이 곧 상태다. 열 머리를 눌러도 걸어 둔 조건이 남아야 한다."""
+    client = _client(world[0])
+    text = _text(client.get("/?q=성남"))
+    # 다른 열을 누르면 그 열의 오름차순으로 간다
+    assert _header_link(text, "사업명") == {"q": ["성남"], "sort": ["name"], "desc": ["0"]}
+    # 지금 정렬 중인 열을 누르면 방향이 뒤집힌다
+    text = _text(client.get("/?q=성남&sort=notice_date&desc=0"))
+    assert _header_link(text, "공고일")["desc"] == ["1"]
+
+
+def test_list_page_marks_a_stage_that_never_ran(world):
+    assert "실행 기록 없음" in _text(_client(world[0]).get("/"))
+
+
+def test_detail_page_shows_all_notices_and_the_history(world):
+    path, ids = world
+    text = _text(_client(path).get(f"/project/{ids['welfare']}"))
+    assert "공고 2건" in text
+    assert "완주군 종합사회복지관 설계용역(재공고)" in text
+    assert "가건축" in text
+    assert "규칙" in text
+
+
+def test_detail_page_is_404_for_an_unknown_or_non_numeric_id(world):
+    client = _client(world[0])
+    assert client.get("/project/999999").status_code == 404
+    assert client.get("/project/abc").status_code == 404
+
+
+def test_pages_escape_markup_that_comes_from_the_data(world):
+    """사업명·기사 제목은 밖에서 온 글이다. 그대로 그리면 스크립트가 실행된다."""
+    path, _ = world
+    conn = connect(path)
+    org_id = upsert_org(conn, "전북특별자치도 완주군", SETTINGS, NOW)
+    project_id = ensure_project(conn, org_id, "<script>alert(1)</script>", "manual", NOW)
+    conn.close()
+    client = _client(path)
+    for url in ("/", f"/project/{project_id}"):
+        text = _text(client.get(url))
+        assert "&lt;script&gt;" in text
+        assert "<script" not in text
+
+
+def test_detail_page_does_not_link_a_script_url(world):
+    path, ids = world
+    conn = connect(path)
+    _verdict(conn, ids["culture"], BUILDING, evidence_json='{"url": "javascript:alert(1)"}')
+    conn.commit()
+    conn.close()
+    assert "javascript:" not in _text(_client(path).get(f"/project/{ids['culture']}")).lower()
+
+
+def test_the_app_opens_the_database_read_only(world):
+    """스펙: 앱이 연 연결로 INSERT를 시도해 거부되는 것을 확인한다.
+
+    누군가 open_readonly를 connect로 바꾸면 이 테스트가 깨진다.
+    """
+    app = create_app(world[0])
+    with app.app_context():
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            get_conn().execute("INSERT INTO app_state (key, value) VALUES ('x', 'y')")
+
+
+def test_a_missing_database_is_reported_not_crashed(tmp_path):
+    """서버를 띄운 뒤 DB 파일이 사라진 경우다. 추적 화면 대신 이유를 말한다."""
+    resp = _client(tmp_path / "gone.db").get("/")
+    assert resp.status_code == 503
+    assert "DB 파일이 없다" in _text(resp)
+    assert not (tmp_path / "gone.db").exists()
