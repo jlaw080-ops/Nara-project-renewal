@@ -1,7 +1,18 @@
 """웹 입력 — 검증은 DB 없이, 저장은 임시 DB로 확인한다."""
 
+import sqlite3
+import threading
+from contextlib import closing
+from pathlib import Path
+
+import pytest
+
+from nara.config import load_settings
+from nara.db import connect, migrate
 from nara.energy import EnergyItem
+from nara.store import ensure_project, upsert_org
 from nara.verdict import BEFORE, BUILDING
+from nara.web.data import DatabaseMissing, open_readwrite
 from nara.web.edit import (
     LONG_TEXT_LIMIT,
     TEXT_LIMIT,
@@ -9,6 +20,11 @@ from nara.web.edit import (
     check_energy,
     check_info,
     check_verdict,
+    release_verdict,
+    save_dept,
+    save_energy,
+    save_info,
+    save_verdict,
 )
 
 CURRENT = {
@@ -131,3 +147,140 @@ def test_check_energy_rejects_duplicates_and_bad_capacity():
         "capacity-2": "0보다 큰 숫자로 적으세요",
         "source-3": "에너지원을 적으세요",
     }
+
+
+SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
+NOW = "2026-09-28T09:00:00"
+
+
+@pytest.fixture
+def db(tmp_path):
+    path = tmp_path / "e.db"
+    conn = connect(path)
+    migrate(conn)
+    org_id = upsert_org(conn, "전북특별자치도 완주군", SETTINGS, NOW)
+    pid = ensure_project(conn, org_id, "완주 체육관 증축", "manual", NOW)
+    conn.execute(
+        "UPDATE project SET address = '완주군 봉동읍', floor_area = 1000.0 WHERE id = ?", (pid,)
+    )
+    conn.commit()
+    conn.close()
+    return path, pid
+
+
+def _values(path, pid, **changes):
+    with closing(open_readwrite(path)) as conn:
+        row = conn.execute("SELECT * FROM project WHERE id = ?", (pid,)).fetchone()
+    return {**{key: row[key] for key in CURRENT}, **changes}
+
+
+def _log(path):
+    with closing(sqlite3.connect(path)) as conn:
+        return conn.execute(
+            "SELECT field, old_value, new_value FROM edit_log ORDER BY id"
+        ).fetchall()
+
+
+def test_save_info_changes_and_logs_only_what_changed(db):
+    path, pid = db
+    with closing(open_readwrite(path)) as conn:
+        changed = save_info(conn, pid, _values(path, pid, floor_area=1200.0), NOW)
+    assert changed == ["연면적"]
+    assert _log(path) == [("floor_area", "1000.0", "1200.0")]
+
+
+def test_save_info_with_nothing_changed_logs_nothing(db):
+    path, pid = db
+    with closing(open_readwrite(path)) as conn:
+        assert save_info(conn, pid, _values(path, pid), NOW) == []
+    assert _log(path) == []
+
+
+def test_save_info_keeps_the_old_value_when_the_log_cannot_be_written(db):
+    """값만 바뀌고 기록이 없으면 이관이 웹 수정을 알아보지 못한다. 둘은 함께 되거나 함께 안 된다."""
+    path, pid = db
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute("DROP TABLE edit_log")
+        conn.commit()
+    with closing(open_readwrite(path)) as conn:
+        with pytest.raises(sqlite3.OperationalError):
+            save_info(conn, pid, _values(path, pid, floor_area=1200.0), NOW)
+    with closing(sqlite3.connect(path)) as conn:
+        assert conn.execute("SELECT floor_area FROM project").fetchone()[0] == 1000.0
+
+
+def test_save_verdict_adds_a_human_row_once(db):
+    path, pid = db
+    with closing(open_readwrite(path)) as conn:
+        assert save_verdict(conn, pid, BUILDING, "현장 확인", NOW) == ["진행현황"]
+        assert save_verdict(conn, pid, BUILDING, "현장 확인", NOW) == []
+        rows = conn.execute("SELECT verdict, decided_by FROM status_check").fetchall()
+    assert [tuple(r) for r in rows] == [(BUILDING, "human")]
+    assert _log(path) == [("verdict", None, BUILDING)]
+
+
+def test_release_copies_the_human_verdict_as_release(db):
+    path, pid = db
+    with closing(open_readwrite(path)) as conn:
+        assert release_verdict(conn, pid, NOW) is False
+        save_verdict(conn, pid, BEFORE, "설계 중", NOW)
+        assert release_verdict(conn, pid, "2026-09-28T09:00:01") is True
+        latest = conn.execute(
+            "SELECT verdict, decided_by FROM status_check ORDER BY checked_at DESC, id DESC"
+        ).fetchone()
+    assert tuple(latest) == (BEFORE, "release")
+
+
+def test_save_dept_adds_a_human_row(db):
+    path, pid = db
+    with closing(open_readwrite(path)) as conn:
+        assert save_dept(conn, pid, "체육진흥과", "공고문 3쪽", NOW) == ["실행부서"]
+        assert save_dept(conn, pid, "체육진흥과", "공고문 3쪽", NOW) == []
+        row = conn.execute("SELECT exec_dept, snippet, decided_by FROM dept_check").fetchone()
+    assert tuple(row) == ("체육진흥과", "공고문 3쪽", "human")
+
+
+def test_save_energy_replaces_the_lines_and_logs_them(db):
+    path, pid = db
+    items = [EnergyItem("지열", 10.0), EnergyItem("PV", 20.0)]
+    with closing(open_readwrite(path)) as conn:
+        assert save_energy(conn, pid, items, NOW) == ["신재생"]
+        assert save_energy(conn, pid, [EnergyItem("PV", 20.0)], NOW) == ["신재생"]
+        rows = conn.execute("SELECT source_type, entered_by FROM energy_plan").fetchall()
+    assert [tuple(r) for r in rows] == [("PV", "human")]
+    assert _log(path)[-1] == ("energy", "PV 20, 지열 10", "PV 20")
+
+
+def test_open_readwrite_does_not_create_a_missing_file(tmp_path):
+    with pytest.raises(DatabaseMissing):
+        open_readwrite(tmp_path / "nope.db")
+    assert not (tmp_path / "nope.db").exists()
+
+
+def _hold_write_lock(path):
+    blocker = sqlite3.connect(path, check_same_thread=False)
+    blocker.execute("BEGIN IMMEDIATE")
+    return blocker
+
+
+def test_saving_waits_for_a_writer_then_succeeds(db):
+    """수집이 쓰는 중이어도 잠깐 기다렸다 저장한다."""
+    path, pid = db
+    blocker = _hold_write_lock(path)
+    threading.Timer(0.3, blocker.commit).start()
+    with closing(open_readwrite(path, timeout=5)) as conn:
+        assert save_info(conn, pid, _values(path, pid, floor_area=1300.0), NOW) == ["연면적"]
+    blocker.close()
+
+
+def test_saving_gives_up_after_the_timeout(db):
+    path, pid = db
+    values = _values(path, pid, floor_area=1300.0)
+    blocker = _hold_write_lock(path)
+    try:
+        with closing(open_readwrite(path, timeout=0.2)) as conn:
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                save_info(conn, pid, values, NOW)
+    finally:
+        blocker.rollback()
+        blocker.close()

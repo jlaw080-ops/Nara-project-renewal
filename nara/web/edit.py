@@ -2,13 +2,14 @@
 
 import math
 import re
+import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from itertools import zip_longest
 
 from nara.energy import EnergyItem
-from nara.sheet_memory import PROJECT_FIELDS
+from nara.sheet_memory import FIELD_LABELS, PROJECT_FIELDS, canonical, energy_value
 from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN
 
 TEXT_LIMIT = 200
@@ -162,3 +163,120 @@ def check_energy(sources: list[str], capacities: list[str]) -> Checked:
         seen.add(source)
         items.append(EnergyItem(source, capacity))
     return Checked({"items": items}, errors)
+
+
+def _log(
+    conn: sqlite3.Connection, project_id: int, field: str, old: object, new: object, now: str
+) -> None:
+    conn.execute(
+        "INSERT INTO edit_log (project_id, field, old_value, new_value, edited_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (project_id, field, canonical(old) or None, canonical(new) or None, now),
+    )
+
+
+def save_info(conn: sqlite3.Connection, project_id: int, values: dict, now: str) -> list[str]:
+    """바뀐 칸만 쓰고 기록한다. 값과 기록은 한 트랜잭션이다."""
+    current = conn.execute("SELECT * FROM project WHERE id = ?", (project_id,)).fetchone()
+    changed: list[str] = []
+    with conn:
+        for field in PROJECT_FIELDS:
+            new = values[field]
+            if canonical(new) == canonical(current[field]):
+                continue
+            # field는 PROJECT_FIELDS에서만 온다 — 폼 값이 칸 이름이 되지 않는다.
+            conn.execute(
+                f"UPDATE project SET {field} = ?, updated_at = ? WHERE id = ?",
+                (new, now, project_id),
+            )
+            _log(conn, project_id, field, current[field], new, now)
+            changed.append(FIELD_LABELS[field])
+    return changed
+
+
+def _latest_verdict(conn: sqlite3.Connection, project_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT verdict, reason, decided_by FROM status_check WHERE project_id = ? "
+        "ORDER BY checked_at DESC, id DESC LIMIT 1",
+        (project_id,),
+    ).fetchone()
+
+
+def save_verdict(
+    conn: sqlite3.Connection, project_id: int, verdict: str, reason: str, now: str
+) -> list[str]:
+    """사람 판정 한 줄. 최신 판정이 사람 판정이 되어 자동 판정이 이 사업을 건너뛴다."""
+    latest = _latest_verdict(conn, project_id)
+    if (
+        latest is not None
+        and latest["decided_by"] == "human"
+        and latest["verdict"] == verdict
+        and (latest["reason"] or "") == reason
+    ):
+        return []
+    with conn:
+        conn.execute(
+            "INSERT INTO status_check (project_id, verdict, reason, decided_by, checked_at) "
+            "VALUES (?, ?, ?, 'human', ?)",
+            (project_id, verdict, reason, now),
+        )
+        _log(conn, project_id, "verdict", latest["verdict"] if latest else None, verdict, now)
+    return [FIELD_LABELS["verdict"]]
+
+
+def release_verdict(conn: sqlite3.Connection, project_id: int, now: str) -> bool:
+    """잠금을 푼다. verdict가 NOT NULL이라 판정을 비우지 않고 지금 판정을 복사해 쌓는다."""
+    latest = _latest_verdict(conn, project_id)
+    if latest is None or latest["decided_by"] != "human":
+        return False
+    with conn:
+        conn.execute(
+            "INSERT INTO status_check (project_id, verdict, reason, decided_by, checked_at) "
+            "VALUES (?, ?, '자동 판정에 다시 맡김', 'release', ?)",
+            (project_id, latest["verdict"], now),
+        )
+    return True
+
+
+def save_dept(
+    conn: sqlite3.Connection, project_id: int, exec_dept: str, snippet: str | None, now: str
+) -> list[str]:
+    latest = conn.execute(
+        "SELECT exec_dept, snippet FROM dept_check WHERE project_id = ? "
+        "AND COALESCE(exec_dept, '') != '' ORDER BY checked_at DESC, id DESC LIMIT 1",
+        (project_id,),
+    ).fetchone()
+    if latest is not None and latest["exec_dept"] == exec_dept and latest["snippet"] == snippet:
+        return []
+    with conn:
+        conn.execute(
+            "INSERT INTO dept_check (project_id, exec_dept, snippet, decided_by, checked_at) "
+            "VALUES (?, ?, ?, 'human', ?)",
+            (project_id, exec_dept, snippet, now),
+        )
+        old = latest["exec_dept"] if latest else None
+        _log(conn, project_id, "exec_dept", old, exec_dept, now)
+    return [FIELD_LABELS["exec_dept"]]
+
+
+def save_energy(
+    conn: sqlite3.Connection, project_id: int, items: list[EnergyItem], now: str
+) -> list[str]:
+    """그 사업의 신재생 줄을 새 목록으로 바꾼다."""
+    rows = conn.execute(
+        "SELECT source_type, capacity_kw FROM energy_plan WHERE project_id = ?", (project_id,)
+    ).fetchall()
+    old = energy_value(EnergyItem(r["source_type"], r["capacity_kw"]) for r in rows)
+    new = energy_value(items)
+    if old == new:
+        return []
+    with conn:
+        conn.execute("DELETE FROM energy_plan WHERE project_id = ?", (project_id,))
+        for item in items:
+            conn.execute(
+                "INSERT INTO energy_plan (project_id, source_type, capacity_kw, entered_by, "
+                "updated_at) VALUES (?, ?, ?, 'human', ?)",
+                (project_id, item.source_type, item.capacity_kw, now),
+            )
+        _log(conn, project_id, "energy", old, new, now)
+    return [FIELD_LABELS["energy"]]
