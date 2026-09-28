@@ -457,7 +457,7 @@ def test_last_runs_names_every_stage_even_one_that_never_ran(world):
     """한 번도 돌지 않은 단계가 화면에서 사라지면 '멈춘 줄 모르는' 사고가 그대로다."""
     with closing(open_readonly(world[0])) as conn:
         runs = last_runs(conn, now=RUNS_NOW)
-    assert [r.label for r in runs] == ["수집", "낙찰 조회", "진행현황"]
+    assert [r.label for r in runs] == ["수집", "낙찰 조회", "진행현황", "백업"]
     for r in runs:
         assert (r.started_at, r.status_label, r.healthy) == (None, "실행 기록 없음", False)
 
@@ -485,7 +485,7 @@ def test_last_runs_reports_the_latest_run_of_each_stage(world):
     assert runs["진행현황"].status_label == "끝나지 않음"
     # 이관은 파이프라인 단계가 아니다. 소급 수집은 사람이 한 번 돌리는 일이라
     # 스케줄 감시 대상이 아니다 — 넣으면 늘 빨갛게 떠 경고를 무시하게 만든다
-    assert set(runs) == {"수집", "낙찰 조회", "진행현황"}
+    assert set(runs) == {"수집", "낙찰 조회", "진행현황", "백업"}
 
 
 def test_last_runs_flags_a_scheduled_stage_that_stopped_running(world):
