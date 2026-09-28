@@ -34,6 +34,7 @@ FIELD_LABELS = {
     "verdict": "진행현황",
     "exec_dept": "실행부서",
     "energy": "신재생",
+    "verdict_release": "잠금 해제",
 }
 SEEDED_KEY = "sheet_memory_seeded"
 

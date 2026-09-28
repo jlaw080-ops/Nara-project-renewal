@@ -162,10 +162,10 @@
 <h2>수정 이력 {{ d.edits|length }}건</h2>
 {% if d.edits %}
 <div class="table-wrap"><table>
-<thead><tr><th>시각</th><th>칸</th><th>이전 값</th><th>새 값</th></tr></thead>
+<thead><tr><th>시각</th><th>누가</th><th>칸</th><th>이전 값</th><th>새 값</th></tr></thead>
 <tbody>
 {% for e in d.edits %}
-<tr><td>{{ e.edited_at }}</td><td>{{ e.label }}</td><td>{{ e.old_value|dash }}</td><td>{{ e.new_value|dash }}</td></tr>
+<tr><td>{{ e.edited_at }}</td><td>{{ e.user_name or '(2단계 기록)' }}</td><td>{{ e.label }}</td><td>{{ e.old_value|dash }}</td><td>{{ e.new_value|dash }}</td></tr>
 {% endfor %}
 </tbody>
 </table></div>

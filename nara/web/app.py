@@ -132,13 +132,14 @@ def _check(section: str, d: ProjectDetail) -> edit.Checked:
 
 def _save(section: str, conn: sqlite3.Connection, project_id: int, values: dict) -> list[str]:
     now = datetime.now().isoformat(timespec="seconds")
+    uid = g.user.id
     if section == "info":
-        return edit.save_info(conn, project_id, values, now)
+        return edit.save_info(conn, project_id, values, now, uid)
     if section == "verdict":
-        return edit.save_verdict(conn, project_id, values["verdict"], values["reason"], now)
+        return edit.save_verdict(conn, project_id, values["verdict"], values["reason"], now, uid)
     if section == "dept":
-        return edit.save_dept(conn, project_id, values["exec_dept"], values["snippet"], now)
-    return edit.save_energy(conn, project_id, values["items"], now)
+        return edit.save_dept(conn, project_id, values["exec_dept"], values["snippet"], now, uid)
+    return edit.save_energy(conn, project_id, values["items"], now, uid)
 
 
 def _energy_rows(d: ProjectDetail, posted: bool) -> list[tuple[str, str]]:
@@ -323,7 +324,7 @@ def create_app(db_path: Path, secret_key: str, host: str | None = None) -> Flask
         db_path = current_app.config["DB_PATH"]
         try:
             with closing(open_readwrite(db_path, current_app.config["WRITE_TIMEOUT"])) as conn:
-                released = edit.release_verdict(conn, project_id, now)
+                released = edit.release_verdict(conn, project_id, now, g.user.id)
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc):
                 raise

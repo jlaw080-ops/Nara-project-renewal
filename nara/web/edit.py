@@ -166,16 +166,28 @@ def check_energy(sources: list[str], capacities: list[str]) -> Checked:
 
 
 def _log(
-    conn: sqlite3.Connection, project_id: int, field: str, old: object, new: object, now: str
+    conn: sqlite3.Connection,
+    project_id: int,
+    field: str,
+    old: object,
+    new: object,
+    now: str,
+    user_id: int | None = None,
 ) -> None:
     conn.execute(
-        "INSERT INTO edit_log (project_id, field, old_value, new_value, edited_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (project_id, field, canonical(old) or None, canonical(new) or None, now),
+        "INSERT INTO edit_log (project_id, field, old_value, new_value, edited_at, user_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (project_id, field, canonical(old) or None, canonical(new) or None, now, user_id),
     )
 
 
-def save_info(conn: sqlite3.Connection, project_id: int, values: dict, now: str) -> list[str]:
+def save_info(
+    conn: sqlite3.Connection,
+    project_id: int,
+    values: dict,
+    now: str,
+    user_id: int | None = None,
+) -> list[str]:
     """바뀐 칸만 쓰고 기록한다. 값과 기록은 한 트랜잭션이다."""
     current = conn.execute("SELECT * FROM project WHERE id = ?", (project_id,)).fetchone()
     changed: list[str] = []
@@ -189,7 +201,7 @@ def save_info(conn: sqlite3.Connection, project_id: int, values: dict, now: str)
                 f"UPDATE project SET {field} = ?, updated_at = ? WHERE id = ?",
                 (new, now, project_id),
             )
-            _log(conn, project_id, field, current[field], new, now)
+            _log(conn, project_id, field, current[field], new, now, user_id)
             changed.append(FIELD_LABELS[field])
     return changed
 
@@ -203,7 +215,12 @@ def _latest_verdict(conn: sqlite3.Connection, project_id: int) -> sqlite3.Row | 
 
 
 def save_verdict(
-    conn: sqlite3.Connection, project_id: int, verdict: str, reason: str, now: str
+    conn: sqlite3.Connection,
+    project_id: int,
+    verdict: str,
+    reason: str,
+    now: str,
+    user_id: int | None = None,
 ) -> list[str]:
     """사람 판정 한 줄. 최신 판정이 사람 판정이 되어 자동 판정이 이 사업을 건너뛴다."""
     latest = _latest_verdict(conn, project_id)
@@ -220,11 +237,21 @@ def save_verdict(
             "VALUES (?, ?, ?, 'human', ?)",
             (project_id, verdict, reason, now),
         )
-        _log(conn, project_id, "verdict", latest["verdict"] if latest else None, verdict, now)
+        _log(
+            conn,
+            project_id,
+            "verdict",
+            latest["verdict"] if latest else None,
+            verdict,
+            now,
+            user_id,
+        )
     return [FIELD_LABELS["verdict"]]
 
 
-def release_verdict(conn: sqlite3.Connection, project_id: int, now: str) -> bool:
+def release_verdict(
+    conn: sqlite3.Connection, project_id: int, now: str, user_id: int | None = None
+) -> bool:
     """잠금을 푼다. verdict가 NOT NULL이라 판정을 비우지 않고 지금 판정을 복사해 쌓는다."""
     latest = _latest_verdict(conn, project_id)
     if latest is None or latest["decided_by"] != "human":
@@ -235,11 +262,20 @@ def release_verdict(conn: sqlite3.Connection, project_id: int, now: str) -> bool
             "VALUES (?, ?, '자동 판정에 다시 맡김', 'release', ?)",
             (project_id, latest["verdict"], now),
         )
+        # 칸 이름을 verdict와 나눈다. verdict로 남기면 다음 시트 판정 변경이 웹 충돌로 보고된다.
+        _log(
+            conn, project_id, "verdict_release", latest["verdict"], latest["verdict"], now, user_id
+        )
     return True
 
 
 def save_dept(
-    conn: sqlite3.Connection, project_id: int, exec_dept: str, snippet: str | None, now: str
+    conn: sqlite3.Connection,
+    project_id: int,
+    exec_dept: str,
+    snippet: str | None,
+    now: str,
+    user_id: int | None = None,
 ) -> list[str]:
     latest = conn.execute(
         "SELECT exec_dept, snippet, decided_by FROM dept_check WHERE project_id = ? "
@@ -263,12 +299,16 @@ def save_dept(
         old = latest["exec_dept"] if latest else None
         # 후보를 확정만 한 것은 값 변경이 아니다. 기록하면 다음 시트 변경이 웹 충돌로 보고된다.
         if old != exec_dept:
-            _log(conn, project_id, "exec_dept", old, exec_dept, now)
+            _log(conn, project_id, "exec_dept", old, exec_dept, now, user_id)
     return [FIELD_LABELS["exec_dept"]]
 
 
 def save_energy(
-    conn: sqlite3.Connection, project_id: int, items: list[EnergyItem], now: str
+    conn: sqlite3.Connection,
+    project_id: int,
+    items: list[EnergyItem],
+    now: str,
+    user_id: int | None = None,
 ) -> list[str]:
     """그 사업의 신재생 줄을 새 목록으로 바꾼다."""
     rows = conn.execute(
@@ -286,5 +326,5 @@ def save_energy(
                 "updated_at) VALUES (?, ?, ?, 'human', ?)",
                 (project_id, item.source_type, item.capacity_kw, now),
             )
-        _log(conn, project_id, "energy", old, new, now)
+        _log(conn, project_id, "energy", old, new, now, user_id)
     return [FIELD_LABELS["energy"]]

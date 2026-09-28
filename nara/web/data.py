@@ -225,8 +225,9 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
     edits = [
         {**dict(row), "label": FIELD_LABELS.get(row["field"], row["field"])}
         for row in conn.execute(
-            "SELECT edited_at, field, old_value, new_value FROM edit_log "
-            "WHERE project_id = ? ORDER BY edited_at DESC, id DESC",
+            "SELECT e.edited_at, e.field, e.old_value, e.new_value, u.name AS user_name "
+            "FROM edit_log e LEFT JOIN app_user u ON u.id = e.user_id "
+            "WHERE e.project_id = ? ORDER BY e.edited_at DESC, e.id DESC",
             (project_id,),
         )
     ]

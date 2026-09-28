@@ -1019,3 +1019,45 @@ def test_behind_caddy_https_origin_is_accepted(world):
     )
     assert resp.status_code == 302
     assert "Secure" in resp.headers["Set-Cookie"]
+
+
+def _tester_id(path):
+    conn = connect(path)
+    uid = conn.execute("SELECT id FROM app_user WHERE email = ?", (TEST_EMAIL,)).fetchone()[0]
+    conn.close()
+    return uid
+
+
+def test_every_web_change_records_who_made_it(world):
+    path, ids = world
+    client = _client(path)
+    url = f"/project/{ids['gym']}"
+    _post(client, f"/project/{ids['culture']}/edit/info", _info(floor_area="500"))
+    _post(client, f"{url}/edit/verdict", {"verdict": BUILDING, "reason": "현장 확인"})
+    _post(client, f"{url}/release", {})
+    conn = connect(path)
+    rows = conn.execute("SELECT field, user_id FROM edit_log ORDER BY id").fetchall()
+    conn.close()
+    uid = _tester_id(path)
+    assert [tuple(r) for r in rows] == [
+        ("floor_area", uid),
+        ("verdict", uid),
+        ("verdict_release", uid),
+    ]
+
+
+def test_edit_history_shows_names_and_marks_older_records(world):
+    path, ids = world
+    client = _client(path)
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO edit_log (project_id, field, old_value, new_value, edited_at) "
+        "VALUES (?, 'note', NULL, '옛 기록', '2026-09-27T09:00:00')",
+        (ids["culture"],),
+    )
+    conn.commit()
+    conn.close()
+    _post(client, f"/project/{ids['culture']}/edit/info", _info(floor_area="500"))
+    text = _text(client.get(f"/project/{ids['culture']}"))
+    assert "시험" in text
+    assert "(2단계 기록)" in text
