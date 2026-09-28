@@ -818,3 +818,18 @@ def test_saving_while_the_collector_writes_keeps_the_input(world):
     text = _text(resp)
     assert "수집이 DB를 쓰고 있습니다" in text
     assert 'value="777"' in text
+
+
+def test_serve_prepares_the_new_tables_on_an_older_database(world, monkeypatch):
+    """1단계 때 만든 DB에는 수정 기록 표가 없다. 저장하면 500이 난다."""
+    path, _ = world
+    conn = connect(path)
+    conn.execute("DROP TABLE edit_log")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(Flask, "run", lambda self, **kw: None)
+    result = CliRunner().invoke(cli_app, ["serve", "--db", str(path)])
+    assert result.exit_code == 0, result.output
+    conn = connect(path)
+    assert conn.execute("SELECT COUNT(*) FROM edit_log").fetchone()[0] == 0
+    conn.close()
