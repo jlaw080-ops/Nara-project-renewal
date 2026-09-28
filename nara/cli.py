@@ -1,4 +1,5 @@
 import shutil
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -17,6 +18,10 @@ from nara.google import search_news
 from nara.llm import adjudicate
 from nara.migrate_sheets import import_tab
 from nara.runlog import run_log
+from nara.slot import SLOTS
+from nara.slot import acquire as acquire_slot
+from nara.slot import plan as slot_plan
+from nara.slot import release as release_slot
 from nara.status import update_statuses
 from nara.web.app import create_app
 
@@ -327,6 +332,62 @@ def user_list(db: Path = typer.Option(DEFAULT_DB)) -> None:
         state = "사용" if row["active"] else "사용 중지"
         last = row["last_login_at"] or "로그인 기록 없음"
         typer.echo(f"{row['email']}\t{row['name']}\t{state}\t{last}")
+
+
+# 슬롯 단계 이름 → 지금 명령. 테스트가 가짜로 바꿔 끼운다.
+_STEP_RUNNERS: dict[str, Callable[..., None]] = {
+    "collect": lambda db, config, days: collect(days=days, db=db, config=config),
+    "enrich award": lambda db, config, tier, group: enrich_award(
+        tier=tier, group=group, limit=300, db=db
+    ),
+    "enrich status": lambda db, config, tier: enrich_status(
+        tier=tier, limit=300, budget=1200, db=db
+    ),
+}
+
+run_app = typer.Typer(help="예약 실행")
+app.add_typer(run_app, name="run")
+
+
+@run_app.command("slot")
+def run_slot(
+    slot: str = typer.Argument(..., help="09 | 12 | 15"),
+    db: Path = typer.Option(DEFAULT_DB),
+    config: Path = typer.Option(DEFAULT_CONFIG),
+) -> None:
+    """그 시각에 할 일을 순서대로 돌린다. 한 단계가 실패해도 다음 단계를 돈다."""
+    if slot not in SLOTS:
+        typer.echo(f"슬롯은 {' | '.join(SLOTS)} 중 하나다: {slot!r}", err=True)
+        raise typer.Exit(code=1)
+    conn = _open_db(db)
+    now = datetime.now()
+    if not acquire_slot(conn, now):
+        stamp = now.isoformat(timespec="seconds")
+        conn.execute(
+            "INSERT INTO run_log (command, args, started_at, finished_at, status, message) "
+            "VALUES ('run slot', ?, ?, ?, 'partial', '앞 슬롯이 돌고 있어 건너뜀')",
+            (slot, stamp, stamp),
+        )
+        conn.commit()
+        typer.echo("앞 슬롯이 아직 돌고 있다 — 이번 회차는 건너뛴다", err=True)
+        raise typer.Exit(code=1)
+    failed: list[str] = []
+    try:
+        for step in slot_plan(slot, date.today().isoweekday()):
+            try:
+                _STEP_RUNNERS[step.name](db=db, config=config, **step.options)
+            except typer.Exit as exc:
+                if exc.exit_code:
+                    failed.append(step.name)
+            except Exception as exc:  # 한 단계가 죽어도 다음 단계를 돈다
+                failed.append(step.name)
+                typer.echo(f"{step.name} 실패: {exc}", err=True)
+    finally:
+        release_slot(conn)
+    if failed:
+        typer.echo(f"실패한 단계: {', '.join(failed)}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"슬롯 {slot} 완료")
 
 
 migrate_app = typer.Typer(help="외부 데이터를 가져온다")
