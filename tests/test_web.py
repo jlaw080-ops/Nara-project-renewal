@@ -694,10 +694,12 @@ def test_serve_binds_to_this_computer_only_without_the_debugger(world, monkeypat
 
     debug=True는 브라우저에서 파이썬 코드를 실행하는 디버거를 연다.
     """
-    monkeypatch.setattr("nara.cli.DEFAULT_ENV", _env_file(tmp_path))
     seen = {}
     monkeypatch.setattr(Flask, "run", lambda self, **kw: seen.update(kw))
-    result = CliRunner().invoke(cli_app, ["serve", "--db", str(world[0]), "--port", "8123"])
+    result = CliRunner().invoke(
+        cli_app,
+        ["serve", "--db", str(world[0]), "--port", "8123", "--env", str(_env_file(tmp_path))],
+    )
     assert result.exit_code == 0, result.output
     assert seen == {"host": "127.0.0.1", "port": 8123, "debug": False}
 
@@ -866,9 +868,9 @@ def test_serve_prepares_the_new_tables_on_an_older_database(world, monkeypatch, 
     conn.execute("DROP TABLE edit_log")
     conn.commit()
     conn.close()
-    monkeypatch.setattr("nara.cli.DEFAULT_ENV", _env_file(tmp_path))
     monkeypatch.setattr(Flask, "run", lambda self, **kw: None)
-    result = CliRunner().invoke(cli_app, ["serve", "--db", str(path)])
+    env = str(_env_file(tmp_path))
+    result = CliRunner().invoke(cli_app, ["serve", "--db", str(path), "--env", env])
     assert result.exit_code == 0, result.output
     conn = connect(path)
     assert conn.execute("SELECT COUNT(*) FROM edit_log").fetchone()[0] == 0
@@ -1119,3 +1121,32 @@ def test_a_fresh_version_saves_normally(world):
         headers=ORIGIN,
     )
     assert resp.status_code == 302
+
+
+def test_serve_refuses_to_start_without_a_secret_key(world, tmp_path):
+    env = tmp_path / "empty.env"
+    env.write_text("", encoding="utf-8")
+    result = CliRunner().invoke(cli_app, ["serve", "--db", str(world[0]), "--env", str(env)])
+    assert result.exit_code == 1
+    assert "NARA_SECRET_KEY" in result.output
+
+
+def test_serve_production_uses_waitress_on_this_computer_only(world, tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr("nara.cli.waitress_serve", lambda app, **kw: seen.update(kw))
+    env = _env_file(tmp_path, NARA_HOST="nara.example.org")
+    result = CliRunner().invoke(
+        cli_app,
+        ["serve", "--db", str(world[0]), "--env", str(env), "--production", "--port", "8000"],
+    )
+    assert result.exit_code == 0, result.output
+    assert (seen["host"], seen["port"]) == ("127.0.0.1", 8000)
+
+
+def test_deploy_files_hold_no_secret_values():
+    """저장소는 공개다. 배포 파일에는 이름만 있고 값은 없다."""
+    root = Path(__file__).resolve().parents[1] / "deploy"
+    text = "\n".join(p.read_text(encoding="utf-8") for p in root.iterdir() if p.is_file())
+    for name in ("G2B_API_KEY", "ANTHROPIC_API_KEY", "NARA_SECRET_KEY"):
+        # 값처럼 생긴 글자(8자 이상 영숫자)만 잡는다. 만드는 명령 안의 이름은 괜찮다.
+        assert not re.search(rf"{name}\s*=\s*[A-Za-z0-9_\-]{{8,}}", text), name

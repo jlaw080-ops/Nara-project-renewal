@@ -1,0 +1,10 @@
+[Unit]
+Description=nara 수집 09시
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+Unit=nara-slot@09.service
+
+[Install]
+WantedBy=timers.target

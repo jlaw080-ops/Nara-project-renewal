@@ -1,0 +1,9 @@
+[Unit]
+Description=nara 수집 슬롯 %i
+
+[Service]
+Type=oneshot
+User=nara
+WorkingDirectory=/srv/nara
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=/home/nara/.local/bin/uv run nara run slot %i --db /srv/nara/data/nara.db

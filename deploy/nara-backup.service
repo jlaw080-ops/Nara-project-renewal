@@ -1,0 +1,8 @@
+[Unit]
+Description=nara DB 백업
+
+[Service]
+Type=oneshot
+User=nara
+WorkingDirectory=/srv/nara
+ExecStart=/home/nara/.local/bin/uv run nara backup --db /srv/nara/data/nara.db --out /srv/nara/backup --env /srv/nara/.env

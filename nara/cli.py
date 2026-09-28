@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 import typer
+from waitress import serve as waitress_serve
 
 from nara import __version__
 from nara.auth import add_user, list_users, normalize_email, reset_password, set_active
@@ -123,23 +124,29 @@ def doctor(db: Path = typer.Option(DEFAULT_DB, help="SQLite 경로")) -> None:
 def serve(
     port: int = typer.Option(8000, min=1, max=65535, help="포트"),
     db: Path = typer.Option(DEFAULT_DB, help="SQLite 경로"),
+    env: Path = typer.Option(DEFAULT_ENV, help="비밀값 파일"),
+    production: bool = typer.Option(False, "--production", help="서버용: waitress로 띄운다"),
 ) -> None:
-    """조회·입력 화면을 띄운다. 이 컴퓨터(127.0.0.1)에서만 열린다."""
+    """조회·입력 화면을 띄운다. 이 컴퓨터(127.0.0.1)에서만 열리고 밖은 Caddy가 잇는다."""
     # _open_db를 쓰지 않는다. 없는 파일이면 위에서 멈춰야 한다 — doctor와 같은 이유.
     if not db.exists():
         typer.echo(f"DB 파일이 없다: {db}", err=True)
         raise typer.Exit(code=1)
-    # 2단계 표(edit_log·sheet_memory)가 없으면 만든다. 파일이 있으니 새 DB를 만들지는 않는다.
-    conn = connect(db)
-    migrate(conn)
-    conn.close()
-    typer.echo(f"조회 화면: http://127.0.0.1:{port}  (끄려면 Ctrl+C)")
-    # debug=True는 브라우저에서 코드를 실행하는 디버거를 연다. 로컬이어도 켜지 않는다.
-    secrets = load_secrets(DEFAULT_ENV)
+    secrets = load_secrets(env)
     if not secrets.secret_key:
         typer.echo("NARA_SECRET_KEY가 .env에 없다 — 세션 서명 키 없이는 띄우지 않는다", err=True)
         raise typer.Exit(code=1)
+    # 새 표가 없으면 만든다. 파일이 있으니 새 DB를 만들지는 않는다.
+    conn = connect(db)
+    migrate(conn)
+    conn.close()
     web = create_app(db, secret_key=secrets.secret_key, host=secrets.host)
+    if production:
+        typer.echo(f"서버 모드: 127.0.0.1:{port} (밖은 Caddy가 https로 잇는다)")
+        waitress_serve(web, host="127.0.0.1", port=port, threads=8)
+        return
+    typer.echo(f"조회 화면: http://127.0.0.1:{port}  (끄려면 Ctrl+C)")
+    # debug=True는 브라우저에서 코드를 실행하는 디버거를 연다. 로컬이어도 켜지 않는다.
     web.run(host="127.0.0.1", port=port, debug=False)
 
 
