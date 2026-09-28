@@ -1061,3 +1061,61 @@ def test_edit_history_shows_names_and_marks_older_records(world):
     text = _text(client.get(f"/project/{ids['culture']}"))
     assert "시험" in text
     assert "(2단계 기록)" in text
+
+
+def _version(client, project_id, section):
+    page = _text(client.get(f"/project/{project_id}?edit={section}"))
+    return re.search(r'name="version" value="([0-9a-f]+)"', page).group(1)
+
+
+def test_a_second_save_on_a_stale_form_is_refused(world):
+    """두 사람이 같은 묶음을 연 뒤 차례로 저장하면 나중 사람의 저장이 조용히 덮으면 안 된다."""
+    path, ids = world
+    pid = ids["culture"]
+    first = _client(path)
+    _ensure_user(path, email="peer@example.com", name="동료")
+    second = _app(path).test_client()
+    _login(second, path, email="peer@example.com")
+    stale = _version(first, pid, "info")
+    fresh = _version(second, pid, "info")
+    ok = _post(second, f"/project/{pid}/edit/info", {**_info(floor_area="100"), "version": fresh})
+    assert ok.status_code == 302
+    resp = _post(first, f"/project/{pid}/edit/info", {**_info(floor_area="200"), "version": stale})
+    assert resp.status_code == 409
+    text = _text(resp)
+    assert "그사이 동료님이 고쳤습니다" in text
+    assert 'value="200"' in text
+    conn = connect(path)
+    assert conn.execute("SELECT floor_area FROM project WHERE id = ?", (pid,)).fetchone()[0] == 100
+    conn.close()
+
+
+def test_a_change_by_collection_is_reported_without_a_name(world):
+    path, ids = world
+    pid = ids["gym"]
+    client = _client(path)
+    stale = _version(client, pid, "verdict")
+    _verdict_conn = connect(path)
+    _verdict(_verdict_conn, pid, BUILDING, when="2026-09-29T09:00:00", decided_by="news")
+    _verdict_conn.commit()
+    _verdict_conn.close()
+    resp = _post(
+        client,
+        f"/project/{pid}/edit/verdict",
+        {"verdict": DONE, "reason": "준공식", "version": stale},
+    )
+    assert resp.status_code == 409
+    assert "그사이 값이 바뀌었습니다" in _text(resp)
+
+
+def test_a_fresh_version_saves_normally(world):
+    path, ids = world
+    pid = ids["gym"]
+    client = _client(path)
+    version = _version(client, pid, "energy")
+    resp = client.post(
+        f"/project/{pid}/edit/energy",
+        data={"source": ["PV"], "capacity": ["20"], "version": version},
+        headers=ORIGIN,
+    )
+    assert resp.status_code == 302

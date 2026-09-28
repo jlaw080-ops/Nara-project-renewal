@@ -44,6 +44,8 @@ from nara.web.query import (
 
 EDIT_SECTIONS = ("info", "verdict", "dept", "energy")
 BUSY_MESSAGE = "수집이 DB를 쓰고 있습니다. 잠시 뒤 다시 저장하세요"
+CONFLICT_BY = "그사이 {}님이 고쳤습니다. 지금 값을 확인하고 다시 저장하세요"
+CONFLICT = "그사이 값이 바뀌었습니다. 지금 값을 확인하고 다시 저장하세요"
 BLANK_ENERGY_ROWS = 3
 SESSION_LIFETIME = timedelta(days=14)
 PUBLIC_ENDPOINTS = {"login", "static"}
@@ -168,6 +170,7 @@ def _render_detail(d: ProjectDetail, section: str | None, errors: dict, status: 
             verdict_choices=edit.EDIT_VERDICTS,
             dept_candidates=[row for row in d.depts if row["exec_dept"]],
             energy_rows=_energy_rows(d, posted),
+            versions={s: edit.version_of(get_conn(), d.project["id"], s) for s in EDIT_SECTIONS},
         ),
         status,
     )
@@ -305,9 +308,14 @@ def create_app(db_path: Path, secret_key: str, host: str | None = None) -> Flask
         checked = _check(section, d)
         if not checked.ok:
             return _render_detail(d, section, checked.errors, 422)
-        db_path = current_app.config["DB_PATH"]
         try:
-            with closing(open_readwrite(db_path, current_app.config["WRITE_TIMEOUT"])) as conn:
+            with closing(_rw_conn()) as conn:
+                sent = request.form.get("version")
+                if sent is not None and sent != edit.version_of(conn, project_id, section):
+                    who = edit.last_editor(conn, project_id, section)
+                    message = CONFLICT_BY.format(who) if who else CONFLICT
+                    fresh = project_detail(get_conn(), project_id)
+                    return _render_detail(fresh, section, {"_form": message}, 409)
                 changed = _save(section, conn, project_id, checked.values)
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc):

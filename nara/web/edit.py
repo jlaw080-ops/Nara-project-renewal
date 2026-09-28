@@ -1,5 +1,6 @@
 """웹 입력의 검증과 저장. 검증은 DB를 모르고, 저장은 쓰기 연결로만 한다."""
 
+import hashlib
 import math
 import re
 import sqlite3
@@ -328,3 +329,55 @@ def save_energy(
             )
         _log(conn, project_id, "energy", old, new, now, user_id)
     return [FIELD_LABELS["energy"]]
+
+
+SECTION_FIELDS = {
+    "info": PROJECT_FIELDS,
+    "verdict": ("verdict", "verdict_release"),
+    "dept": ("exec_dept",),
+    "energy": ("energy",),
+}
+
+
+def version_of(conn: sqlite3.Connection, project_id: int, section: str) -> str:
+    """그 묶음의 지금 값으로 만든 짧은 표시. 폼을 연 뒤 값이 바뀌면 달라진다."""
+    if section == "info":
+        row = conn.execute(
+            f"SELECT {', '.join(PROJECT_FIELDS)} FROM project WHERE id = ?", (project_id,)
+        ).fetchone()
+        parts = [canonical(row[f]) for f in PROJECT_FIELDS] if row else []
+    elif section == "verdict":
+        latest = _latest_row_id(conn, "status_check", project_id, "")
+        parts = [latest]
+    elif section == "dept":
+        parts = [
+            _latest_row_id(conn, "dept_check", project_id, "AND COALESCE(exec_dept, '') != ''")
+        ]
+    else:
+        rows = conn.execute(
+            "SELECT source_type, capacity_kw FROM energy_plan WHERE project_id = ?", (project_id,)
+        ).fetchall()
+        parts = [energy_value(EnergyItem(r["source_type"], r["capacity_kw"]) for r in rows)]
+    return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _latest_row_id(conn: sqlite3.Connection, table: str, project_id: int, extra: str) -> str:
+    # table·extra는 위의 고정 값만 받는다.
+    row = conn.execute(
+        f"SELECT id FROM {table} WHERE project_id = ? {extra} "
+        "ORDER BY checked_at DESC, id DESC LIMIT 1",
+        (project_id,),
+    ).fetchone()
+    return str(row[0]) if row else ""
+
+
+def last_editor(conn: sqlite3.Connection, project_id: int, section: str) -> str | None:
+    """그 묶음을 가장 최근에 웹에서 고친 사람의 이름. 기록이 없으면 None."""
+    fields = SECTION_FIELDS[section]
+    row = conn.execute(
+        f"SELECT u.name FROM edit_log e JOIN app_user u ON u.id = e.user_id "
+        f"WHERE e.project_id = ? AND e.field IN ({', '.join('?' * len(fields))}) "
+        "ORDER BY e.edited_at DESC, e.id DESC LIMIT 1",
+        (project_id, *fields),
+    ).fetchone()
+    return row[0] if row else None
