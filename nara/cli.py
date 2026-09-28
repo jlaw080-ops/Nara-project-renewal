@@ -127,7 +127,12 @@ def serve(
     conn.close()
     typer.echo(f"조회 화면: http://127.0.0.1:{port}  (끄려면 Ctrl+C)")
     # debug=True는 브라우저에서 코드를 실행하는 디버거를 연다. 로컬이어도 켜지 않는다.
-    create_app(db).run(host="127.0.0.1", port=port, debug=False)
+    secrets = load_secrets(DEFAULT_ENV)
+    if not secrets.secret_key:
+        typer.echo("NARA_SECRET_KEY가 .env에 없다 — 세션 서명 키 없이는 띄우지 않는다", err=True)
+        raise typer.Exit(code=1)
+    web = create_app(db, secret_key=secrets.secret_key, host=secrets.host)
+    web.run(host="127.0.0.1", port=port, debug=False)
 
 
 enrich_app = typer.Typer(help="수집한 공고에 정보를 덧붙인다")

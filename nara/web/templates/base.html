@@ -22,7 +22,7 @@
   textarea:focus-visible {
     outline: 2px solid var(--link); outline-offset: 2px;
   }
-  input[type=search], input[type=date], input[type=text], button {
+  input[type=search], input[type=date], input[type=text], input[type=password], button {
     font: inherit; min-height: 44px; box-sizing: border-box; border: 1px solid var(--field-line);
     padding: 0 12px; background: var(--bg); color: var(--fg);
   }
@@ -44,6 +44,7 @@
   .energy-row { display: flex; flex-wrap: wrap; gap: 12px; }
   .field-error { color: var(--bad); font-size: 12px; }
   .saved { border-left: 4px solid var(--link); padding: 8px 12px; background: var(--head); }
+  .account { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin: 0; }
   form.inline { display: inline; }
   table { border-collapse: collapse; width: 100%; }
   th, td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
@@ -58,6 +59,10 @@
 </style>
 </head>
 <body>
+{% if g.user %}
+<div class="account muted">{{ g.user.name }} · <a href="{{ url_for('change_password') }}">비밀번호 바꾸기</a>
+  <form method="post" class="inline" action="{{ url_for('logout') }}"><button type="submit">로그아웃</button></form></div>
+{% endif %}
 {% block body %}{% endblock %}
 </body>
 </html>

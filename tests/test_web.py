@@ -11,7 +11,9 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from flask import Flask
 from typer.testing import CliRunner
+from werkzeug.security import generate_password_hash
 
+from nara.auth import BAD_LOGIN, LOCKED, add_user
 from nara.cli import app as cli_app
 from nara.config import load_settings
 from nara.db import connect, migrate
@@ -512,10 +514,50 @@ def test_org_options_puts_focus_orgs_first(world):
     assert names == ["전북특별자치도 완주군", "경기도 성남시"]
 
 
-def _client(path):
-    app = create_app(path)
+SECRET = "test-secret-key"
+TEST_EMAIL = "tester@example.com"
+TEST_PASSWORD = "correct horse battery"
+ORIGIN = {"Origin": "http://localhost"}
+
+
+def _ensure_user(path, email=TEST_EMAIL, name="시험", password=TEST_PASSWORD):
+    conn = connect(path)
+    try:
+        if not conn.execute("SELECT 1 FROM app_user WHERE email = ?", (email,)).fetchone():
+            add_user(conn, email, name, NOW)
+        conn.execute(
+            "UPDATE app_user SET password_hash = ?, must_change = 0 WHERE email = ?",
+            (generate_password_hash(password, method="scrypt"), email),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _app(path, **config):
+    app = create_app(path, secret_key=SECRET)
     app.testing = True
-    return app.test_client()
+    app.config.update(config)
+    return app
+
+
+def _login(client, path, email=TEST_EMAIL, password=TEST_PASSWORD):
+    if path.exists():  # 없는 DB에 connect하면 파일이 생긴다
+        _ensure_user(path, email=email, password=password)
+    return client.post("/login", data={"email": email, "password": password}, headers=ORIGIN)
+
+
+def _env_file(tmp_path, **values):
+    path = tmp_path / ".env"
+    pairs = {"NARA_SECRET_KEY": "test-secret-key", **values}
+    path.write_text("".join(f"{k}={v}\n" for k, v in pairs.items()), encoding="utf-8")
+    return path
+
+
+def _client(path, **config):
+    client = _app(path, **config).test_client()
+    _login(client, path)
+    return client
 
 
 def _text(resp):
@@ -624,7 +666,7 @@ def test_the_app_opens_the_database_read_only(world):
 
     누군가 open_readonly를 connect로 바꾸면 이 테스트가 깨진다.
     """
-    app = create_app(world[0])
+    app = _app(world[0])
     with app.app_context():
         with pytest.raises(sqlite3.OperationalError, match="readonly"):
             get_conn().execute("INSERT INTO app_state (key, value) VALUES ('x', 'y')")
@@ -647,11 +689,12 @@ def test_serve_refuses_a_missing_database(tmp_path):
     assert not missing.exists()
 
 
-def test_serve_binds_to_this_computer_only_without_the_debugger(world, monkeypatch):
+def test_serve_binds_to_this_computer_only_without_the_debugger(world, monkeypatch, tmp_path):
     """127.0.0.1 밖에 열면 3단계 전에 외부에 노출된다.
 
     debug=True는 브라우저에서 파이썬 코드를 실행하는 디버거를 연다.
     """
+    monkeypatch.setattr("nara.cli.DEFAULT_ENV", _env_file(tmp_path))
     seen = {}
     monkeypatch.setattr(Flask, "run", lambda self, **kw: seen.update(kw))
     result = CliRunner().invoke(cli_app, ["serve", "--db", str(world[0]), "--port", "8123"])
@@ -802,15 +845,11 @@ def test_an_unknown_edit_section_is_404(world):
 
 def test_saving_while_the_collector_writes_keeps_the_input(world):
     path, ids = world
-    app = create_app(path)
-    app.testing = True
-    app.config["WRITE_TIMEOUT"] = 0.2
+    client = _client(path, WRITE_TIMEOUT=0.2)
     blocker = sqlite3.connect(path)
     blocker.execute("BEGIN IMMEDIATE")
     try:
-        resp = _post(
-            app.test_client(), f"/project/{ids['culture']}/edit/info", _info(floor_area="777")
-        )
+        resp = _post(client, f"/project/{ids['culture']}/edit/info", _info(floor_area="777"))
     finally:
         blocker.rollback()
         blocker.close()
@@ -820,13 +859,14 @@ def test_saving_while_the_collector_writes_keeps_the_input(world):
     assert 'value="777"' in text
 
 
-def test_serve_prepares_the_new_tables_on_an_older_database(world, monkeypatch):
+def test_serve_prepares_the_new_tables_on_an_older_database(world, monkeypatch, tmp_path):
     """1단계 때 만든 DB에는 수정 기록 표가 없다. 저장하면 500이 난다."""
     path, _ = world
     conn = connect(path)
     conn.execute("DROP TABLE edit_log")
     conn.commit()
     conn.close()
+    monkeypatch.setattr("nara.cli.DEFAULT_ENV", _env_file(tmp_path))
     monkeypatch.setattr(Flask, "run", lambda self, **kw: None)
     result = CliRunner().invoke(cli_app, ["serve", "--db", str(path)])
     assert result.exit_code == 0, result.output
@@ -837,10 +877,7 @@ def test_serve_prepares_the_new_tables_on_an_older_database(world, monkeypatch):
 
 def test_release_while_the_collector_writes_says_so(world):
     path, ids = world
-    app = create_app(path)
-    app.testing = True
-    app.config["WRITE_TIMEOUT"] = 0.2
-    client = app.test_client()
+    client = _client(path, WRITE_TIMEOUT=0.2)
     url = f"/project/{ids['gym']}"
     _post(client, f"{url}/edit/verdict", {"verdict": BUILDING, "reason": "현장 확인"})
     blocker = sqlite3.connect(path)
@@ -859,3 +896,126 @@ def test_release_does_not_claim_success_when_nothing_was_locked(world):
     client = _client(path)
     resp = _post(client, f"/project/{ids['gym']}/release", {})
     assert "released" not in resp.headers["Location"]
+
+
+def test_every_page_asks_for_login_first(world):
+    path, ids = world
+    client = _app(path).test_client()
+    for url in ("/", f"/project/{ids['gym']}"):
+        resp = client.get(url)
+        assert resp.status_code == 302
+        assert resp.headers["Location"].startswith("/login")
+    post = client.post(f"/project/{ids['gym']}/edit/info", data={}, headers=ORIGIN)
+    assert post.status_code == 302
+
+
+def test_login_failures_share_one_message(world):
+    path, _ = world
+    _ensure_user(path)
+    client = _app(path).test_client()
+    for email, password in ((TEST_EMAIL, "wrong one"), ("nobody@example.com", TEST_PASSWORD)):
+        resp = client.post("/login", data={"email": email, "password": password}, headers=ORIGIN)
+        assert resp.status_code == 401
+        assert BAD_LOGIN in _text(resp)
+
+
+def test_login_locks_after_five_failures(world):
+    path, _ = world
+    _ensure_user(path)
+    client = _app(path).test_client()
+    for _ in range(5):
+        client.post("/login", data={"email": TEST_EMAIL, "password": "x"}, headers=ORIGIN)
+    assert LOCKED in _text(_login(client, path))
+
+
+def test_login_goes_back_to_the_page_only_inside_this_site(world):
+    """로그인 화면이 남의 사이트로 튕기는 발판이 되면 안 된다."""
+    path, ids = world
+    _ensure_user(path)
+    inside = f"/project/{ids['gym']}"
+    for nxt, expected in (
+        (inside, inside),
+        ("//evil.example", "/"),
+        ("https://evil.example", "/"),
+        ("/\\evil.example", "/"),
+    ):
+        client = _app(path).test_client()
+        resp = client.post(
+            "/login",
+            data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "next": nxt},
+            headers=ORIGIN,
+        )
+        assert resp.headers["Location"] == expected, nxt
+
+
+def test_a_temporary_password_must_be_changed_first(world):
+    path, _ = world
+    conn = connect(path)
+    temp = add_user(conn, "new@example.com", "신입", NOW)
+    conn.close()
+    client = _app(path).test_client()
+    client.post("/login", data={"email": "new@example.com", "password": temp}, headers=ORIGIN)
+    assert client.get("/").headers["Location"] == "/password"
+    resp = client.post(
+        "/password",
+        data={"current": temp, "new": "brand new pass", "confirm": "brand new pass"},
+        headers=ORIGIN,
+    )
+    assert resp.status_code == 302
+    assert client.get("/").status_code == 200
+
+
+def test_password_form_explains_a_mismatch(world):
+    path, _ = world
+    client = _client(path)
+    resp = client.post(
+        "/password",
+        data={"current": TEST_PASSWORD, "new": "long enough 1", "confirm": "long enough 2"},
+        headers=ORIGIN,
+    )
+    assert resp.status_code == 422
+    assert "새 비밀번호 두 칸이 다릅니다" in _text(resp)
+
+
+def test_logout_ends_the_session(world):
+    path, _ = world
+    client = _client(path)
+    assert client.get("/").status_code == 200
+    assert "시험" in _text(client.get("/"))
+    client.post("/logout", headers=ORIGIN)
+    assert client.get("/").status_code == 302
+
+
+def test_a_disabled_account_loses_its_session(world):
+    path, _ = world
+    client = _client(path)
+    conn = connect(path)
+    conn.execute("UPDATE app_user SET active = 0")
+    conn.commit()
+    conn.close()
+    assert client.get("/").status_code == 302
+
+
+def test_the_app_refuses_to_start_without_a_secret_key(world):
+    with pytest.raises(ValueError, match="NARA_SECRET_KEY"):
+        create_app(world[0], secret_key="")
+
+
+def test_behind_caddy_https_origin_is_accepted(world):
+    """Caddy 뒤에서는 요청이 http로 들어온다. https Origin과 어긋나면 모든 저장이 403이 된다."""
+    path, _ = world
+    _ensure_user(path)
+    app = create_app(path, secret_key=SECRET, host="nara.example.org")
+    app.testing = True
+    client = app.test_client()
+    resp = client.post(
+        "/login",
+        data={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+        headers={
+            "Host": "nara.example.org",
+            "Origin": "https://nara.example.org",
+            "X-Forwarded-Proto": "https",
+        },
+    )
+    assert resp.status_code == 302
+    assert "Secure" in resp.headers["Set-Cookie"]
