@@ -6,6 +6,7 @@ import httpx
 import typer
 
 from nara import __version__
+from nara.auth import add_user, list_users, normalize_email, reset_password, set_active
 from nara.award import update_awards
 from nara.collect import backfill as run_backfill
 from nara.collect import collect_range
@@ -253,6 +254,74 @@ def enrich_status(
     if counters.failed and counters.failed == counters.processed:
         typer.echo("전체 판정 실패 — 사업 데이터나 판정 로직에 문제가 없는지 확인한다.", err=True)
         raise typer.Exit(code=1)
+
+
+user_app = typer.Typer(help="로그인 계정을 관리한다")
+app.add_typer(user_app, name="user")
+
+
+def _now() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _fail(exc: ValueError) -> typer.Exit:
+    typer.echo(str(exc), err=True)
+    return typer.Exit(code=1)
+
+
+@user_app.command("add")
+def user_add(
+    email: str = typer.Argument(..., help="로그인 이메일"),
+    name: str = typer.Option(..., help="화면에 보일 이름"),
+    db: Path = typer.Option(DEFAULT_DB),
+) -> None:
+    """계정을 만들고 임시 비밀번호를 한 번만 보인다."""
+    conn = _open_db(db)
+    try:
+        temp = add_user(conn, email, name, _now())
+    except ValueError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"계정을 만들었다: {normalize_email(email)}")
+    typer.echo(f"임시 비밀번호(한 번만 보인다): {temp}")
+    typer.echo("첫 로그인에서 비밀번호를 바꾸게 된다.")
+
+
+@user_app.command("reset")
+def user_reset(
+    email: str = typer.Argument(...),
+    db: Path = typer.Option(DEFAULT_DB),
+) -> None:
+    """임시 비밀번호를 다시 만들고 잠금을 푼다."""
+    conn = _open_db(db)
+    try:
+        temp = reset_password(conn, email, _now())
+    except ValueError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"임시 비밀번호(한 번만 보인다): {temp}")
+
+
+@user_app.command("disable")
+def user_disable(
+    email: str = typer.Argument(...),
+    db: Path = typer.Option(DEFAULT_DB),
+) -> None:
+    """로그인을 막는다. 수정 기록은 남긴다."""
+    conn = _open_db(db)
+    try:
+        set_active(conn, email, False)
+    except ValueError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"사용 중지: {normalize_email(email)}")
+
+
+@user_app.command("list")
+def user_list(db: Path = typer.Option(DEFAULT_DB)) -> None:
+    """계정 목록."""
+    conn = _open_db(db)
+    for row in list_users(conn):
+        state = "사용" if row["active"] else "사용 중지"
+        last = row["last_login_at"] or "로그인 기록 없음"
+        typer.echo(f"{row['email']}\t{row['name']}\t{state}\t{last}")
 
 
 migrate_app = typer.Typer(help="외부 데이터를 가져온다")

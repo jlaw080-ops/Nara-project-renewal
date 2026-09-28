@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 
 import pytest
+from typer.testing import CliRunner
 
 from nara.auth import (
     BAD_LOGIN,
@@ -15,6 +16,7 @@ from nara.auth import (
     reset_password,
     set_active,
 )
+from nara.cli import app as cli_app
 from nara.db import connect, migrate
 
 NOW = "2026-09-28T09:00:00"
@@ -147,3 +149,31 @@ def test_migrate_adds_the_user_column_to_an_older_edit_log(tmp_path):
     migrate(c)
     columns = [r[1] for r in c.execute("PRAGMA table_info(edit_log)")]
     assert "user_id" in columns
+
+
+def _cli(*args):
+    return CliRunner().invoke(cli_app, list(args))
+
+
+def test_user_commands_add_list_reset_and_disable(tmp_path):
+    db = str(tmp_path / "u.db")
+    added = _cli("user", "add", "Kim@Example.com", "--name", "김지헌", "--db", db)
+    assert added.exit_code == 0, added.output
+    assert "임시 비밀번호" in added.output
+    listed = _cli("user", "list", "--db", db)
+    assert "kim@example.com" in listed.output
+    assert "김지헌" in listed.output
+    assert _cli("user", "reset", "kim@example.com", "--db", db).exit_code == 0
+    assert _cli("user", "disable", "kim@example.com", "--db", db).exit_code == 0
+    assert "사용 중지" in _cli("user", "list", "--db", db).output
+
+
+def test_user_commands_explain_a_failure(tmp_path):
+    db = str(tmp_path / "u.db")
+    _cli("user", "add", "kim@example.com", "--name", "김", "--db", db)
+    dup = _cli("user", "add", "kim@example.com", "--name", "김", "--db", db)
+    assert dup.exit_code == 1
+    assert "이미" in dup.output
+    missing = _cli("user", "reset", "nobody@example.com", "--db", db)
+    assert missing.exit_code == 1
+    assert "없는 계정" in missing.output
