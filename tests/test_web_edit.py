@@ -284,3 +284,22 @@ def test_saving_gives_up_after_the_timeout(db):
     finally:
         blocker.rollback()
         blocker.close()
+
+
+def test_confirming_an_imported_candidate_records_a_human_row_but_no_web_edit(db):
+    """확정은 값 변경이 아니다. 수정 기록에 남기면 다음 시트 변경이 웹 충돌로 잘못 보고된다."""
+    path, pid = db
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute(
+            "INSERT INTO dept_check (project_id, exec_dept, snippet, decided_by, checked_at) "
+            "VALUES (?, '체육진흥과', '부서장', 'imported', '2026-09-01T00:00:00')",
+            (pid,),
+        )
+        conn.commit()
+    with closing(open_readwrite(path)) as conn:
+        save_dept(conn, pid, "체육진흥과", "부서장", NOW)
+        latest = conn.execute(
+            "SELECT decided_by FROM dept_check ORDER BY checked_at DESC, id DESC"
+        ).fetchone()
+    assert latest[0] == "human"
+    assert _log(path) == []

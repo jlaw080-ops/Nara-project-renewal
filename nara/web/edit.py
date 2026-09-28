@@ -261,7 +261,9 @@ def save_dept(
             (project_id, exec_dept, snippet, now),
         )
         old = latest["exec_dept"] if latest else None
-        _log(conn, project_id, "exec_dept", old, exec_dept, now)
+        # 후보를 확정만 한 것은 값 변경이 아니다. 기록하면 다음 시트 변경이 웹 충돌로 보고된다.
+        if old != exec_dept:
+            _log(conn, project_id, "exec_dept", old, exec_dept, now)
     return [FIELD_LABELS["exec_dept"]]
 
 

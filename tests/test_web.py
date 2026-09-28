@@ -833,3 +833,29 @@ def test_serve_prepares_the_new_tables_on_an_older_database(world, monkeypatch):
     conn = connect(path)
     assert conn.execute("SELECT COUNT(*) FROM edit_log").fetchone()[0] == 0
     conn.close()
+
+
+def test_release_while_the_collector_writes_says_so(world):
+    path, ids = world
+    app = create_app(path)
+    app.testing = True
+    app.config["WRITE_TIMEOUT"] = 0.2
+    client = app.test_client()
+    url = f"/project/{ids['gym']}"
+    _post(client, f"{url}/edit/verdict", {"verdict": BUILDING, "reason": "현장 확인"})
+    blocker = sqlite3.connect(path)
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        resp = _post(client, f"{url}/release", {})
+    finally:
+        blocker.rollback()
+        blocker.close()
+    assert resp.status_code == 503
+    assert "수집이 DB를 쓰고 있습니다" in _text(resp)
+
+
+def test_release_does_not_claim_success_when_nothing_was_locked(world):
+    path, ids = world
+    client = _client(path)
+    resp = _post(client, f"/project/{ids['gym']}/release", {})
+    assert "released" not in resp.headers["Location"]

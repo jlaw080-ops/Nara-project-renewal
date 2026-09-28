@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -903,7 +904,7 @@ def _pid(conn):
     return conn.execute("SELECT id FROM project WHERE name = ?", (TITLE,)).fetchone()[0]
 
 
-def _web_edit(conn, field, value):
+def _web_edit(conn, field, value, when=NOW):
     """웹 저장이 하는 일을 흉내 낸다: 값을 바꾸고 edit_log를 남긴다."""
     pid = _pid(conn)
     old = conn.execute(f"SELECT {field} FROM project WHERE id = ?", (pid,)).fetchone()[0]
@@ -911,7 +912,7 @@ def _web_edit(conn, field, value):
     conn.execute(
         "INSERT INTO edit_log (project_id, field, old_value, new_value, edited_at) "
         "VALUES (?, ?, ?, ?, ?)",
-        (pid, field, old, value, NOW),
+        (pid, field, old, value, when),
     )
     conn.commit()
 
@@ -963,7 +964,8 @@ def test_migrate_tsv_prints_the_web_edits_it_replaced(tmp_path, monkeypatch):
     sheet.write_text(_sheet(**{"착공일": "2026.03.01"}), encoding="utf-8")
     assert runner.invoke(cli.app, ["migrate", "tsv", str(sheet), "--tab", "완주", "--db", str(db)])
     c = connect(db)
-    _web_edit(c, "start_date", "2026-04-01")
+    # CLI 이관은 지금 시각으로 기록한다. 웹 수정도 그 뒤여야 한다.
+    _web_edit(c, "start_date", "2026-04-01", when=datetime.now().isoformat(timespec="seconds"))
     c.close()
     sheet.write_text(_sheet(**{"착공일": "2026.05.01"}), encoding="utf-8")
     result = runner.invoke(
@@ -1091,3 +1093,15 @@ def test_reimport_department_follows_the_same_rule(conn):
     stats = import_tab(conn, "완주", _sheet(**{"담당부서": "시설과"}), SETTINGS, LATER)
     assert latest_dept() == "시설과"
     assert stats.overwritten == [f"{TITLE} · 실행부서 · 문화체육과 → 시설과"]
+
+
+def test_a_web_edit_is_reported_once_not_on_every_later_sheet_change(conn):
+    """웹 수정 뒤 시트가 두 번 바뀌면 두 번째는 시트 값을 시트 값으로 덮는 것이다."""
+    import_tab(conn, "완주", _sheet(**{"착공일": "2026.03.01"}), SETTINGS, NOW)
+    _web_edit(conn, "start_date", "2026-04-01")
+    first = import_tab(conn, "완주", _sheet(**{"착공일": "2026.05.01"}), SETTINGS, LATER)
+    second = import_tab(
+        conn, "완주", _sheet(**{"착공일": "2026.06.01"}), SETTINGS, "2026-09-26T09:00:00"
+    )
+    assert len(first.overwritten) == 1
+    assert second.overwritten == []

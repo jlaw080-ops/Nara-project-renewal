@@ -211,12 +211,20 @@ def create_app(db_path: Path) -> Flask:
 
     @app.post("/project/<int:project_id>/release")
     def release(project_id: int):
-        if project_detail(get_conn(), project_id) is None:
+        d = project_detail(get_conn(), project_id)
+        if d is None:
             abort(404)
         now = datetime.now().isoformat(timespec="seconds")
         db_path = current_app.config["DB_PATH"]
-        with closing(open_readwrite(db_path, current_app.config["WRITE_TIMEOUT"])) as conn:
-            edit.release_verdict(conn, project_id, now)
+        try:
+            with closing(open_readwrite(db_path, current_app.config["WRITE_TIMEOUT"])) as conn:
+                released = edit.release_verdict(conn, project_id, now)
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc):
+                raise
+            return _render_detail(d, None, {"_form": BUSY_MESSAGE}, 503)
+        if not released:
+            return redirect(url_for("detail", project_id=project_id))
         return redirect(url_for("detail", project_id=project_id, released="1"))
 
     return app

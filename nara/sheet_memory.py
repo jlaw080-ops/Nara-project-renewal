@@ -70,13 +70,23 @@ def remember(conn: sqlite3.Connection, project_id: int, field: str, value: str, 
 
 
 def edited_on_web(conn: sqlite3.Connection, project_id: int, field: str) -> bool:
-    return (
-        conn.execute(
-            "SELECT 1 FROM edit_log WHERE project_id = ? AND field = ? LIMIT 1",
-            (project_id, field),
-        ).fetchone()
-        is not None
-    )
+    """지난 이관 뒤에 웹에서 고친 적이 있나.
+
+    '한 번이라도 고쳤나'로 보면 웹 수정 뒤 시트가 두 번 바뀔 때 두 번째도
+    웹 충돌로 보고한다 — 그때는 시트 값을 시트 값으로 덮는 것이다.
+    같은 초는 웹 수정으로 친다.
+    """
+    edited = conn.execute(
+        "SELECT MAX(edited_at) FROM edit_log WHERE project_id = ? AND field = ?",
+        (project_id, field),
+    ).fetchone()[0]
+    if edited is None:
+        return False
+    since = conn.execute(
+        "SELECT imported_at FROM sheet_memory WHERE project_id = ? AND field = ?",
+        (project_id, field),
+    ).fetchone()
+    return since is None or edited >= since[0]
 
 
 def _seed_rows(conn: sqlite3.Connection) -> list[tuple[int, str, str]]:
