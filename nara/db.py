@@ -19,10 +19,19 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _add_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    """표에 칸이 없으면 더한다. table·column은 이 파일의 고정 값만 받는다."""
+    columns = [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
 def migrate(conn: sqlite3.Connection) -> int:
     """스키마를 적용하고 버전을 돌려준다. 여러 번 불러도 결과가 같다."""
     sql = resources.files("nara").joinpath("schema.sql").read_text(encoding="utf-8")
     conn.executescript(sql)
+    # CREATE TABLE IF NOT EXISTS는 이미 있는 표에 칸을 더하지 않는다. 2단계 때 만든 DB용.
+    _add_column(conn, "edit_log", "user_id", "INTEGER REFERENCES app_user(id)")
     conn.execute(
         "INSERT INTO app_state (key, value) VALUES ('schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
