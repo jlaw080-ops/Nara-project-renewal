@@ -311,12 +311,17 @@ def create_app(db_path: Path, secret_key: str, host: str | None = None) -> Flask
         try:
             with closing(_rw_conn()) as conn:
                 sent = request.form.get("version")
+                # 비교부터 저장까지 쓰기 잠금 하나로 묶는다.
+                # 둘이 동시에 비교를 통과하면 나중 것이 덮는다.
+                conn.execute("BEGIN IMMEDIATE")
                 if sent is not None and sent != edit.version_of(conn, project_id, section):
                     who = edit.last_editor(conn, project_id, section)
+                    conn.rollback()
                     message = CONFLICT_BY.format(who) if who else CONFLICT
                     fresh = project_detail(get_conn(), project_id)
                     return _render_detail(fresh, section, {"_form": message}, 409)
                 changed = _save(section, conn, project_id, checked.values)
+                conn.commit()  # 바뀐 것이 없어 저장 함수가 트랜잭션을 닫지 않은 경우
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc):
                 raise

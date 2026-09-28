@@ -50,6 +50,8 @@ chmod 600 /srv/nara/.env
 
 ## 4. DB 옮기기
 
+먼저 `exit`로 nara 셸에서 나와 ubuntu 계정으로 돌아온다(nara 계정은 sudo를 못 쓴다).
+
 사용자 PC에서(수집을 끈 뒤):
 
 ```bash

@@ -19,6 +19,7 @@ from nara.config import load_settings
 from nara.db import connect, migrate
 from nara.store import ensure_project, upsert_org
 from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN
+from nara.web import edit
 from nara.web.app import create_app, get_conn
 from nara.web.data import (
     DatabaseMissing,
@@ -1150,3 +1151,27 @@ def test_deploy_files_hold_no_secret_values():
     for name in ("G2B_API_KEY", "ANTHROPIC_API_KEY", "NARA_SECRET_KEY"):
         # 값처럼 생긴 글자(8자 이상 영숫자)만 잡는다. 만드는 명령 안의 이름은 괜찮다.
         assert not re.search(rf"{name}\s*=\s*[A-Za-z0-9_\-]{{8,}}", text), name
+
+
+def test_the_version_is_compared_inside_the_write_lock(world, monkeypatch):
+    """비교와 저장 사이에 다른 사람이 끼면 나중 저장이 조용히 덮는다.
+
+    쓰기 잠금 안에서 비교해야 한다.
+    """
+    path, ids = world
+    client = _client(path)
+    version = _version(client, ids["culture"], "info")
+    seen = []
+    real = edit.version_of
+
+    def spy(conn, project_id, section):
+        seen.append(conn.in_transaction)
+        return real(conn, project_id, section)
+
+    monkeypatch.setattr(edit, "version_of", spy)
+    _post(
+        client,
+        f"/project/{ids['culture']}/edit/info",
+        {**_info(floor_area="5"), "version": version},
+    )
+    assert seen[-1] is True
