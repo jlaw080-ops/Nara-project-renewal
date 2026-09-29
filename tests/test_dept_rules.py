@@ -1,0 +1,107 @@
+"""실행부서 판정 규칙 — 스킬에 적힌 실제 실패 사례를 옮겼다."""
+
+from nara.dept_rules import (
+    DeptAnswer,
+    decide_by_rule,
+    excerpt_for_llm,
+    find_candidates,
+    find_contract_dept,
+    unspace,
+    verify_answer,
+)
+
+PAIR = (
+    "13. 기타사항\n"
+    "가. 계약관련 문의: 재무과 계약팀 (063-000-0000)\n"
+    "나. 사업관련 문의: 문화관광과 관광팀 (063-000-0001)\n"
+)
+
+
+def _names(text):
+    return [c.name for c in find_candidates(text)]
+
+
+def test_the_pair_structure_gives_the_executing_department():
+    """공고문은 계약부서와 실행부서를 짝으로 적는다. 실행부서 쪽을 고른다."""
+    candidates = find_candidates(PAIR)
+    assert [c.name for c in candidates] == ["문화관광과"]
+    assert candidates[0].near
+    assert "사업관련 문의" in candidates[0].snippet
+    assert decide_by_rule(candidates).name == "문화관광과"
+    assert find_contract_dept(PAIR) == "재무과"
+
+
+def test_contract_departments_are_never_candidates():
+    assert _names("문의처: 재무과 경리팀 063-000-0000") == []
+    assert _names("사업 담당 부서: 회계과") == []
+
+
+def test_a_conjunction_is_not_a_department():
+    """조사 '과'(=and)가 붙은 말은 부서가 아니다. '동 용역과'처럼 지시어 뒤도 그렇다."""
+    assert _names("과업 관련 문의: 동 용역과 관련하여 도시계획과로 문의") == ["도시계획과"]
+    assert _names("사업관련 문의는 다음과 같이 건축과 건축팀으로 한다") == ["건축과"]
+
+
+def test_spaced_out_names_are_joined():
+    """칸을 맞추려고 부서명 글자 사이를 띄운 공고문이 있다."""
+    assert unspace("사업 담당 부서 : 행 정 과") == "사업 담당 부서 : 행정과"
+    assert _names("사업 담당 부서 : 행 정 과 (063-000-0000)") == ["행정과"]
+
+
+def test_a_team_name_is_reduced_to_its_division():
+    assert _names("사업담당: 문화관광과 문화유산팀") == ["문화관광과"]
+
+
+def test_two_candidates_are_not_decided_by_rule():
+    text = "사업관련 문의: 건축과\n설계서 열람 문의: 도시재생과"
+    assert sorted(_names(text)) == ["건축과", "도시재생과"]
+    assert decide_by_rule(find_candidates(text)) is None
+
+
+def test_a_department_far_from_the_cue_is_not_decided_by_rule():
+    text = "사업관련 문의: " + "가" * 120 + " 건축과"
+    candidates = find_candidates(text)
+    assert [c.name for c in candidates] == ["건축과"]
+    assert not candidates[0].near
+    assert decide_by_rule(candidates) is None
+
+
+def test_the_excerpt_keeps_the_contact_sections_and_the_end():
+    body = "가" * 5000 + "\n사업관련 문의: 건축과\n" + "나" * 5000 + "\n문의처: 행정과 끝"
+    excerpt = excerpt_for_llm(body)
+    assert "사업관련 문의: 건축과" in excerpt
+    assert excerpt.endswith("문의처: 행정과 끝")
+    assert len(excerpt) <= 6000
+
+
+def _answer(dept, quote, contract=None):
+    return DeptAnswer(exec_dept=dept, contract_dept=contract, quote=quote)
+
+
+def test_a_quote_found_in_the_text_confirms_the_answer():
+    assert verify_answer(PAIR, _answer("문화관광과", "사업관련 문의: 문화관광과 관광팀"))
+
+
+def test_spacing_and_line_breaks_do_not_break_the_match():
+    """PDF는 줄을 아무 데서나 끊는다. 공백을 빼고 비교한다."""
+    text = "나. 사업관련\n문의: 문화 관광과 관광팀"
+    assert verify_answer(text, _answer("문화관광과", "사업관련 문의: 문화관광과 관광팀"))
+
+
+def test_a_reworded_quote_is_rejected():
+    assert not verify_answer(PAIR, _answer("문화관광과", "사업 문의는 문화관광과에서 받습니다"))
+
+
+def test_a_department_missing_from_its_own_quote_is_rejected():
+    assert not verify_answer(PAIR, _answer("건축과", "사업관련 문의: 문화관광과 관광팀"))
+
+
+def test_a_contract_department_answer_is_rejected():
+    assert not verify_answer(PAIR, _answer("재무과", "계약관련 문의: 재무과 계약팀"))
+
+
+def test_a_team_only_or_empty_answer_is_rejected():
+    text = "사업관련 문의: 관광팀 (063-000-0001)"
+    assert not verify_answer(text, _answer("관광팀", "사업관련 문의: 관광팀"))
+    assert not verify_answer(PAIR, _answer(None, "사업관련 문의: 문화관광과 관광팀"))
+    assert not verify_answer(PAIR, _answer("문화관광과", "관광과"))
