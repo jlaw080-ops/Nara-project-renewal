@@ -1,6 +1,7 @@
 """웹 조회 화면. 요청을 받아 query·data에 넘기고 템플릿을 그린다."""
 
 import sqlite3
+from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -176,7 +177,12 @@ def _render_detail(d: ProjectDetail, section: str | None, errors: dict, status: 
     )
 
 
-def create_app(db_path: Path, secret_key: str, host: str | None = None) -> Flask:
+def create_app(
+    db_path: Path,
+    secret_key: str,
+    host: str | None = None,
+    lan_hosts: Sequence[str] = (),
+) -> Flask:
     if not secret_key:
         raise ValueError("세션 서명 키가 없다 — .env의 NARA_SECRET_KEY를 채운다")
     app = Flask(__name__)
@@ -185,7 +191,13 @@ def create_app(db_path: Path, secret_key: str, host: str | None = None) -> Flask
     app.add_template_filter(_dash, "dash")
     app.add_template_filter(_won, "won")
     # DNS 리바인딩으로 외부 페이지가 이 화면을 읽지 못하게 한다.
-    app.config["TRUSTED_HOSTS"] = ["127.0.0.1", "localhost", *([host] if host else [])]
+    # 사내망 공유(lan_hosts)는 http라 host와 달리 Secure 쿠키·프록시 설정을 켜지 않는다.
+    app.config["TRUSTED_HOSTS"] = [
+        "127.0.0.1",
+        "localhost",
+        *lan_hosts,
+        *([host] if host else []),
+    ]
     app.config["WRITE_TIMEOUT"] = BUSY_TIMEOUT_SECONDS
     app.config.update(
         SESSION_COOKIE_HTTPONLY=True,

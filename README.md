@@ -33,6 +33,10 @@ uv run nara serve                                       # 조회·입력 화면 
 `uv run nara user add <이메일> --name <이름>`으로 계정을 만든다. 임시 비밀번호는 한 번만
 보이고, 첫 로그인에서 바꾼다.
 
+사내망의 다른 PC에서 써 보게 하려면 `uv run nara serve --lan`으로 띄우고, 화면에 나온
+`http://<이 PC IP>:8000` 주소를 알려 준다. 사내망 안에서는 http라 비밀번호가 암호화되지 않으니
+다른 곳에서 쓰는 비밀번호는 쓰지 않는다. 이 PC가 켜져 있어야 한다.
+
 서버 설치는 [deploy/setup.md](deploy/setup.md)에 있다. 서버에서는 `nara run slot 09|12|15`가
 하루 세 번 수집하고 `nara backup`이 매일 백업한다.
 

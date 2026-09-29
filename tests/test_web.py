@@ -1175,3 +1175,45 @@ def test_the_version_is_compared_inside_the_write_lock(world, monkeypatch):
         {**_info(floor_area="5"), "version": version},
     )
     assert seen[-1] is True
+
+
+LAN_IP = "192.168.0.10"
+
+
+def test_serve_lan_opens_to_the_office_network_and_shows_the_address(world, tmp_path, monkeypatch):
+    """사내망 공유: 다른 PC가 들어올 수 있게 열고, 알려 줄 주소를 보인다."""
+    seen = {}
+    monkeypatch.setattr("nara.cli.waitress_serve", lambda app, **kw: seen.update(kw, app=app))
+    monkeypatch.setattr("nara.cli._lan_addresses", lambda: (LAN_IP, ["my-pc", LAN_IP]))
+    env = str(_env_file(tmp_path))
+    result = CliRunner().invoke(
+        cli_app, ["serve", "--db", str(world[0]), "--env", env, "--lan", "--port", "8000"]
+    )
+    assert result.exit_code == 0, result.output
+    assert (seen["host"], seen["port"]) == ("0.0.0.0", 8000)
+    assert f"http://{LAN_IP}:8000" in result.output
+    assert set(seen["app"].config["TRUSTED_HOSTS"]) >= {"my-pc", LAN_IP}
+
+
+def _lan_client(path):
+    _ensure_user(path)
+    app = create_app(path, secret_key=SECRET, lan_hosts=["my-pc", LAN_IP])
+    app.testing = True
+    return app.test_client()
+
+
+def test_a_colleague_can_log_in_over_the_office_network(world):
+    """사내망은 http다. 쿠키에 Secure가 붙으면 브라우저가 쿠키를 버려 로그인이 안 된다."""
+    path, _ = world
+    client = _lan_client(path)
+    lan = {"Host": f"{LAN_IP}:8000", "Origin": f"http://{LAN_IP}:8000"}
+    resp = client.post("/login", data={"email": TEST_EMAIL, "password": TEST_PASSWORD}, headers=lan)
+    assert resp.status_code == 302
+    assert "Secure" not in resp.headers["Set-Cookie"]
+    assert client.get("/", headers={"Host": f"{LAN_IP}:8000"}).status_code == 200
+
+
+def test_the_office_network_mode_still_refuses_other_host_names(world):
+    """DNS 리바인딩 방어는 사내망 공유에서도 그대로다."""
+    client = _lan_client(world[0])
+    assert client.get("/login", headers={"Host": "evil.example"}).status_code == 400
