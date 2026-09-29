@@ -1,0 +1,14 @@
+[Unit]
+Description=nara 조회·입력 화면
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=nara
+WorkingDirectory=/srv/nara
+ExecStart=/home/nara/.local/bin/uv run nara serve --production --db /srv/nara/data/nara.db --env /srv/nara/.env
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

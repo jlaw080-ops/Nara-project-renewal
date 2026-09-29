@@ -225,8 +225,9 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
     edits = [
         {**dict(row), "label": FIELD_LABELS.get(row["field"], row["field"])}
         for row in conn.execute(
-            "SELECT edited_at, field, old_value, new_value FROM edit_log "
-            "WHERE project_id = ? ORDER BY edited_at DESC, id DESC",
+            "SELECT e.edited_at, e.field, e.old_value, e.new_value, u.name AS user_name "
+            "FROM edit_log e LEFT JOIN app_user u ON u.id = e.user_id "
+            "WHERE e.project_id = ? ORDER BY e.edited_at DESC, e.id DESC",
             (project_id,),
         )
     ]
@@ -249,6 +250,7 @@ PIPELINE_STAGES = (
     ("collect", "수집"),
     ("enrich award", "낙찰 조회"),
     ("enrich status", "진행현황"),
+    ("backup", "백업"),
 )
 # 이보다 오래 새 실행이 없으면 멈춘 것으로 본다. 스케줄러가 멈추면 run_log에 새 줄이
 # 생기지 않아 마지막 '정상'이 계속 정상으로 보인다. 금요일 15시 뒤 월요일 9시(66시간)는

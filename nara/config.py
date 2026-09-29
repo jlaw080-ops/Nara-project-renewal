@@ -21,6 +21,9 @@ class Secrets:
     naver_client_id: str | None
     naver_client_secret: str | None
     anthropic_api_key: str | None
+    secret_key: str | None = None
+    host: str | None = None
+    backup_remote: str | None = None
 
 
 def load_settings(path: Path) -> Settings:
@@ -58,4 +61,7 @@ def load_secrets(env_path: Path | None = None) -> Secrets:
         naver_client_id=pick("NAVER_CLIENT_ID"),
         naver_client_secret=pick("NAVER_CLIENT_SECRET"),
         anthropic_api_key=pick("ANTHROPIC_API_KEY"),
+        secret_key=pick("NARA_SECRET_KEY"),
+        host=pick("NARA_HOST"),
+        backup_remote=pick("NARA_BACKUP_REMOTE"),
     )

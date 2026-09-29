@@ -11,12 +11,15 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from flask import Flask
 from typer.testing import CliRunner
+from werkzeug.security import generate_password_hash
 
+from nara.auth import BAD_LOGIN, LOCKED, add_user
 from nara.cli import app as cli_app
 from nara.config import load_settings
 from nara.db import connect, migrate
 from nara.store import ensure_project, upsert_org
 from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN
+from nara.web import edit
 from nara.web.app import create_app, get_conn
 from nara.web.data import (
     DatabaseMissing,
@@ -455,7 +458,7 @@ def test_last_runs_names_every_stage_even_one_that_never_ran(world):
     """한 번도 돌지 않은 단계가 화면에서 사라지면 '멈춘 줄 모르는' 사고가 그대로다."""
     with closing(open_readonly(world[0])) as conn:
         runs = last_runs(conn, now=RUNS_NOW)
-    assert [r.label for r in runs] == ["수집", "낙찰 조회", "진행현황"]
+    assert [r.label for r in runs] == ["수집", "낙찰 조회", "진행현황", "백업"]
     for r in runs:
         assert (r.started_at, r.status_label, r.healthy) == (None, "실행 기록 없음", False)
 
@@ -483,7 +486,7 @@ def test_last_runs_reports_the_latest_run_of_each_stage(world):
     assert runs["진행현황"].status_label == "끝나지 않음"
     # 이관은 파이프라인 단계가 아니다. 소급 수집은 사람이 한 번 돌리는 일이라
     # 스케줄 감시 대상이 아니다 — 넣으면 늘 빨갛게 떠 경고를 무시하게 만든다
-    assert set(runs) == {"수집", "낙찰 조회", "진행현황"}
+    assert set(runs) == {"수집", "낙찰 조회", "진행현황", "백업"}
 
 
 def test_last_runs_flags_a_scheduled_stage_that_stopped_running(world):
@@ -512,10 +515,50 @@ def test_org_options_puts_focus_orgs_first(world):
     assert names == ["전북특별자치도 완주군", "경기도 성남시"]
 
 
-def _client(path):
-    app = create_app(path)
+SECRET = "test-secret-key"
+TEST_EMAIL = "tester@example.com"
+TEST_PASSWORD = "correct horse battery"
+ORIGIN = {"Origin": "http://localhost"}
+
+
+def _ensure_user(path, email=TEST_EMAIL, name="시험", password=TEST_PASSWORD):
+    conn = connect(path)
+    try:
+        if not conn.execute("SELECT 1 FROM app_user WHERE email = ?", (email,)).fetchone():
+            add_user(conn, email, name, NOW)
+        conn.execute(
+            "UPDATE app_user SET password_hash = ?, must_change = 0 WHERE email = ?",
+            (generate_password_hash(password, method="scrypt"), email),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _app(path, **config):
+    app = create_app(path, secret_key=SECRET)
     app.testing = True
-    return app.test_client()
+    app.config.update(config)
+    return app
+
+
+def _login(client, path, email=TEST_EMAIL, password=TEST_PASSWORD):
+    if path.exists():  # 없는 DB에 connect하면 파일이 생긴다
+        _ensure_user(path, email=email, password=password)
+    return client.post("/login", data={"email": email, "password": password}, headers=ORIGIN)
+
+
+def _env_file(tmp_path, **values):
+    path = tmp_path / ".env"
+    pairs = {"NARA_SECRET_KEY": "test-secret-key", **values}
+    path.write_text("".join(f"{k}={v}\n" for k, v in pairs.items()), encoding="utf-8")
+    return path
+
+
+def _client(path, **config):
+    client = _app(path, **config).test_client()
+    _login(client, path)
+    return client
 
 
 def _text(resp):
@@ -624,7 +667,7 @@ def test_the_app_opens_the_database_read_only(world):
 
     누군가 open_readonly를 connect로 바꾸면 이 테스트가 깨진다.
     """
-    app = create_app(world[0])
+    app = _app(world[0])
     with app.app_context():
         with pytest.raises(sqlite3.OperationalError, match="readonly"):
             get_conn().execute("INSERT INTO app_state (key, value) VALUES ('x', 'y')")
@@ -647,14 +690,17 @@ def test_serve_refuses_a_missing_database(tmp_path):
     assert not missing.exists()
 
 
-def test_serve_binds_to_this_computer_only_without_the_debugger(world, monkeypatch):
+def test_serve_binds_to_this_computer_only_without_the_debugger(world, monkeypatch, tmp_path):
     """127.0.0.1 밖에 열면 3단계 전에 외부에 노출된다.
 
     debug=True는 브라우저에서 파이썬 코드를 실행하는 디버거를 연다.
     """
     seen = {}
     monkeypatch.setattr(Flask, "run", lambda self, **kw: seen.update(kw))
-    result = CliRunner().invoke(cli_app, ["serve", "--db", str(world[0]), "--port", "8123"])
+    result = CliRunner().invoke(
+        cli_app,
+        ["serve", "--db", str(world[0]), "--port", "8123", "--env", str(_env_file(tmp_path))],
+    )
     assert result.exit_code == 0, result.output
     assert seen == {"host": "127.0.0.1", "port": 8123, "debug": False}
 
@@ -802,15 +848,11 @@ def test_an_unknown_edit_section_is_404(world):
 
 def test_saving_while_the_collector_writes_keeps_the_input(world):
     path, ids = world
-    app = create_app(path)
-    app.testing = True
-    app.config["WRITE_TIMEOUT"] = 0.2
+    client = _client(path, WRITE_TIMEOUT=0.2)
     blocker = sqlite3.connect(path)
     blocker.execute("BEGIN IMMEDIATE")
     try:
-        resp = _post(
-            app.test_client(), f"/project/{ids['culture']}/edit/info", _info(floor_area="777")
-        )
+        resp = _post(client, f"/project/{ids['culture']}/edit/info", _info(floor_area="777"))
     finally:
         blocker.rollback()
         blocker.close()
@@ -820,7 +862,7 @@ def test_saving_while_the_collector_writes_keeps_the_input(world):
     assert 'value="777"' in text
 
 
-def test_serve_prepares_the_new_tables_on_an_older_database(world, monkeypatch):
+def test_serve_prepares_the_new_tables_on_an_older_database(world, monkeypatch, tmp_path):
     """1단계 때 만든 DB에는 수정 기록 표가 없다. 저장하면 500이 난다."""
     path, _ = world
     conn = connect(path)
@@ -828,7 +870,8 @@ def test_serve_prepares_the_new_tables_on_an_older_database(world, monkeypatch):
     conn.commit()
     conn.close()
     monkeypatch.setattr(Flask, "run", lambda self, **kw: None)
-    result = CliRunner().invoke(cli_app, ["serve", "--db", str(path)])
+    env = str(_env_file(tmp_path))
+    result = CliRunner().invoke(cli_app, ["serve", "--db", str(path), "--env", env])
     assert result.exit_code == 0, result.output
     conn = connect(path)
     assert conn.execute("SELECT COUNT(*) FROM edit_log").fetchone()[0] == 0
@@ -837,10 +880,7 @@ def test_serve_prepares_the_new_tables_on_an_older_database(world, monkeypatch):
 
 def test_release_while_the_collector_writes_says_so(world):
     path, ids = world
-    app = create_app(path)
-    app.testing = True
-    app.config["WRITE_TIMEOUT"] = 0.2
-    client = app.test_client()
+    client = _client(path, WRITE_TIMEOUT=0.2)
     url = f"/project/{ids['gym']}"
     _post(client, f"{url}/edit/verdict", {"verdict": BUILDING, "reason": "현장 확인"})
     blocker = sqlite3.connect(path)
@@ -859,3 +899,279 @@ def test_release_does_not_claim_success_when_nothing_was_locked(world):
     client = _client(path)
     resp = _post(client, f"/project/{ids['gym']}/release", {})
     assert "released" not in resp.headers["Location"]
+
+
+def test_every_page_asks_for_login_first(world):
+    path, ids = world
+    client = _app(path).test_client()
+    for url in ("/", f"/project/{ids['gym']}"):
+        resp = client.get(url)
+        assert resp.status_code == 302
+        assert resp.headers["Location"].startswith("/login")
+    post = client.post(f"/project/{ids['gym']}/edit/info", data={}, headers=ORIGIN)
+    assert post.status_code == 302
+
+
+def test_login_failures_share_one_message(world):
+    path, _ = world
+    _ensure_user(path)
+    client = _app(path).test_client()
+    for email, password in ((TEST_EMAIL, "wrong one"), ("nobody@example.com", TEST_PASSWORD)):
+        resp = client.post("/login", data={"email": email, "password": password}, headers=ORIGIN)
+        assert resp.status_code == 401
+        assert BAD_LOGIN in _text(resp)
+
+
+def test_login_locks_after_five_failures(world):
+    path, _ = world
+    _ensure_user(path)
+    client = _app(path).test_client()
+    for _ in range(5):
+        client.post("/login", data={"email": TEST_EMAIL, "password": "x"}, headers=ORIGIN)
+    assert LOCKED in _text(_login(client, path))
+
+
+def test_login_goes_back_to_the_page_only_inside_this_site(world):
+    """로그인 화면이 남의 사이트로 튕기는 발판이 되면 안 된다."""
+    path, ids = world
+    _ensure_user(path)
+    inside = f"/project/{ids['gym']}"
+    for nxt, expected in (
+        (inside, inside),
+        ("//evil.example", "/"),
+        ("https://evil.example", "/"),
+        ("/\\evil.example", "/"),
+    ):
+        client = _app(path).test_client()
+        resp = client.post(
+            "/login",
+            data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "next": nxt},
+            headers=ORIGIN,
+        )
+        assert resp.headers["Location"] == expected, nxt
+
+
+def test_a_temporary_password_must_be_changed_first(world):
+    path, _ = world
+    conn = connect(path)
+    temp = add_user(conn, "new@example.com", "신입", NOW)
+    conn.close()
+    client = _app(path).test_client()
+    client.post("/login", data={"email": "new@example.com", "password": temp}, headers=ORIGIN)
+    assert client.get("/").headers["Location"] == "/password"
+    resp = client.post(
+        "/password",
+        data={"current": temp, "new": "brand new pass", "confirm": "brand new pass"},
+        headers=ORIGIN,
+    )
+    assert resp.status_code == 302
+    assert client.get("/").status_code == 200
+
+
+def test_password_form_explains_a_mismatch(world):
+    path, _ = world
+    client = _client(path)
+    resp = client.post(
+        "/password",
+        data={"current": TEST_PASSWORD, "new": "long enough 1", "confirm": "long enough 2"},
+        headers=ORIGIN,
+    )
+    assert resp.status_code == 422
+    assert "새 비밀번호 두 칸이 다릅니다" in _text(resp)
+
+
+def test_logout_ends_the_session(world):
+    path, _ = world
+    client = _client(path)
+    assert client.get("/").status_code == 200
+    assert "시험" in _text(client.get("/"))
+    client.post("/logout", headers=ORIGIN)
+    assert client.get("/").status_code == 302
+
+
+def test_a_disabled_account_loses_its_session(world):
+    path, _ = world
+    client = _client(path)
+    conn = connect(path)
+    conn.execute("UPDATE app_user SET active = 0")
+    conn.commit()
+    conn.close()
+    assert client.get("/").status_code == 302
+
+
+def test_the_app_refuses_to_start_without_a_secret_key(world):
+    with pytest.raises(ValueError, match="NARA_SECRET_KEY"):
+        create_app(world[0], secret_key="")
+
+
+def test_behind_caddy_https_origin_is_accepted(world):
+    """Caddy 뒤에서는 요청이 http로 들어온다. https Origin과 어긋나면 모든 저장이 403이 된다."""
+    path, _ = world
+    _ensure_user(path)
+    app = create_app(path, secret_key=SECRET, host="nara.example.org")
+    app.testing = True
+    client = app.test_client()
+    resp = client.post(
+        "/login",
+        data={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+        headers={
+            "Host": "nara.example.org",
+            "Origin": "https://nara.example.org",
+            "X-Forwarded-Proto": "https",
+        },
+    )
+    assert resp.status_code == 302
+    assert "Secure" in resp.headers["Set-Cookie"]
+
+
+def _tester_id(path):
+    conn = connect(path)
+    uid = conn.execute("SELECT id FROM app_user WHERE email = ?", (TEST_EMAIL,)).fetchone()[0]
+    conn.close()
+    return uid
+
+
+def test_every_web_change_records_who_made_it(world):
+    path, ids = world
+    client = _client(path)
+    url = f"/project/{ids['gym']}"
+    _post(client, f"/project/{ids['culture']}/edit/info", _info(floor_area="500"))
+    _post(client, f"{url}/edit/verdict", {"verdict": BUILDING, "reason": "현장 확인"})
+    _post(client, f"{url}/release", {})
+    conn = connect(path)
+    rows = conn.execute("SELECT field, user_id FROM edit_log ORDER BY id").fetchall()
+    conn.close()
+    uid = _tester_id(path)
+    assert [tuple(r) for r in rows] == [
+        ("floor_area", uid),
+        ("verdict", uid),
+        ("verdict_release", uid),
+    ]
+
+
+def test_edit_history_shows_names_and_marks_older_records(world):
+    path, ids = world
+    client = _client(path)
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO edit_log (project_id, field, old_value, new_value, edited_at) "
+        "VALUES (?, 'note', NULL, '옛 기록', '2026-09-27T09:00:00')",
+        (ids["culture"],),
+    )
+    conn.commit()
+    conn.close()
+    _post(client, f"/project/{ids['culture']}/edit/info", _info(floor_area="500"))
+    text = _text(client.get(f"/project/{ids['culture']}"))
+    assert "시험" in text
+    assert "(2단계 기록)" in text
+
+
+def _version(client, project_id, section):
+    page = _text(client.get(f"/project/{project_id}?edit={section}"))
+    return re.search(r'name="version" value="([0-9a-f]+)"', page).group(1)
+
+
+def test_a_second_save_on_a_stale_form_is_refused(world):
+    """두 사람이 같은 묶음을 연 뒤 차례로 저장하면 나중 사람의 저장이 조용히 덮으면 안 된다."""
+    path, ids = world
+    pid = ids["culture"]
+    first = _client(path)
+    _ensure_user(path, email="peer@example.com", name="동료")
+    second = _app(path).test_client()
+    _login(second, path, email="peer@example.com")
+    stale = _version(first, pid, "info")
+    fresh = _version(second, pid, "info")
+    ok = _post(second, f"/project/{pid}/edit/info", {**_info(floor_area="100"), "version": fresh})
+    assert ok.status_code == 302
+    resp = _post(first, f"/project/{pid}/edit/info", {**_info(floor_area="200"), "version": stale})
+    assert resp.status_code == 409
+    text = _text(resp)
+    assert "그사이 동료님이 고쳤습니다" in text
+    assert 'value="200"' in text
+    conn = connect(path)
+    assert conn.execute("SELECT floor_area FROM project WHERE id = ?", (pid,)).fetchone()[0] == 100
+    conn.close()
+
+
+def test_a_change_by_collection_is_reported_without_a_name(world):
+    path, ids = world
+    pid = ids["gym"]
+    client = _client(path)
+    stale = _version(client, pid, "verdict")
+    _verdict_conn = connect(path)
+    _verdict(_verdict_conn, pid, BUILDING, when="2026-09-29T09:00:00", decided_by="news")
+    _verdict_conn.commit()
+    _verdict_conn.close()
+    resp = _post(
+        client,
+        f"/project/{pid}/edit/verdict",
+        {"verdict": DONE, "reason": "준공식", "version": stale},
+    )
+    assert resp.status_code == 409
+    assert "그사이 값이 바뀌었습니다" in _text(resp)
+
+
+def test_a_fresh_version_saves_normally(world):
+    path, ids = world
+    pid = ids["gym"]
+    client = _client(path)
+    version = _version(client, pid, "energy")
+    resp = client.post(
+        f"/project/{pid}/edit/energy",
+        data={"source": ["PV"], "capacity": ["20"], "version": version},
+        headers=ORIGIN,
+    )
+    assert resp.status_code == 302
+
+
+def test_serve_refuses_to_start_without_a_secret_key(world, tmp_path):
+    env = tmp_path / "empty.env"
+    env.write_text("", encoding="utf-8")
+    result = CliRunner().invoke(cli_app, ["serve", "--db", str(world[0]), "--env", str(env)])
+    assert result.exit_code == 1
+    assert "NARA_SECRET_KEY" in result.output
+
+
+def test_serve_production_uses_waitress_on_this_computer_only(world, tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr("nara.cli.waitress_serve", lambda app, **kw: seen.update(kw))
+    env = _env_file(tmp_path, NARA_HOST="nara.example.org")
+    result = CliRunner().invoke(
+        cli_app,
+        ["serve", "--db", str(world[0]), "--env", str(env), "--production", "--port", "8000"],
+    )
+    assert result.exit_code == 0, result.output
+    assert (seen["host"], seen["port"]) == ("127.0.0.1", 8000)
+
+
+def test_deploy_files_hold_no_secret_values():
+    """저장소는 공개다. 배포 파일에는 이름만 있고 값은 없다."""
+    root = Path(__file__).resolve().parents[1] / "deploy"
+    text = "\n".join(p.read_text(encoding="utf-8") for p in root.iterdir() if p.is_file())
+    for name in ("G2B_API_KEY", "ANTHROPIC_API_KEY", "NARA_SECRET_KEY"):
+        # 값처럼 생긴 글자(8자 이상 영숫자)만 잡는다. 만드는 명령 안의 이름은 괜찮다.
+        assert not re.search(rf"{name}\s*=\s*[A-Za-z0-9_\-]{{8,}}", text), name
+
+
+def test_the_version_is_compared_inside_the_write_lock(world, monkeypatch):
+    """비교와 저장 사이에 다른 사람이 끼면 나중 저장이 조용히 덮는다.
+
+    쓰기 잠금 안에서 비교해야 한다.
+    """
+    path, ids = world
+    client = _client(path)
+    version = _version(client, ids["culture"], "info")
+    seen = []
+    real = edit.version_of
+
+    def spy(conn, project_id, section):
+        seen.append(conn.in_transaction)
+        return real(conn, project_id, section)
+
+    monkeypatch.setattr(edit, "version_of", spy)
+    _post(
+        client,
+        f"/project/{ids['culture']}/edit/info",
+        {**_info(floor_area="5"), "version": version},
+    )
+    assert seen[-1] is True

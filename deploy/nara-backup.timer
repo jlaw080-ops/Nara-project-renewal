@@ -1,0 +1,9 @@
+[Unit]
+Description=nara DB 백업 03시
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -133,7 +133,8 @@ CREATE TABLE IF NOT EXISTS edit_log (
   field      TEXT NOT NULL,
   old_value  TEXT,
   new_value  TEXT,
-  edited_at  TEXT NOT NULL
+  edited_at  TEXT NOT NULL,
+  user_id    INTEGER REFERENCES app_user(id)
 );
 CREATE INDEX IF NOT EXISTS idx_edit_project ON edit_log(project_id, field);
 
@@ -145,6 +146,25 @@ CREATE TABLE IF NOT EXISTS sheet_memory (
   imported_at TEXT NOT NULL,
   PRIMARY KEY (project_id, field)
 );
+
+CREATE TABLE IF NOT EXISTS app_user (
+  id            INTEGER PRIMARY KEY,
+  email         TEXT NOT NULL UNIQUE,
+  name          TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  must_change   INTEGER NOT NULL DEFAULT 1,
+  active        INTEGER NOT NULL DEFAULT 1,
+  created_at    TEXT NOT NULL,
+  last_login_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS login_attempt (
+  id    INTEGER PRIMARY KEY,
+  email TEXT NOT NULL,
+  ok    INTEGER NOT NULL,
+  at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_login_email ON login_attempt(email, at);
 
 INSERT OR IGNORE INTO energy_unit_price (source_type, price_per_kw, effective_from) VALUES
   ('BIPV',   5000000,  '2026-09-16'),

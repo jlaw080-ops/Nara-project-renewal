@@ -1,0 +1,5 @@
+# 첫 줄의 주소를 DuckDNS에서 받은 주소로 바꾼다. 인증서는 Caddy가 자동으로 받는다.
+example.duckdns.org {
+	encode gzip
+	reverse_proxy 127.0.0.1:8000
+}

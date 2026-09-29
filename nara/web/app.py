@@ -3,12 +3,24 @@
 import sqlite3
 from contextlib import closing
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from itertools import zip_longest
 from pathlib import Path
 
-from flask import Flask, abort, current_app, g, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    abort,
+    current_app,
+    g,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
+from werkzeug.middleware.proxy_fix import ProxyFix
 
+from nara import auth
 from nara.web import edit
 from nara.web.data import (
     BUSY_TIMEOUT_SECONDS,
@@ -32,7 +44,12 @@ from nara.web.query import (
 
 EDIT_SECTIONS = ("info", "verdict", "dept", "energy")
 BUSY_MESSAGE = "수집이 DB를 쓰고 있습니다. 잠시 뒤 다시 저장하세요"
+CONFLICT_BY = "그사이 {}님이 고쳤습니다. 지금 값을 확인하고 다시 저장하세요"
+CONFLICT = "그사이 값이 바뀌었습니다. 지금 값을 확인하고 다시 저장하세요"
 BLANK_ENERGY_ROWS = 3
+SESSION_LIFETIME = timedelta(days=14)
+PUBLIC_ENDPOINTS = {"login", "static"}
+PASSWORD_ENDPOINTS = {"change_password", "logout"}
 
 
 def get_conn() -> sqlite3.Connection:
@@ -80,6 +97,25 @@ def _same_origin() -> bool:
     return request.headers.get("Sec-Fetch-Site") == "same-origin"
 
 
+def _safe_next(raw: str | None) -> str:
+    """로그인 뒤 돌아갈 곳. 이 사이트 안의 경로만 받는다."""
+    target = (raw or "").strip()
+    if target.startswith("/") and not target.startswith(("//", "/\\")):
+        return target
+    return "/"
+
+
+def _current_user() -> auth.User | None:
+    uid = session.get("uid")
+    if not isinstance(uid, int):
+        return None
+    return auth.get_user(get_conn(), uid)
+
+
+def _rw_conn() -> sqlite3.Connection:
+    return open_readwrite(current_app.config["DB_PATH"], current_app.config["WRITE_TIMEOUT"])
+
+
 def _candidates(d: ProjectDetail) -> dict[int, tuple[str, str | None]]:
     return {row["id"]: (row["exec_dept"], row["snippet"]) for row in d.depts if row["exec_dept"]}
 
@@ -98,13 +134,14 @@ def _check(section: str, d: ProjectDetail) -> edit.Checked:
 
 def _save(section: str, conn: sqlite3.Connection, project_id: int, values: dict) -> list[str]:
     now = datetime.now().isoformat(timespec="seconds")
+    uid = g.user.id
     if section == "info":
-        return edit.save_info(conn, project_id, values, now)
+        return edit.save_info(conn, project_id, values, now, uid)
     if section == "verdict":
-        return edit.save_verdict(conn, project_id, values["verdict"], values["reason"], now)
+        return edit.save_verdict(conn, project_id, values["verdict"], values["reason"], now, uid)
     if section == "dept":
-        return edit.save_dept(conn, project_id, values["exec_dept"], values["snippet"], now)
-    return edit.save_energy(conn, project_id, values["items"], now)
+        return edit.save_dept(conn, project_id, values["exec_dept"], values["snippet"], now, uid)
+    return edit.save_energy(conn, project_id, values["items"], now, uid)
 
 
 def _energy_rows(d: ProjectDetail, posted: bool) -> list[tuple[str, str]]:
@@ -133,24 +170,96 @@ def _render_detail(d: ProjectDetail, section: str | None, errors: dict, status: 
             verdict_choices=edit.EDIT_VERDICTS,
             dept_candidates=[row for row in d.depts if row["exec_dept"]],
             energy_rows=_energy_rows(d, posted),
+            versions={s: edit.version_of(get_conn(), d.project["id"], s) for s in EDIT_SECTIONS},
         ),
         status,
     )
 
 
-def create_app(db_path: Path) -> Flask:
+def create_app(db_path: Path, secret_key: str, host: str | None = None) -> Flask:
+    if not secret_key:
+        raise ValueError("세션 서명 키가 없다 — .env의 NARA_SECRET_KEY를 채운다")
     app = Flask(__name__)
+    app.secret_key = secret_key
     app.config["DB_PATH"] = Path(db_path)
     app.add_template_filter(_dash, "dash")
     app.add_template_filter(_won, "won")
     # DNS 리바인딩으로 외부 페이지가 이 화면을 읽지 못하게 한다.
-    app.config["TRUSTED_HOSTS"] = ["127.0.0.1", "localhost"]
+    app.config["TRUSTED_HOSTS"] = ["127.0.0.1", "localhost", *([host] if host else [])]
     app.config["WRITE_TIMEOUT"] = BUSY_TIMEOUT_SECONDS
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=bool(host),
+        PERMANENT_SESSION_LIFETIME=SESSION_LIFETIME,
+    )
+    if host:
+        # Caddy 뒤에서는 요청이 http로 들어온다. 브라우저 Origin은 https라 그대로 두면
+        # 같은 출처 확인이 모든 저장을 막는다. Caddy 한 단만 믿는다.
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1)
 
     @app.before_request
     def _guard_writes():
         if request.method == "POST" and not _same_origin():
             abort(403)
+
+    @app.before_request
+    def _require_login():
+        # 경로가 안 맞거나 믿지 않는 Host면 Flask가 404·400을 낸다. 로그인 화면으로 돌리지 않는다.
+        if request.endpoint is None or request.endpoint in PUBLIC_ENDPOINTS:
+            return None
+        get_conn()  # DB 파일이 없으면 로그인 화면 대신 이유를 말한다(DatabaseMissing → 503)
+        user = _current_user()
+        if user is None:
+            session.clear()
+            nxt = request.full_path.rstrip("?") if request.method == "GET" else None
+            return redirect(url_for("login", next=nxt))
+        g.user = user
+        if user.must_change and request.endpoint not in PASSWORD_ENDPOINTS:
+            return redirect(url_for("change_password"))
+        return None
+
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        if request.method == "GET":
+            nxt = request.args.get("next", "")
+            return render_template("login.html", email="", error=None, next=nxt)
+        email = request.form.get("email", "")
+        with closing(_rw_conn()) as conn:
+            user, error = auth.authenticate(
+                conn, email, request.form.get("password", ""), datetime.now()
+            )
+        if user is None:
+            nxt = request.form.get("next", "")
+            return render_template("login.html", email=email, error=error, next=nxt), 401
+        session.clear()
+        session.permanent = True
+        session["uid"] = user.id
+        return redirect(_safe_next(request.form.get("next")))
+
+    @app.post("/logout")
+    def logout():
+        session.clear()
+        return redirect(url_for("login"))
+
+    @app.route("/password", methods=["GET", "POST"])
+    def change_password():
+        if request.method == "GET":
+            return render_template("password.html", error=None)
+        new = request.form.get("new", "")
+        if new != request.form.get("confirm", ""):
+            return render_template("password.html", error="새 비밀번호 두 칸이 다릅니다"), 422
+        with closing(_rw_conn()) as conn:
+            error = auth.change_password(
+                conn,
+                g.user.id,
+                request.form.get("current", ""),
+                new,
+                datetime.now().isoformat(timespec="seconds"),
+            )
+        if error:
+            return render_template("password.html", error=error), 422
+        return redirect(url_for("index"))
 
     @app.teardown_appcontext
     def _close(_exc):
@@ -199,10 +308,20 @@ def create_app(db_path: Path) -> Flask:
         checked = _check(section, d)
         if not checked.ok:
             return _render_detail(d, section, checked.errors, 422)
-        db_path = current_app.config["DB_PATH"]
         try:
-            with closing(open_readwrite(db_path, current_app.config["WRITE_TIMEOUT"])) as conn:
+            with closing(_rw_conn()) as conn:
+                sent = request.form.get("version")
+                # 비교부터 저장까지 쓰기 잠금 하나로 묶는다.
+                # 둘이 동시에 비교를 통과하면 나중 것이 덮는다.
+                conn.execute("BEGIN IMMEDIATE")
+                if sent is not None and sent != edit.version_of(conn, project_id, section):
+                    who = edit.last_editor(conn, project_id, section)
+                    conn.rollback()
+                    message = CONFLICT_BY.format(who) if who else CONFLICT
+                    fresh = project_detail(get_conn(), project_id)
+                    return _render_detail(fresh, section, {"_form": message}, 409)
                 changed = _save(section, conn, project_id, checked.values)
+                conn.commit()  # 바뀐 것이 없어 저장 함수가 트랜잭션을 닫지 않은 경우
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc):
                 raise
@@ -218,7 +337,7 @@ def create_app(db_path: Path) -> Flask:
         db_path = current_app.config["DB_PATH"]
         try:
             with closing(open_readwrite(db_path, current_app.config["WRITE_TIMEOUT"])) as conn:
-                released = edit.release_verdict(conn, project_id, now)
+                released = edit.release_verdict(conn, project_id, now, g.user.id)
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc):
                 raise

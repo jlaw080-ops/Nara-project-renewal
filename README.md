@@ -27,6 +27,15 @@ uv run nara serve                                       # 조회·입력 화면 
 실제로 바뀐 칸만 반영하고, 그 칸이 웹 입력을 덮으면 목록으로 알려준다. 사람이 정한
 진행현황은 `enrich status`가 건너뛴다. 상세 화면의 "자동 판정에 다시 맡기기"로 푼다.
 
+### 로그인과 서버
+
+화면은 로그인해야 열린다. `.env`에 `NARA_SECRET_KEY`(무작위 긴 글자)를 넣고
+`uv run nara user add <이메일> --name <이름>`으로 계정을 만든다. 임시 비밀번호는 한 번만
+보이고, 첫 로그인에서 바꾼다.
+
+서버 설치는 [deploy/setup.md](deploy/setup.md)에 있다. 서버에서는 `nara run slot 09|12|15`가
+하루 세 번 수집하고 `nara backup`이 매일 백업한다.
+
 ## 개발
 
 ```bash
