@@ -352,6 +352,14 @@ def enrich_dept(
     )
     if not secrets.anthropic_api_key:
         typer.echo("Claude API 키가 없어 애매한 건을 검토 필요로 남긴다")
+    # 키를 처음 넣은 날 요청 모양이 틀려 전부 400이어도 '확정 Claude 0'과 구분되게 센다.
+    if run.asked_llm:
+        typer.echo(f"Claude에 물은 건 {run.asked_llm}건 중 답을 못 받은 건 {run.llm_unanswered}건")
+    if run.llm_unanswered:
+        typer.echo(
+            "Claude 답을 못 받은 건은 다음 회차에 다시 묻는다 — 키나 요청 모양을 확인한다",
+            err=True,
+        )
     if run.stopped_early:
         typer.echo("시간 예산을 넘겨 멈췄다 — 다음 회차가 이어서 본다")
     if run.failed and run.failed == run.checked:

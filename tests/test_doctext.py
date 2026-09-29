@@ -92,3 +92,12 @@ def test_a_broken_file_reads_as_empty_instead_of_failing():
     assert extract_text(b"PK\x03\x04 broken zip") == ""
     assert extract_text(OLE + b"broken") == ""
     assert extract_text(b"plain text") == ""
+
+
+def test_hwpx_tabs_and_line_breaks_keep_words_apart():
+    """문의처 줄은 탭으로 칸을 맞춘다. 태그를 지우며 글자를 붙이면 안 된다."""
+    xml = (
+        '<hp:p><hp:t>사업담당<hp:tab width="4000" leader="0" type="1"/>도시재생과'
+        "<hp:lineBreak/>홍길동</hp:t></hp:p>"
+    )
+    assert "사업담당\t도시재생과\n홍길동" in extract_text(_hwpx({"section0.xml": xml}))

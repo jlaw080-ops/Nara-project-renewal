@@ -16,6 +16,13 @@ from pypdf import PdfReader
 _OLE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 _PARA_TEXT = 67  # HWPTAG_PARA_TEXT
 _SECTION = re.compile(r"Contents/section(\d+)\.xml$")
+# 태그를 지우기 전에 칸 띄움을 글자로 바꾼다. 문의처 줄은 탭으로 칸을 맞추는데,
+# 그냥 지우면 '사업담당<탭>도시재생과'가 '사업담당도시재생과' 한 낱말이 된다.
+_HWPX_GAPS = (
+    (re.compile(r"<hp:tab\b[^>]*/>"), "\t"),
+    (re.compile(r"<hp:lineBreak\b[^>]*/>"), "\n"),
+    (re.compile(r"<hp:(?:nbSpace|fwSpace)\b[^>]*/>"), " "),
+)
 
 
 def kind_of(data: bytes) -> str | None:
@@ -50,6 +57,8 @@ def _hwpx(data: bytes) -> str:
         for name in sections:
             xml = archive.read(name).decode("utf-8", "ignore")
             xml = xml.replace("</hp:p>", "\n")
+            for gap, char in _HWPX_GAPS:
+                xml = gap.sub(char, xml)
             parts.append(html.unescape(re.sub(r"<[^>]+>", "", xml)))
     return "\n".join(parts)
 

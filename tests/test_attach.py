@@ -191,3 +191,32 @@ def test_probing_stops_at_a_response_that_is_not_an_attachment():
     got = gather(client, "B1", None, None, sleep=lambda s: None)
     assert [d.name for d in got] == ["공고문.pdf"]
     assert seen == [1, 2, 1]
+
+
+def _two_listed() -> str:
+    return _raw(
+        ("공고문.hwpx", probe_url("B1", "000", 1)), ("과업지시서.pdf", probe_url("B1", "000", 2))
+    )
+
+
+def test_a_failed_second_document_does_not_drop_the_notice():
+    """과업지시서가 상한을 넘거나 깨져도 공고문은 읽는다. 둘째 문서는 보조다."""
+    client = _client(
+        {1: (200, _disp("x"), HWPX), 2: (200, {"content-type": "text/html"}, b"<html>")}
+    )
+    got = gather(client, "B1", "000", _two_listed(), sleep=lambda s: None)
+    assert [d.name for d in got] == ["공고문.hwpx"]
+
+
+def test_a_failed_notice_document_is_still_a_failure():
+    client = _client({1: (500, {}, b""), 2: (200, _disp("x"), PDF)})
+    with pytest.raises(AttachError):
+        gather(client, "B1", "000", _two_listed(), sleep=lambda s: None)
+
+
+def test_an_error_on_the_first_probe_is_a_failure_not_an_empty_notice():
+    """점검 안내·5xx를 '첨부 없음'으로 적으면 다시 보지 않는다. 없는 순번(422)만 끝이다."""
+    for status, headers, body in [(503, {}, b""), (200, {"content-type": "text/html"}, b"<x>")]:
+        with pytest.raises(AttachError):
+            gather(_client({1: (status, headers, body)}), "B1", None, None, sleep=lambda s: None)
+    assert gather(_client({}), "B1", None, None, sleep=lambda s: None) == []

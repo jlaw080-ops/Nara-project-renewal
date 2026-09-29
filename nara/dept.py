@@ -1,9 +1,9 @@
 """실행부서 조회 흐름. 첨부를 받아 읽고, 규칙과 Claude로 부서를 찾아 기록한다.
 
 확정된 부서(시트·사람·자동 확정)가 있는 사업은 보지 않는다. 한 번 본 사업은
-가장 최근 공고번호가 바뀌었거나 지난번이 다운로드 실패였을 때만 다시 본다.
-수집이 최근 3일 공고를 날마다 다시 받아 collected_at이 바뀌므로 시각이 아니라
-공고번호로 비교한다.
+가장 최근 공고번호가 바뀌었거나, 지난번이 다운로드 실패였거나, 지난번에 Claude
+답을 받지 못했고 지금은 키가 있을 때만 다시 본다. 수집이 최근 3일 공고를 날마다
+다시 받아 collected_at이 바뀌므로 시각이 아니라 공고번호로 비교한다.
 """
 
 import hashlib
@@ -41,6 +41,8 @@ NOTE_CONTRACT_ONLY = "공고문에 계약부서만 있음"
 NOTE_NOT_FOUND = "공고문에서 실행부서를 찾지 못함"
 NOTE_DOWNLOAD_FAILED = "다운로드 실패"
 NOTE_MANUAL = "수동 확인"
+# 키가 없었거나 Claude가 답하지 않은 회차의 사유 끝에 붙는다. 키가 생기면 다시 묻는다.
+CLAUDE_PENDING = "Claude 확인 전"
 _AUTO = "decided_by IN ('rule', 'llm')"
 
 Asker = Callable[[Secrets, str], DeptAnswer | None]
@@ -82,18 +84,25 @@ def _last_auto(conn: sqlite3.Connection, project_id: int) -> sqlite3.Row | None:
     ).fetchone()
 
 
-def _due(conn: sqlite3.Connection, project_id: int) -> bool:
+def _due(conn: sqlite3.Connection, project_id: int, can_ask: bool) -> bool:
     newest = _newest_bid(conn, project_id)
     if newest is None:
         return False
     last = _last_auto(conn, project_id)
     if last is None:
         return True
-    return last["bid_no"] != newest or last["note"] == NOTE_DOWNLOAD_FAILED
+    note = last["note"] or ""
+    if can_ask and note.endswith(CLAUDE_PENDING):
+        return True
+    return last["bid_no"] != newest or note == NOTE_DOWNLOAD_FAILED
 
 
 def pending_dept_projects(
-    conn: sqlite3.Connection, tier: str | None, group: int | None, limit: int
+    conn: sqlite3.Connection,
+    tier: str | None,
+    group: int | None,
+    limit: int,
+    can_ask: bool = False,
 ) -> list[sqlite3.Row]:
     """확정 부서가 없고 다시 볼 이유가 있는 사업. 한 번도 안 본 사업부터."""
     sql = [
@@ -114,7 +123,7 @@ def pending_dept_projects(
         params.append(group)
     sql.append("ORDER BY last_auto IS NOT NULL, last_auto, p.id")
     rows = conn.execute("\n".join(sql), params).fetchall()
-    return [row for row in rows if _due(conn, row["id"])][:limit]
+    return [row for row in rows if _due(conn, row["id"], can_ask)][:limit]
 
 
 def _record(
@@ -179,7 +188,11 @@ def _documents(
     if saved:
         return [_Doc(r["path"], (root / r["text_path"]).read_text(encoding="utf-8")) for r in saved]
     downloads = gather(client, notice["bid_no"], notice["bid_ord"], notice["raw_json"], sleep)
-    return [_save(conn, root, notice["bid_no"], d, now) for d in downloads]
+    docs = [_save(conn, root, notice["bid_no"], d, now) for d in downloads]
+    # 받은 첨부는 그 자체로 유효하다. 곧바로 커밋해 Claude를 기다리는 동안(30초 넘게)
+    # 쓰기 잠금을 쥐지 않는다 — 웹 저장은 5초만 기다린다.
+    conn.commit()
+    return docs
 
 
 def _recent_failures(conn: sqlite3.Connection, project_id: int, marker: str) -> int:
@@ -233,6 +246,11 @@ def _process(
             docs = _documents(conn, client, root, notice, now, sleep)
             if docs:
                 break
+    except httpx.ConnectError, httpx.ConnectTimeout:
+        # 나라장터에 닿지 못했다. 공고 탓이 아니니 세 번 한도를 쓰지 않는다 — PC가
+        # 하루 오프라인이면 기다리던 사업이 전부 '수동 확인'으로 빠진다. 기록 없이 둔다.
+        run.failed += 1
+        return
     except httpx.HTTPError, AttachError, OSError:
         failures = _recent_failures(conn, project_id, marker) + 1
         note = NOTE_MANUAL if failures >= MAX_DOWNLOAD_FAILURES else NOTE_DOWNLOAD_FAILED
@@ -275,6 +293,8 @@ def _process(
         answer = asker(secrets, excerpt_for_llm(full_text))
         if answer is None:
             run.llm_unanswered += 1
+    # 키가 없었거나 답을 못 받았으면 사유 끝에 적어 둔다. 키가 생기면 받아 둔 첨부로 다시 묻는다.
+    tail = f" · {CLAUDE_PENDING}" if answer is None else ""
     if answer is not None and verify_answer(full_text, answer):
         _record(
             conn,
@@ -313,12 +333,12 @@ def _process(
             contract_dept=contract,
             snippet=c.snippet,
             source_file=source,
-            note=NOTE_RULE_CANDIDATE,
+            note=NOTE_RULE_CANDIDATE + tail,
         )
     if candidates or (answer is not None and answer.exec_dept):
         run.review += 1
         return
-    note = NOTE_CONTRACT_ONLY if contract else NOTE_NOT_FOUND
+    note = (NOTE_CONTRACT_ONLY if contract else NOTE_NOT_FOUND) + tail
     _record(conn, project_id, marker, now, contract_dept=contract, note=note)
     run.not_found += 1
 
@@ -340,7 +360,8 @@ def update_depts(
     """대상을 돌며 부서를 찾는다. 사업마다 커밋해 중간에 멈춰도 거기까지는 남는다."""
     run = DeptRun()
     started = now_fn()
-    for row in pending_dept_projects(conn, tier, group, limit):
+    can_ask = bool(secrets.anthropic_api_key)
+    for row in pending_dept_projects(conn, tier, group, limit, can_ask):
         if now_fn() - started > budget_seconds:
             run.stopped_early = True
             break

@@ -2,6 +2,7 @@
 
 import io
 import json
+import sqlite3
 import zipfile
 
 import httpx
@@ -84,8 +85,13 @@ def _notice(conn, pid, org_id, bid_no, notice_date, raw=True):
     conn.commit()
 
 
-def _server(texts: dict[str, str], fail: set[str] = frozenset(), calls: list | None = None):
-    """공고번호별 공고문. fail에 든 공고번호는 네트워크 오류."""
+def _server(
+    texts: dict[str, str],
+    fail: set[str] = frozenset(),
+    calls: list | None = None,
+    broken: set[str] = frozenset(),
+):
+    """공고번호별 공고문. fail은 연결 불가, broken은 나라장터가 500을 준다."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         bid_no = request.url.params["bidPbancNo"]
@@ -94,6 +100,8 @@ def _server(texts: dict[str, str], fail: set[str] = frozenset(), calls: list | N
             calls.append((bid_no, seq))
         if bid_no in fail:
             raise httpx.ConnectError("down")
+        if bid_no in broken:
+            return httpx.Response(500)
         if seq == 1 and bid_no in texts:
             return httpx.Response(
                 200,
@@ -187,7 +195,8 @@ def test_nothing_found_is_recorded_with_a_reason(db, tmp_path):
     _project(db, 1, bid_no="B1")
     _project(db, 2, bid_no="B2", raw=False)  # 원본 없음 + 서버에 파일 없음 = 첨부 없음
     _run(db, tmp_path / "a", _server({"B1": "계약관련 문의: 재무과"}))
-    assert _rows(db, 1)[0]["note"] == "공고문에 계약부서만 있음"
+    # 키 없이 못 찾은 건도 키가 생기면 Claude에 다시 묻는다
+    assert _rows(db, 1)[0]["note"] == "공고문에 계약부서만 있음 · Claude 확인 전"
     assert _rows(db, 1)[0]["exec_dept"] is None
     assert _rows(db, 2)[0]["note"] == NOTE_NO_FILES
 
@@ -230,13 +239,86 @@ def test_a_project_is_looked_up_again_only_when_a_newer_notice_arrives(db, tmp_p
 
 def test_download_failures_are_retried_then_left_for_a_person(db, tmp_path):
     _project(db, 1, bid_no="B1")
-    down = _server({}, fail={"B1"})
+    down = _server({}, broken={"B1"})
     for _ in range(3):
         run, counters = _run(db, tmp_path / "a", down)
         assert run.failed == 1 and counters.failed == 1
     notes = [r["note"] for r in _rows(db, 1)]
     assert notes == [NOTE_DOWNLOAD_FAILED, NOTE_DOWNLOAD_FAILED, NOTE_MANUAL]
     assert pending_dept_projects(db, None, None, 300) == []
+
+
+def test_a_network_outage_does_not_use_up_the_retries(db, tmp_path):
+    """PC가 하루 오프라인이어도 사업이 '수동 확인'으로 빠지지 않는다.
+
+    연결 실패는 공고 탓이 아니다.
+    """
+    _project(db, 1, bid_no="B1")
+    down = _server({}, fail={"B1"})
+    for _ in range(3):
+        run, counters = _run(db, tmp_path / "a", down)
+        assert run.failed == 1 and counters.failed == 1
+    assert NOTE_MANUAL not in [r["note"] for r in _rows(db, 1)]
+    assert [r["id"] for r in pending_dept_projects(db, None, None, 300)] == [1]
+
+
+def test_an_error_page_on_an_old_notice_is_a_download_failure(db, tmp_path):
+    """옛 공고의 첫 순번이 오류면 '첨부 없음'이 아니다 — 그렇게 적으면 다시 보지 않는다."""
+    _project(db, 1, bid_no="B1", raw=False)
+    _run(db, tmp_path / "a", _server({}, broken={"B1"}))
+    assert _rows(db, 1)[0]["note"] == NOTE_DOWNLOAD_FAILED
+
+
+def test_projects_left_without_claude_are_asked_once_a_key_arrives(db, tmp_path):
+    """키 없이 돈 사업은 후보로 남는다. 키를 넣으면 받아 둔 첨부로 다시 묻는다."""
+    root = tmp_path / "a"
+    _project(db, 1, bid_no="B1")
+    calls: list = []
+    server = _server({"B1": TWO}, calls=calls)
+    _run(db, root, server)
+    assert pending_dept_projects(db, None, None, 300) == []
+    assert [r["id"] for r in pending_dept_projects(db, None, None, 300, can_ask=True)] == [1]
+    asker = lambda s, e: DeptAnswer("도시재생과", None, "설계서 열람 문의: 도시재생과")  # noqa: E731
+    run, _ = _run(db, root, server, KEYED, asker)
+    assert run.confirmed_llm == 1
+    assert calls == [("B1", 1)]  # 첨부는 다시 받지 않았다
+    assert pending_dept_projects(db, None, None, 300, can_ask=True) == []
+
+
+def test_an_unanswered_claude_call_is_asked_again(db, tmp_path):
+    """400·429·시간 초과로 답을 못 받은 건은 영영 후보로 남지 않는다."""
+    _project(db, 1, bid_no="B1")
+    run, _ = _run(db, tmp_path / "a", _server({"B1": TWO}), KEYED, lambda s, e: None)
+    assert (run.asked_llm, run.llm_unanswered) == (1, 1)
+    assert [r["id"] for r in pending_dept_projects(db, None, None, 300, can_ask=True)] == [1]
+
+
+def test_a_claude_answer_that_fails_the_check_is_not_asked_again(db, tmp_path):
+    _project(db, 1, bid_no="B1")
+    asker = lambda s, e: DeptAnswer("문화예술과", None, "문화예술과에서 담당합니다")  # noqa: E731
+    _run(db, tmp_path / "a", _server({"B1": TWO}), KEYED, asker)
+    assert pending_dept_projects(db, None, None, 300, can_ask=True) == []
+
+
+def test_the_database_is_free_while_claude_is_thinking(db, tmp_path):
+    """Claude 호출은 30초를 넘길 수 있다. 그동안 웹 저장이 잠금에 막히면 안 된다."""
+    _project(db, 1, bid_no="B1")
+    free = []
+
+    def asker(secrets, excerpt):
+        other = sqlite3.connect(tmp_path / "n.db", timeout=0)
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            other.rollback()
+            free.append(True)
+        except sqlite3.OperationalError:
+            free.append(False)
+        finally:
+            other.close()
+        return None
+
+    _run(db, tmp_path / "a", _server({"B1": TWO}), KEYED, asker)
+    assert free == [True]
 
 
 def test_saved_files_are_read_again_without_downloading(db, tmp_path):
@@ -305,6 +387,23 @@ def test_enrich_dept_command_reports_and_logs(tmp_path, monkeypatch):
         conn.execute("SELECT status FROM run_log WHERE command = 'enrich dept'").fetchone()[0]
         == "ok"
     )
+
+
+def test_enrich_dept_reports_claude_calls_and_warns_when_none_answer(tmp_path, monkeypatch):
+    """키를 처음 넣은 날 요청 모양이 틀려 전부 400이면, 그 사실이 요약에 보여야 한다."""
+    db_path = tmp_path / "n.db"
+    conn = connect(db_path)
+    migrate(conn)
+    conn.close()
+
+    def fake(conn, client, secrets, root, tier, group, limit, counters, asker, budget_seconds):
+        counters.processed = 2
+        return DeptRun(checked=2, review=2, asked_llm=2, llm_unanswered=2)
+
+    monkeypatch.setattr(cli, "update_depts", fake)
+    result = CliRunner().invoke(cli.app, ["enrich", "dept", "--db", str(db_path)])
+    assert result.exit_code == 0, result.output
+    assert "Claude에 물은 건 2건 중 답을 못 받은 건 2건" in result.output
 
 
 def test_enrich_dept_refuses_an_unknown_tier(tmp_path):

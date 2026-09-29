@@ -21,6 +21,7 @@ DOWNLOAD_URL = (
     "?bidPbancNo={bid_no}&bidPbancOrd={bid_ord}&fileType=&fileSeq={seq}&prcmBsneSeCd=05"
 )
 MAX_FILES = 10
+NO_SUCH_FILE = 422  # 없는 순번에 나라장터가 주는 상태(2026-09-29 실측)
 MAX_BYTES = 30 * 1024 * 1024
 TIMEOUT_SECONDS = 30.0
 PAUSE_SECONDS = 0.5  # 나라장터에 부담을 주지 않도록 요청 사이에 쉰다
@@ -132,12 +133,35 @@ def fetch(client: httpx.Client, url: str) -> tuple[str, bytes, str]:
 
 
 def peek(client: httpx.Client, url: str) -> str | None:
-    """첨부면 서버가 알려 준 이름, 아니면 None. 본문은 읽지 않는다."""
+    """첨부면 서버가 알려 준 이름, 없는 순번(422)이면 None. 본문은 읽지 않는다.
+
+    그 밖의 응답(점검 안내 페이지·5xx)은 AttachError다 — 파일이 없다는 뜻이 아니다.
+    """
     with client.stream("GET", url, timeout=TIMEOUT_SECONDS, follow_redirects=True) as response:
         disposition = response.headers.get("content-disposition", "")
-        if response.status_code != 200 or "attachment" not in disposition.lower():
+        if response.status_code == 200 and "attachment" in disposition.lower():
+            return _header_name(disposition) or None
+        if response.status_code == NO_SUCH_FILE:
             return None
-        return _header_name(disposition) or None
+        raise AttachError(f"첨부가 아닌 응답: HTTP {response.status_code}")
+
+
+def _fetch_chosen(
+    client: httpx.Client, files: list[RemoteFile], sleep: Callable[[float], None]
+) -> list[Download]:
+    """고른 문서를 받는다. 첫 문서(공고문)를 못 받으면 실패다. 둘째는 보조라
+    못 받아도 첫 문서만으로 읽는다 — 그림 많은 과업지시서가 상한을 넘는 일이 흔하다."""
+    downloads = []
+    for i, f in enumerate(files):
+        sleep(PAUSE_SECONDS)
+        try:
+            _, content, kind = fetch(client, f.url)
+        except AttachError, httpx.HTTPError:
+            if i == 0:
+                raise
+            continue
+        downloads.append(Download(f.seq, f.name, content, kind))
+    return downloads
 
 
 def gather(
@@ -149,30 +173,27 @@ def gather(
 ) -> list[Download]:
     """고른 문서를 받아 돌려준다. 받을 문서가 없으면 빈 목록.
 
-    목록에 있던 파일을 못 받으면 AttachError·httpx.HTTPError를 그대로 올린다.
+    공고문을 못 받으면 AttachError·httpx.HTTPError를 그대로 올린다.
     """
     listed = files_from_raw(raw_json)
     if listed:
-        downloads = []
-        for f in choose(listed):
-            sleep(PAUSE_SECONDS)
-            _, content, kind = fetch(client, f.url)
-            downloads.append(Download(f.seq, safe_name(f.name), content, kind))
-        return downloads
+        chosen = [RemoteFile(f.seq, safe_name(f.name), f.url) for f in choose(listed)]
+        return _fetch_chosen(client, chosen, sleep)
 
     # 원본이 없으면 순번을 훑어 이름만 읽는다(응답 머리). 도면처럼 큰 파일을 이름 때문에
-    # 내려받지 않는다. 첨부가 아닌 응답(422 JSON·안내 페이지)이 오면 거기까지가 그 공고의 파일이다.
+    # 내려받지 않는다. 없는 순번(422)이 오면 거기까지가 그 공고의 파일이다. 첫 순번이
+    # 오류면 실패로 올린다 — '첨부 없음'으로 적으면 다시 보지 않는다.
     probed: list[RemoteFile] = []
     for seq in range(1, MAX_FILES + 1):
         sleep(PAUSE_SECONDS)
         url = probe_url(bid_no, bid_ord, seq)
-        name = peek(client, url)
+        try:
+            name = peek(client, url)
+        except AttachError:
+            if seq == 1:
+                raise
+            break
         if name is None:
             break
         probed.append(RemoteFile(seq, safe_name(name), url))
-    downloads = []
-    for f in choose(probed):
-        sleep(PAUSE_SECONDS)
-        _, content, kind = fetch(client, f.url)
-        downloads.append(Download(f.seq, f.name, content, kind))
-    return downloads
+    return _fetch_chosen(client, choose(probed), sleep)

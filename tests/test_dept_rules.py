@@ -142,3 +142,17 @@ def test_a_word_ending_in_result_is_not_a_department():
     text = "지역업체 참여도는 사업부서의 심사 평가결과에 따릅니다."
     assert "평가결과" not in _names(text)
     assert _names("사업부서: 성과관리과 (063-000-0000)") == ["성과관리과"]
+
+
+def test_a_cue_glued_to_the_name_does_not_join_it():
+    """HWPX 탭·PDF 추출로 신호어와 부서명이 붙어도 신호어가 이름에 들어가지 않는다."""
+    assert decide_by_rule(find_candidates("○ 사업담당도시재생과 홍길동")).name == "도시재생과"
+    assert _names("담당부서건축과 (063-000-0000)") == ["건축과"]
+
+
+def test_part_of_a_longer_name_does_not_verify():
+    """'도시건축과' 안에 '건축과'가 들어 있어도 건축과라고 적힌 것이 아니다."""
+    quote = "사업 담당부서: 도시건축과 건축팀"
+    text = f"13. 기타\n{quote}\n"
+    assert not verify_answer(text, _answer("건축과", quote))
+    assert verify_answer(text, _answer("도시건축과", quote))

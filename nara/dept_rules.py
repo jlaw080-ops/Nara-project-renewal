@@ -85,13 +85,13 @@ def _is_candidate(name: str, before: str) -> bool:
     return not (JOSA.match(name) or DEICTIC.search(before))
 
 
-def _cues(txt: str) -> list[tuple[int, bool]]:
-    """(신호어 위치, 문의처·담당 신호어인가). 문의처 신호어와 겹치는 일반 신호어는 뺀다."""
+def _cues(txt: str) -> list[tuple[int, int, bool]]:
+    """(신호어 시작, 끝, 문의처·담당 신호어인가). 문의처 신호어와 겹치는 일반 신호어는 뺀다."""
     contact = [(m.start(), m.end()) for m in CONTACT_CUE.finditer(txt)]
-    found = [(a, True) for a, _ in contact]
+    found = [(a, b, True) for a, b in contact]
     for m in CONTEXT_CUE.finditer(txt):
         if not any(a <= m.start() < b for a, b in contact):
-            found.append((m.start(), False))
+            found.append((m.start(), m.end(), False))
     return sorted(found)
 
 
@@ -99,16 +99,17 @@ def find_candidates(text: str) -> list[Candidate]:
     txt = _clean(text)
     weights: Counter[str] = Counter()
     first: dict[str, tuple[str, bool]] = {}
-    for start, contact in _cues(txt):
-        # 줄바꿈을 한 칸으로 바꿔 글자 위치를 그대로 둔다
-        window = txt[start : start + WINDOW].replace("\n", " ")
+    for start, cue_end, contact in _cues(txt):
+        # 신호어 끝부터 본다. 탭이 사라져 '사업담당도시재생과'처럼 붙어도 신호어가
+        # 이름에 들어가지 않는다. 줄바꿈은 한 칸으로 바꿔 글자 위치를 그대로 둔다.
+        window = txt[cue_end : cue_end + WINDOW].replace("\n", " ")
         for m in DEPT.finditer(window):
             name = m.group(1)
             if not _is_candidate(name, window[: m.start()]):
                 continue
             near = contact and m.start() < NEAR
             weights[name] += 3 if near else 1
-            end = start + max(150, m.end() + 20)
+            end = max(start + 150, cue_end + m.end() + 20)
             snippet = _WS.sub(" ", txt[max(0, start - 40) : end]).strip()[:250]
             if name not in first or (near and not first[name][1]):
                 first[name] = (snippet, near)
@@ -159,6 +160,12 @@ def is_division(name: str) -> bool:
     return m is not None and m.group(2) is None
 
 
+def _names_whole(quote: str, dept: str) -> bool:
+    """근거 문장에 부서명이 온전한 낱말로 있는가. '도시건축과' 안의 '건축과'는 아니다."""
+    pattern = r"(?<![가-힣])" + r"\s*".join(map(re.escape, dept))
+    return re.search(pattern, quote) is not None
+
+
 def verify_answer(text: str, answer: DeptAnswer) -> bool:
     """근거 문장이 원문에 글자 그대로 있고, 그 안에 부서명이 있고, 계약 계열이 아니면 참.
 
@@ -167,6 +174,8 @@ def verify_answer(text: str, answer: DeptAnswer) -> bool:
     if not answer.exec_dept or not answer.quote:
         return False
     dept, quote = squash(answer.exec_dept), squash(answer.quote)
-    if len(quote) < MIN_QUOTE or quote not in squash(text) or dept not in quote:
+    if len(quote) < MIN_QUOTE or quote not in squash(text):
+        return False
+    if not _names_whole(answer.quote, dept):
         return False
     return is_division(dept) and not EXCL.match(dept)
