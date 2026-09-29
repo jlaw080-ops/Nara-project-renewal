@@ -105,3 +105,40 @@ def test_a_team_only_or_empty_answer_is_rejected():
     assert not verify_answer(text, _answer("관광팀", "사업관련 문의: 관광팀"))
     assert not verify_answer(PAIR, _answer(None, "사업관련 문의: 문화관광과 관광팀"))
     assert not verify_answer(PAIR, _answer("문화관광과", "관광과"))
+
+
+# 실데이터 검증(2026-09-30)에서 시트 값과 어긋난 자동 확정 네 건. 본문 속 일반 신호어로
+# 찾은 부서는 후보일 뿐이다. 문의처를 가리키는 신호어 근처에서 찾아야 확정한다.
+def test_a_venue_after_place_is_not_confirmed():
+    text = (
+        "◦ 장소: 미정(설계공모 홈페이지을 통해 추후 공지) ◦ 기타사항은 설계공모지침서 참조 "
+        "※ 심사일 및 심사장소는 발주기관의 사정에 따라 변경될 수 있음"
+    )
+    assert "심사장소" not in _names(text)
+    assert decide_by_rule(find_candidates(text)) is None
+
+
+def test_a_facility_in_the_task_prose_is_not_confirmed():
+    text = "- 본 사업 관련 홍보 및 교육방안 등 - 커뮤니티센터 설치 및 인테리어 계획"
+    assert decide_by_rule(find_candidates(text)) is None
+    text = "가. 본 과업지시서는 “비봉면 행정복지센터 건립사업 설계용역”에 적용한다."
+    assert decide_by_rule(find_candidates(text)) is None
+
+
+def test_the_ordering_agency_and_is_not_a_department():
+    text = (
+        "○ 과업을 수행함에 있어 과업지시서에 명기되지 아니한 사항은 발주기관과 수급인이 상호 조정"
+    )
+    assert "발주기관과" not in _names(text)
+
+
+def test_a_contact_cue_still_confirms():
+    text = "나. 과업 관련 문의: 환경사업소 자원순환팀 (063-580-0000)"
+    assert decide_by_rule(find_candidates(text)).name == "환경사업소"
+
+
+def test_a_word_ending_in_result_is_not_a_department():
+    """'결과'·'효과'처럼 '과'로 끝나는 보통 낱말은 부서가 아니다(실데이터 사례)."""
+    text = "지역업체 참여도는 사업부서의 심사 평가결과에 따릅니다."
+    assert "평가결과" not in _names(text)
+    assert _names("사업부서: 성과관리과 (063-000-0000)") == ["성과관리과"]

@@ -15,13 +15,15 @@ EXCL = re.compile(r"^(재무|회계|경리|세정|예산|기획예산|계약|감
 BAD = re.compile(
     r"국가법령정보센터|조달청|나라장터|지방자치단|개찰|열람장소|기술사사무소"
     r"|소방시설|정보센터|본점소|건축사사무소|엔지니어링|전시실|회의실|사무실"
-    r"|민원실|교실|도서관|숙소|화장실|창고|기계실|전기실|단련실|프로그램실|자료실"
+    r"|민원실|교실|도서관|숙소|화장실|창고|기계실|전기실|단련실|프로그램실|자료실|장소"
 )
 # 조사 '과'(=and)가 붙어 부서명처럼 보이는 것들. "이 사업과 관련된" → 가짜 부서 "사업과"
 JOSA = re.compile(
     r"^(사업|다음|역할|향상|방안|제반|기관|수단|입찰|군민|방문객|성찰|업무|계획|내용"
-    r"|목적|결과|기준|조건|자격|서류|절차|방법|현황)과$"
+    r"|목적|결과|기준|조건|자격|서류|절차|방법|현황|발주기관|수급인|계약상대자|관계기관)과$"
 )
+# '과'로 끝나는 보통 낱말. "심사 평가결과에"를 부서 "평가결과"로 읽으면 안 된다.
+WORD_END = re.compile(r"(결과|효과|성과|통과|초과|경과)$")
 # 앞에 지시관형사가 오면 조사 결합이다: "이 사업과", "본 사업과", "동 용역과".
 # 지시어가 따로 선 낱말일 때만이다 — "다음과 같이 건축과"의 "같이"를 "이"로 읽으면 안 된다.
 DEICTIC = re.compile(r"(?:^|[^가-힣])(이|본|동|해당|당해|위)\s*$")
@@ -29,12 +31,15 @@ DEPT = re.compile(
     r"([가-힣]{2,12}(?:과|국|실|단|소|센터|본부|사업소|담당관))"
     r"(\s*([가-힣]{2,10}(?:팀|계|담당)))?"
 )
-# 실행부서를 가리키는 신호어 — 계약부서 신호어와 짝을 이뤄 등장하는 경우가 많다
-CUE = re.compile(
-    r"사업\s*담당|사업\s*부서|사업\s*관련|담당\s*부서|주관\s*부서|열람\s*문의"
-    r"|설계서\s*열람|과업\s*(?:관련|문의|지시서)|설계\s*(?:관련|문의)"
-    r"|용역에\s*관한|문의처|접수\s*처|장\s*소\s*:"
+# 실행부서를 가리키는 신호어. 문의처·담당 신호어 근처에서 찾은 부서만 자동 확정한다.
+# 본문 속 일반 신호어("본 사업 관련 홍보", "본 과업지시서는", "장소:")로 찾은 것은
+# 후보일 뿐이다 — 2026-09-30 실데이터에서 시설명·장소명이 부서로 확정됐다.
+CONTACT_CUE = re.compile(
+    r"사업\s*담당|사업\s*부서|담당\s*부서|주관\s*부서|사업\s*관련\s*문의"
+    r"|(?:과업|설계|용역)\s*(?:관련\s*)?문의|열람\s*문의|설계서\s*열람|용역에\s*관한"
+    r"|문의\s*처|접수\s*처"
 )
+CONTEXT_CUE = re.compile(r"사업\s*관련|과업\s*(?:관련|지시서)|설계\s*관련|장\s*소\s*:")
 CONTRACT_CUE = re.compile(r"계약\s*(?:관련|문의|에\s*관한)|입찰\s*(?:관련|문의|에\s*관한)")
 _SPACED = re.compile(r"(?<![가-힣])((?:[가-힣] ){2,}[과국실소단])(?![가-힣])")
 _WS = re.compile(r"\s+")
@@ -51,7 +56,7 @@ class Candidate:
     name: str  # 과 단위 부서 이름
     weight: int
     snippet: str  # 근거 문장
-    near: bool  # 신호어 바로 뒤(90자 안)에서 찾았는가
+    near: bool  # 문의처·담당 신호어 바로 뒤(90자 안)에서 찾았는가
 
 
 @dataclass(frozen=True)
@@ -75,24 +80,33 @@ def _clean(text: str) -> str:
 
 
 def _is_candidate(name: str, before: str) -> bool:
-    if EXCL.match(name) or BAD.search(name) or len(name) < 3:
+    if EXCL.match(name) or BAD.search(name) or WORD_END.search(name) or len(name) < 3:
         return False
     return not (JOSA.match(name) or DEICTIC.search(before))
+
+
+def _cues(txt: str) -> list[tuple[int, bool]]:
+    """(신호어 위치, 문의처·담당 신호어인가). 문의처 신호어와 겹치는 일반 신호어는 뺀다."""
+    contact = [(m.start(), m.end()) for m in CONTACT_CUE.finditer(txt)]
+    found = [(a, True) for a, _ in contact]
+    for m in CONTEXT_CUE.finditer(txt):
+        if not any(a <= m.start() < b for a, b in contact):
+            found.append((m.start(), False))
+    return sorted(found)
 
 
 def find_candidates(text: str) -> list[Candidate]:
     txt = _clean(text)
     weights: Counter[str] = Counter()
     first: dict[str, tuple[str, bool]] = {}
-    for cue in CUE.finditer(txt):
-        start = cue.start()
+    for start, contact in _cues(txt):
         # 줄바꿈을 한 칸으로 바꿔 글자 위치를 그대로 둔다
         window = txt[start : start + WINDOW].replace("\n", " ")
         for m in DEPT.finditer(window):
             name = m.group(1)
             if not _is_candidate(name, window[: m.start()]):
                 continue
-            near = m.start() < NEAR
+            near = contact and m.start() < NEAR
             weights[name] += 3 if near else 1
             end = start + max(150, m.end() + 20)
             snippet = _WS.sub(" ", txt[max(0, start - 40) : end]).strip()[:250]
@@ -122,7 +136,7 @@ def excerpt_for_llm(text: str) -> str:
     """신호어 앞뒤 구간과 문서 끝. 끝부분은 잘리지 않게 남기고 앞쪽을 줄인다."""
     txt = _clean(text)
     tail_start = max(0, len(txt) - EXCERPT_TAIL)
-    cues = [*CUE.finditer(txt), *CONTRACT_CUE.finditer(txt)]
+    cues = [*CONTACT_CUE.finditer(txt), *CONTEXT_CUE.finditer(txt), *CONTRACT_CUE.finditer(txt)]
     spans = sorted(
         (max(0, c.start() - EXCERPT_AROUND), min(tail_start, c.end() + EXCERPT_AROUND))
         for c in cues
