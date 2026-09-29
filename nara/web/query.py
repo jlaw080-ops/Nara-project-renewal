@@ -25,6 +25,7 @@ class Filters:
     date_from: str = ""
     date_to: str = ""
     verdicts: tuple[str, ...] = ()
+    dept_review: bool = False
     sort: str = DEFAULT_SORT
     desc: bool = True
 
@@ -117,6 +118,7 @@ def parse_filters(args: Mapping[str, list[str]]) -> tuple[Filters, list[str]]:
         date_from=date_from,
         date_to=date_to,
         verdicts=verdicts,
+        dept_review=_first(args, "dept") == "review",
         sort=sort,
         desc=_first(args, "desc") != "0",
     )
@@ -141,6 +143,8 @@ def to_args(f: Filters) -> dict[str, list[str]]:
         args["to"] = [f.date_to]
     if f.verdicts:
         args["verdict"] = list(f.verdicts)
+    if f.dept_review:
+        args["dept"] = ["review"]
     args["sort"] = [f.sort]
     args["desc"] = ["1" if f.desc else "0"]
     return args
@@ -176,6 +180,11 @@ ld AS (
            ) AS rn
     FROM dept_check d
     WHERE d.project_id IS NOT NULL AND d.confirmed = 1 AND COALESCE(d.exec_dept, '') != ''
+),
+lr AS (
+    SELECT DISTINCT d.project_id
+    FROM dept_check d
+    WHERE d.project_id IS NOT NULL AND d.confirmed = 0 AND COALESCE(d.exec_dept, '') != ''
 )
 """
 
@@ -185,6 +194,7 @@ JOIN org o ON o.id = p.org_id
 LEFT JOIN ln ON ln.project_id = p.id AND ln.rn = 1
 LEFT JOIN ls ON ls.project_id = p.id AND ls.rn = 1
 LEFT JOIN ld ON ld.project_id = p.id AND ld.rn = 1
+LEFT JOIN lr ON lr.project_id = p.id
 LEFT JOIN award a ON a.bid_no = ln.bid_no
 """
 
@@ -237,6 +247,8 @@ def _where(f: Filters, include_dates: bool) -> tuple[str, list]:
         if NO_VERDICT in f.verdicts:
             parts.append("ls.verdict IS NULL")
         clauses.append(f"({' OR '.join(parts)})")
+    if f.dept_review:
+        clauses.append("(lr.project_id IS NOT NULL AND ld.exec_dept IS NULL)")
     return (" WHERE " + " AND ".join(clauses)) if clauses else "", params
 
 
@@ -267,7 +279,8 @@ def build_list_query(f: Filters) -> tuple[str, list]:
         _LATEST
         + "SELECT p.id, o.name AS org_name, p.name, ln.title AS notice_title, "
         + "ln.notice_date, ln.open_date, ls.verdict, ls.decided_by AS verdict_by, a.winner, "
-        + "ld.exec_dept, p.zeb_grade, "
+        + "ld.exec_dept, (lr.project_id IS NOT NULL AND ld.exec_dept IS NULL) AS dept_review, "
+        + "p.zeb_grade, "
         + f"{matched_sql} AS matched_title"
         + _FROM
         + where_sql

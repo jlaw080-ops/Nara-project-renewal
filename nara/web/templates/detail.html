@@ -53,6 +53,14 @@
 {% endfor %}
 </tbody>
 </table></div>
+{% if d.attachments %}
+<p class="muted">받아 둔 첨부 {{ d.attachments|length }}건</p>
+<ul>
+{% for a in d.attachments %}
+  <li><a href="{{ url_for('attachment', attachment_id=a.id) }}">{{ a.filename }}</a> <span class="muted">{{ a.bid_no }} · {{ a.downloaded_at }}</span></li>
+{% endfor %}
+</ul>
+{% endif %}
 {% else %}
 <p class="muted">공고가 없습니다{% if d.project.source == 'manual' %} — 시트에서 이관한 사업입니다{% endif %}</p>
 {% endif %}
@@ -117,14 +125,17 @@
 {% endif %}
 {% if d.depts %}
 <div class="table-wrap"><table>
-<thead><tr><th>실행부서</th><th>계약부서</th><th>근거 문장</th><th>출처</th><th>조회 시각</th></tr></thead>
+<thead><tr><th>실행부서</th><th>상태</th><th>판정</th><th>계약부서</th><th>근거 문장</th><th>출처</th><th>사유</th><th>조회 시각</th></tr></thead>
 <tbody>
 {% for p in d.depts %}
 <tr>
   <td>{{ p.exec_dept|dash }}</td>
+  <td>{% if p.confirmed %}확정{% elif p.exec_dept %}후보{% else %}—{% endif %}</td>
+  <td>{{ p.by_label }}</td>
   <td>{{ p.contract_dept|dash }}</td>
   <td>{{ p.snippet|dash }}</td>
   <td>{{ p.source_file|dash }}</td>
+  <td>{{ p.note|dash }}</td>
   <td>{{ p.checked_at }}</td>
 </tr>
 {% endfor %}

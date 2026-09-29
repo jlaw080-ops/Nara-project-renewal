@@ -19,6 +19,7 @@
   </label>
   <label>관심기관
     <span><input type="checkbox" name="focus" value="1"{% if f.focus_only %} checked{% endif %}> 관심기관만</span>
+    <span><input type="checkbox" name="dept" value="review"{% if f.dept_review %} checked{% endif %}> 실행부서 검토 필요</span>
   </label>
   <label>이름 검색
     <input type="search" name="q" value="{{ f.q }}" placeholder="공고명 또는 사업명">
@@ -71,7 +72,7 @@
   <td>{{ r.open_date|dash }}</td>
   <td>{{ r.verdict or no_verdict }}{% if r.verdict_by == 'human' %} <span class="muted">(사람)</span>{% endif %}</td>
   <td>{{ r.winner|dash }}</td>
-  <td>{{ r.exec_dept|dash }}</td>
+  <td>{% if r.exec_dept %}{{ r.exec_dept }}{% elif r.dept_review %}<span class="muted">검토 필요</span>{% else %}—{% endif %}</td>
   <td>{{ r.zeb_grade|dash }}</td>
 </tr>
 {% else %}

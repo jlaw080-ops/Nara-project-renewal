@@ -16,12 +16,14 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     session,
     url_for,
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from nara import auth
+from nara.db import attachments_dir
 from nara.web import edit
 from nara.web.data import (
     BUSY_TIMEOUT_SECONDS,
@@ -78,6 +80,8 @@ def _conditions(f: Filters, org_names: dict[int, str]) -> list[str]:
     if f.has_date:
         parts.append(f"공고일 {f.date_from}~{f.date_to}")
     parts.extend(f.verdicts)
+    if f.dept_review:
+        parts.append("실행부서 검토 필요")
     return parts
 
 
@@ -188,6 +192,7 @@ def create_app(
     app = Flask(__name__)
     app.secret_key = secret_key
     app.config["DB_PATH"] = Path(db_path)
+    app.config["ATTACH_DIR"] = attachments_dir(Path(db_path))
     app.add_template_filter(_dash, "dash")
     app.add_template_filter(_won, "won")
     # DNS 리바인딩으로 외부 페이지가 이 화면을 읽지 못하게 한다.
@@ -309,6 +314,25 @@ def create_app(
             abort(404)
         section = request.args.get("edit")
         return _render_detail(d, section if section in EDIT_SECTIONS else None, {})
+
+    @app.get("/attachment/<int:attachment_id>")
+    def attachment(attachment_id: int):
+        row = (
+            get_conn()
+            .execute(
+                "SELECT filename, path FROM attachment WHERE id = ? AND status = 'ok'",
+                (attachment_id,),
+            )
+            .fetchone()
+        )
+        if row is None or not row["path"]:
+            abort(404)
+        root = Path(current_app.config["ATTACH_DIR"]).resolve()
+        target = (root / row["path"]).resolve()
+        # DB에 적힌 경로를 믿지 않는다. 첨부 폴더 밖이면 없는 것으로 친다.
+        if not target.is_relative_to(root) or not target.is_file():
+            abort(404)
+        return send_file(target, as_attachment=True, download_name=row["filename"])
 
     @app.post("/project/<int:project_id>/edit/<section>")
     def save(project_id: int, section: str):

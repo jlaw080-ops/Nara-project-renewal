@@ -114,12 +114,13 @@ class ProjectDetail:
     project: sqlite3.Row
     notices: list[dict]
     history: list[StatusEntry]
-    depts: list[sqlite3.Row]
+    depts: list[dict]
     energy: list[EnergyLine]
     energy_total: int
     energy_unpriced: list[str]
     locked: bool = False
     edits: list[dict] = ()
+    attachments: list[sqlite3.Row] = ()
 
 
 def safe_url(url: str | None) -> str:
@@ -211,9 +212,19 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
             (project_id,),
         )
     ]
-    depts = conn.execute(
-        "SELECT id, exec_dept, contract_dept, snippet, source_file, checked_at FROM dept_check "
-        "WHERE project_id = ? ORDER BY checked_at DESC, id DESC",
+    depts = [
+        {**dict(row), "by_label": DECIDED_BY_LABELS.get(row["decided_by"], row["decided_by"])}
+        for row in conn.execute(
+            "SELECT id, exec_dept, contract_dept, snippet, source_file, decided_by, confirmed, "
+            "note, checked_at FROM dept_check "
+            "WHERE project_id = ? ORDER BY checked_at DESC, id DESC",
+            (project_id,),
+        )
+    ]
+    attachments = conn.execute(
+        "SELECT a.id, a.bid_no, a.filename, a.downloaded_at FROM attachment a "
+        "JOIN notice n ON n.bid_no = a.bid_no "
+        "WHERE n.project_id = ? AND a.status = 'ok' ORDER BY a.bid_no DESC, a.seq",
         (project_id,),
     ).fetchall()
     energy, energy_total, energy_unpriced = _energy(conn, project_id)
@@ -241,6 +252,7 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
         energy_unpriced=energy_unpriced,
         locked=latest is not None and latest["decided_by"] == "human",
         edits=edits,
+        attachments=attachments,
     )
 
 

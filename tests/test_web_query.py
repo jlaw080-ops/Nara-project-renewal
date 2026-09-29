@@ -159,3 +159,10 @@ def test_placeholders_and_params_line_up():
 def test_excluded_query_exists_only_with_a_date_condition():
     assert build_excluded_query(Filters(q="관")) is None
     assert build_excluded_query(Filters(date_from="2026-01-01")) is not None
+
+
+def test_the_review_filter_round_trips_through_the_url():
+    f, notes = parse_filters({"dept": ["review"]})
+    assert f.dept_review and notes == []
+    assert to_args(f)["dept"] == ["review"]
+    assert "dept" not in to_args(parse_filters({})[0])

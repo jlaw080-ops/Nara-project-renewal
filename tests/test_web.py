@@ -1256,3 +1256,87 @@ def test_a_new_candidate_does_not_block_a_save_in_progress(world):
         headers=ORIGIN,
     )
     assert resp.status_code == 302
+
+
+def test_a_project_with_only_candidates_is_marked_for_review(world):
+    path, ids = world
+    conn = connect(path)
+    _dept(conn, ids["culture"], "도시재생과", "2026-09-28T09:00:00", "rule", confirmed=0)
+    _dept(conn, ids["gym"], "건축과", "2026-09-01T09:00:00")
+    _dept(conn, ids["gym"], "문화관광과", "2026-09-28T09:00:00", "rule", confirmed=0)
+    conn.commit()
+    conn.close()
+    client = _client(path)
+    rows = {r["id"]: r for r in _list(path).rows}
+    assert rows[ids["culture"]]["dept_review"] and not rows[ids["gym"]]["dept_review"]
+    only = _list(path, dept_review=True).rows
+    assert [r["id"] for r in only] == [ids["culture"]]
+    text = _text(client.get("/?dept=review"))
+    assert "검토 필요" in text and "실행부서 검토 필요" in text
+
+
+def test_detail_shows_candidates_with_their_source_and_reason(world):
+    path, ids = world
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO dept_check (project_id, exec_dept, snippet, source_file, decided_by, "
+        "confirmed, note, checked_at) VALUES (?, '도시재생과', '설계서 열람 문의: 도시재생과', "
+        "'N6/1_공고문.hwpx', 'rule', 0, '규칙 후보', '2026-09-28T09:00:00')",
+        (ids["culture"],),
+    )
+    conn.execute(
+        "INSERT INTO dept_check (project_id, decided_by, confirmed, note, checked_at) "
+        "VALUES (?, 'rule', 0, '첨부 없음', '2026-09-27T09:00:00')",
+        (ids["culture"],),
+    )
+    conn.commit()
+    conn.close()
+    text = _text(_client(path).get(f"/project/{ids['culture']}"))
+    for expected in ("도시재생과", "후보", "규칙", "N6/1_공고문.hwpx", "규칙 후보", "첨부 없음"):
+        assert expected in text
+
+
+def _attachment(path, rel, filename="공고문.pdf", body=b"%PDF-1.4 test"):
+    root = path.parent / "attachments"
+    target = root / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(body)
+    conn = connect(path)
+    cur = conn.execute(
+        "INSERT INTO attachment (bid_no, seq, filename, path, status, attempts, downloaded_at) "
+        "VALUES ('N6', 1, ?, ?, 'ok', 1, '2026-09-28T09:00:00')",
+        (filename, rel),
+    )
+    conn.commit()
+    conn.close()
+    return cur.lastrowid
+
+
+def test_a_saved_attachment_is_listed_and_downloads(world):
+    path, ids = world
+    aid = _attachment(path, "N6/1_공고문.pdf")
+    client = _client(path)
+    assert "공고문.pdf" in _text(client.get(f"/project/{ids['culture']}"))
+    resp = client.get(f"/attachment/{aid}")
+    assert resp.status_code == 200
+    assert resp.data == b"%PDF-1.4 test"
+    assert "attachment" in resp.headers["Content-Disposition"]
+
+
+def test_attachment_download_needs_login(world):
+    path, _ = world
+    aid = _attachment(path, "N6/1_공고문.pdf")
+    assert _app(path).test_client().get(f"/attachment/{aid}").status_code == 302
+
+
+def test_attachment_download_never_leaves_the_folder(world):
+    """DB에 적힌 경로가 폴더 밖을 가리켜도 내주면 안 된다."""
+    path, _ = world
+    aid = _attachment(path, "N6/1_공고문.pdf")
+    conn = connect(path)
+    conn.execute("UPDATE attachment SET path = '../w.db' WHERE id = ?", (aid,))
+    conn.commit()
+    conn.close()
+    client = _client(path)
+    assert client.get(f"/attachment/{aid}").status_code == 404
+    assert client.get("/attachment/999999").status_code == 404
