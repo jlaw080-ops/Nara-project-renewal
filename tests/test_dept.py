@@ -197,7 +197,7 @@ def test_old_notices_without_raw_data_are_probed(db, tmp_path):
     calls: list = []
     _run(db, tmp_path / "a", _server({"B1": ONE}, calls=calls))
     assert _rows(db, 1)[0]["exec_dept"] == "문화관광과"
-    assert calls == [("B1", 1), ("B1", 2)]
+    assert calls == [("B1", 1), ("B1", 2), ("B1", 1)]  # 이름 확인 1·2, 받기 1
 
 
 def test_confirmed_departments_are_left_alone(db, tmp_path):

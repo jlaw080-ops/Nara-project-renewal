@@ -151,7 +151,8 @@ def test_gather_probes_numbers_until_the_first_non_file():
     )
     got = gather(client, "B1", None, None, sleep=lambda s: None)
     assert [(d.seq, d.name) for d in got] == [(1, "공고문.hwpx"), (2, "과업지시서.hwp")]
-    assert seen == [1, 2, 3]
+    # 이름은 응답 머리로만 확인하고(1·2·3), 고른 파일만 내려받는다(1·2)
+    assert seen == [1, 2, 3, 1, 2]
 
 
 def test_gather_waits_between_requests():
@@ -159,3 +160,34 @@ def test_gather_waits_between_requests():
     client = _client({1: (200, _disp("공고문.pdf"), PDF)})
     gather(client, "B1", None, None, sleep=waits.append)
     assert waits and all(w == attach.PAUSE_SECONDS for w in waits)
+
+
+def test_probing_does_not_download_files_it_will_not_keep(monkeypatch):
+    """옛 공고는 이름을 알려고 순번을 훑는다. 도면처럼 큰 파일까지 받으면 안 된다."""
+    monkeypatch.setattr(attach, "MAX_BYTES", 100)
+    seen: list[int] = []
+    client = _client(
+        {
+            1: (200, _disp("공고문.pdf"), PDF),
+            2: (200, _disp("도면.pdf"), b"%PDF" + b"x" * 1000),
+        },
+        seen,
+    )
+    got = gather(client, "B1", None, None, sleep=lambda s: None)
+    assert [d.name for d in got] == ["공고문.pdf"]
+    assert seen == [1, 2, 3, 1]
+
+
+def test_probing_stops_at_a_response_that_is_not_an_attachment():
+    seen: list[int] = []
+    client = _client(
+        {
+            1: (200, _disp("공고문.pdf"), PDF),
+            2: (200, {"content-type": "text/html"}, b"<html>"),
+            3: (200, _disp("과업지시서.pdf"), PDF),
+        },
+        seen,
+    )
+    got = gather(client, "B1", None, None, sleep=lambda s: None)
+    assert [d.name for d in got] == ["공고문.pdf"]
+    assert seen == [1, 2, 1]

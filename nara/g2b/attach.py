@@ -131,6 +131,15 @@ def fetch(client: httpx.Client, url: str) -> tuple[str, bytes, str]:
     return _header_name(disposition), content, kind
 
 
+def peek(client: httpx.Client, url: str) -> str | None:
+    """첨부면 서버가 알려 준 이름, 아니면 None. 본문은 읽지 않는다."""
+    with client.stream("GET", url, timeout=TIMEOUT_SECONDS, follow_redirects=True) as response:
+        disposition = response.headers.get("content-disposition", "")
+        if response.status_code != 200 or "attachment" not in disposition.lower():
+            return None
+        return _header_name(disposition) or None
+
+
 def gather(
     client: httpx.Client,
     bid_no: str,
@@ -151,14 +160,19 @@ def gather(
             downloads.append(Download(f.seq, safe_name(f.name), content, kind))
         return downloads
 
+    # 원본이 없으면 순번을 훑어 이름만 읽는다(응답 머리). 도면처럼 큰 파일을 이름 때문에
+    # 내려받지 않는다. 첨부가 아닌 응답(422 JSON·안내 페이지)이 오면 거기까지가 그 공고의 파일이다.
     probed: list[RemoteFile] = []
-    contents: dict[int, tuple[bytes, str]] = {}
     for seq in range(1, MAX_FILES + 1):
         sleep(PAUSE_SECONDS)
-        try:
-            name, content, kind = fetch(client, probe_url(bid_no, bid_ord, seq))
-        except AttachError:
-            break  # 없는 순번이다. 여기까지가 그 공고의 파일이다
-        probed.append(RemoteFile(seq, safe_name(name or f"첨부{seq}.{kind}"), "", kind))
-        contents[seq] = (content, kind)
-    return [Download(f.seq, f.name, *contents[f.seq]) for f in choose(probed)]
+        url = probe_url(bid_no, bid_ord, seq)
+        name = peek(client, url)
+        if name is None:
+            break
+        probed.append(RemoteFile(seq, safe_name(name), url))
+    downloads = []
+    for f in choose(probed):
+        sleep(PAUSE_SECONDS)
+        _, content, kind = fetch(client, f.url)
+        downloads.append(Download(f.seq, f.name, content, kind))
+    return downloads
