@@ -1275,6 +1275,19 @@ def test_a_project_with_only_candidates_is_marked_for_review(world):
     assert "검토 필요" in text and "실행부서 검토 필요" in text
 
 
+def test_each_filter_checkbox_has_a_label_of_its_own(world):
+    """label 하나에 체크박스가 둘이면 label은 첫째 것만 가리킨다.
+
+    그러면 '실행부서 검토 필요' 글자를 눌러도 '관심기관만'이 켜진다.
+    """
+    path, _ = world
+    text = _text(_client(path).get("/"))
+    labels = re.findall(r"<label\b.*?</label>", text, re.S)
+    for name in ("focus", "dept"):
+        (own,) = [lb for lb in labels if f'name="{name}"' in lb]
+        assert own.count('type="checkbox"') == 1
+
+
 def test_detail_shows_candidates_with_their_source_and_reason(world):
     path, ids = world
     conn = connect(path)
