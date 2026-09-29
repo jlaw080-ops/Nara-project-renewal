@@ -12,6 +12,7 @@ from nara.web.data import open_readonly
 
 KEEP_LOCAL_DAYS = 7
 KEEP_REMOTE = "30d"
+KEEP_COPY_DAYS = 30
 
 
 def make_backup(db_path: Path, out_dir: Path, today: date) -> Path:
@@ -48,6 +49,20 @@ def prune_local(out_dir: Path, today: date, keep_days: int = KEEP_LOCAL_DAYS) ->
             path.unlink()
             removed.append(path)
     return removed
+
+
+def copy_to_dir(packed: Path, dest: Path, today: date, keep_days: int = KEEP_COPY_DAYS) -> Path:
+    """다른 폴더(예: Dropbox)에 복사하고, 그 폴더에는 최근 keep_days일만 남긴다.
+
+    동기화 프로그램이 쓰다 만 파일을 올리지 않게 임시 이름으로 쓴 뒤 이름을 바꾼다.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    target = dest / packed.name
+    partial = target.with_name(target.name + ".part")
+    shutil.copy2(packed, partial)
+    partial.replace(target)
+    prune_local(dest, today, keep_days)
+    return target
 
 
 def upload(packed: Path, remote: str, run: Callable = subprocess.run) -> None:

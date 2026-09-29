@@ -8,7 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nara import cli
-from nara.backup import make_backup, prune_local, upload
+from nara.backup import copy_to_dir, make_backup, prune_local, upload
 from nara.db import connect, migrate
 
 TODAY = date(2026, 9, 28)
@@ -116,3 +116,44 @@ def test_backup_with_a_remote_uploads(db, tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert sent == ["gdrive:nara-backup"]
     assert _last_backup(db) == "ok"
+
+
+def test_copy_to_a_folder_keeps_thirty_days_there(tmp_path):
+    """Dropbox 같은 동기화 폴더에 복사한다.
+
+    그 폴더에는 최근 30일만 남기고 다른 파일은 건드리지 않는다.
+    """
+    packed = tmp_path / "nara-20260928.db.gz"
+    packed.write_bytes(b"new")
+    dest = tmp_path / "Dropbox" / "nara-backup"
+    dest.mkdir(parents=True)
+    (dest / "nara-20260829.db.gz").write_bytes(b"old")  # 30일 전
+    (dest / "nara-20260830.db.gz").write_bytes(b"keep")  # 29일 전
+    (dest / "memo.txt").write_text("keep")
+    copied = copy_to_dir(packed, dest, TODAY)
+    assert copied.read_bytes() == b"new"
+    names = sorted(p.name for p in dest.iterdir())
+    assert names == ["memo.txt", "nara-20260830.db.gz", "nara-20260928.db.gz"]
+
+
+def test_backup_with_a_folder_copies_there_and_says_ok(db, tmp_path):
+    folder = tmp_path / "Dropbox 폴더" / "nara-backup"
+    env = _env(tmp_path, NARA_BACKUP_DIR=str(folder))
+    result = CliRunner().invoke(
+        cli.app, ["backup", "--db", str(db), "--out", str(tmp_path / "out"), "--env", str(env)]
+    )
+    assert result.exit_code == 0, result.output
+    assert list(folder.glob("nara-*.db.gz"))
+    assert _last_backup(db) == "ok"
+
+
+def test_backup_says_partial_when_the_folder_copy_fails(db, tmp_path):
+    blocked = tmp_path / "not-a-folder"
+    blocked.write_text("파일이라 폴더를 만들 수 없다")
+    env = _env(tmp_path, NARA_BACKUP_DIR=str(blocked))
+    result = CliRunner().invoke(
+        cli.app, ["backup", "--db", str(db), "--out", str(tmp_path / "out"), "--env", str(env)]
+    )
+    assert result.exit_code == 1
+    assert "폴더로 복사하지 못했다" in result.output
+    assert _last_backup(db) == "partial"
