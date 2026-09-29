@@ -175,7 +175,7 @@ ld AS (
                PARTITION BY d.project_id ORDER BY d.checked_at DESC, d.id DESC
            ) AS rn
     FROM dept_check d
-    WHERE d.project_id IS NOT NULL AND COALESCE(d.exec_dept, '') != ''
+    WHERE d.project_id IS NOT NULL AND d.confirmed = 1 AND COALESCE(d.exec_dept, '') != ''
 )
 """
 

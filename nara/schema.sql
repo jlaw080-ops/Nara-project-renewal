@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS dept_check (
   head_tel      TEXT,
   snippet       TEXT,
   source_file   TEXT,
+  confirmed     INTEGER NOT NULL DEFAULT 1,     -- 0 = 자동 조회가 남긴 후보·못 찾음 기록
+  note          TEXT,                           -- 못 찾은 사유·후보 출처
   decided_by    TEXT NOT NULL,
   checked_at    TEXT NOT NULL
 );
@@ -84,6 +86,7 @@ CREATE TABLE IF NOT EXISTS dept_check (
 CREATE TABLE IF NOT EXISTS attachment (
   id            INTEGER PRIMARY KEY,
   bid_no        TEXT NOT NULL REFERENCES notice(bid_no),
+  seq           INTEGER,                        -- 나라장터 파일 순번
   filename      TEXT NOT NULL,
   path          TEXT,
   sha256        TEXT,

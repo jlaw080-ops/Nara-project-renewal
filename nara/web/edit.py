@@ -280,7 +280,8 @@ def save_dept(
 ) -> list[str]:
     latest = conn.execute(
         "SELECT exec_dept, snippet, decided_by FROM dept_check WHERE project_id = ? "
-        "AND COALESCE(exec_dept, '') != '' ORDER BY checked_at DESC, id DESC LIMIT 1",
+        "AND confirmed = 1 AND COALESCE(exec_dept, '') != '' "
+        "ORDER BY checked_at DESC, id DESC LIMIT 1",
         (project_id,),
     ).fetchone()
     # 후보를 사람이 확정한 것도 기록한다. 이미 사람이 같은 값으로 확정했을 때만 건너뛴다.
@@ -351,7 +352,12 @@ def version_of(conn: sqlite3.Connection, project_id: int, section: str) -> str:
         parts = [latest]
     elif section == "dept":
         parts = [
-            _latest_row_id(conn, "dept_check", project_id, "AND COALESCE(exec_dept, '') != ''")
+            _latest_row_id(
+                conn,
+                "dept_check",
+                project_id,
+                "AND confirmed = 1 AND COALESCE(exec_dept, '') != ''",
+            )
         ]
     else:
         rows = conn.execute(

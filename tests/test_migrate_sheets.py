@@ -1105,3 +1105,22 @@ def test_a_web_edit_is_reported_once_not_on_every_later_sheet_change(conn):
     )
     assert len(first.overwritten) == 1
     assert second.overwritten == []
+
+
+def test_sheet_department_is_imported_over_an_unconfirmed_candidate(conn):
+    """자동 조회가 남긴 후보는 '지금 값'이 아니다. 시트 값이 확정으로 들어와야 한다."""
+    import_tab(conn, "완주", _sheet(**{"담당부서": ""}), SETTINGS, NOW)
+    pid = _pid(conn)
+    conn.execute(
+        "INSERT INTO dept_check (project_id, exec_dept, decided_by, confirmed, checked_at) "
+        "VALUES (?, '시설과', 'rule', 0, '2026-09-20T00:00:00')",
+        (pid,),
+    )
+    conn.commit()
+    stats = import_tab(conn, "완주", _sheet(**{"담당부서": "시설과"}), SETTINGS, LATER)
+    confirmed = conn.execute(
+        "SELECT exec_dept, decided_by FROM dept_check WHERE project_id = ? AND confirmed = 1",
+        (pid,),
+    ).fetchall()
+    assert [tuple(r) for r in confirmed] == [("시설과", "imported")]
+    assert stats.overwritten == []

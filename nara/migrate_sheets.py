@@ -186,7 +186,8 @@ def _apply_dept(
         return
     latest = conn.execute(
         "SELECT exec_dept FROM dept_check WHERE project_id = ? "
-        "AND COALESCE(exec_dept, '') != '' ORDER BY checked_at DESC, id DESC LIMIT 1",
+        "AND confirmed = 1 AND COALESCE(exec_dept, '') != '' "
+        "ORDER BY checked_at DESC, id DESC LIMIT 1",
         (project_id,),
     ).fetchone()
     if latest is None or latest[0] != dept:

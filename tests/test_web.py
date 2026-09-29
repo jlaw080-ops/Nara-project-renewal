@@ -88,6 +88,14 @@ def _verdict(
     )
 
 
+def _dept(conn, project_id, dept, when, decided_by="imported", confirmed=1, note=None):
+    conn.execute(
+        "INSERT INTO dept_check (project_id, exec_dept, decided_by, confirmed, note, "
+        "checked_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (project_id, dept, decided_by, confirmed, note, when),
+    )
+
+
 @pytest.fixture
 def world(tmp_path):
     """실제 모양을 줄인 DB. 공고 있는 사업·재공고·시트 이관(공고 없음)·판정 전을 다 담는다."""
@@ -1217,3 +1225,34 @@ def test_the_office_network_mode_still_refuses_other_host_names(world):
     """DNS 리바인딩 방어는 사내망 공유에서도 그대로다."""
     client = _lan_client(world[0])
     assert client.get("/login", headers={"Host": "evil.example"}).status_code == 400
+
+
+def test_a_candidate_is_never_shown_as_the_department(world):
+    """자동 조회가 남긴 후보가 확정값처럼 목록에 뜨면 안 된다."""
+    path, ids = world
+    conn = connect(path)
+    _dept(conn, ids["gym"], "건축과", "2026-09-01T09:00:00")
+    _dept(conn, ids["gym"], "문화관광과", "2026-09-28T09:00:00", "rule", confirmed=0)
+    _dept(conn, ids["culture"], "도시재생과", "2026-09-28T09:00:00", "rule", confirmed=0)
+    conn.commit()
+    conn.close()
+    rows = {r["id"]: r for r in _list(path).rows}
+    assert rows[ids["gym"]]["exec_dept"] == "건축과"
+    assert rows[ids["culture"]]["exec_dept"] is None
+
+
+def test_a_new_candidate_does_not_block_a_save_in_progress(world):
+    """폼을 연 사이 자동 조회가 후보를 남겨도 확정값은 그대로라 저장이 막히면 안 된다."""
+    path, ids = world
+    client = _client(path)
+    version = _version(client, ids["gym"], "dept")
+    conn = connect(path)
+    _dept(conn, ids["gym"], "문화관광과", "2026-09-28T09:00:00", "rule", confirmed=0)
+    conn.commit()
+    conn.close()
+    resp = client.post(
+        f"/project/{ids['gym']}/edit/dept",
+        data={"exec_dept": "건축과", "snippet": "", "version": version},
+        headers=ORIGIN,
+    )
+    assert resp.status_code == 302
