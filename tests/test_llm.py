@@ -2,7 +2,8 @@ import anthropic
 import httpx2
 
 from nara.config import Secrets
-from nara.llm import adjudicate
+from nara.dept_rules import DeptAnswer
+from nara.llm import MODEL, SYSTEM_DEPT, adjudicate, ask_dept
 from nara.verdict import BEFORE, BUILDING, Article
 
 KEYED = Secrets(
@@ -181,3 +182,31 @@ def test_adjudicate_still_swallows_api_errors_when_reusing_a_client(monkeypatch)
     monkeypatch.setattr(llm.anthropic, "Anthropic", _Broken)
     assert adjudicate(KEYED, "사업", ARTICLES, "질문") is None
     llm._reset_clients()
+
+
+def test_ask_dept_reads_the_three_lines():
+    client = _FakeClient(
+        _Response("실행부서: 문화관광과\n계약부서: 재무과\n근거: 사업관련 문의: 문화관광과 관광팀")
+    )
+    answer = ask_dept(KEYED, "발췌", client=client)
+    assert answer == DeptAnswer("문화관광과", "재무과", "사업관련 문의: 문화관광과 관광팀")
+    assert (client.seen["model"], client.seen["system"]) == (MODEL, SYSTEM_DEPT)
+    assert MODEL == "claude-opus-5"
+
+
+def test_ask_dept_treats_none_as_no_department():
+    client = _FakeClient(_Response("실행부서: 없음\n계약부서: 없음\n근거: 없음"))
+    answer = ask_dept(KEYED, "발췌", client=client)
+    assert (answer.exec_dept, answer.contract_dept) == (None, None)
+
+
+def test_ask_dept_without_a_key_does_not_call():
+    client = _FakeClient(_Response("실행부서: 건축과"))
+    assert ask_dept(KEYLESS, "발췌", client=client) is None
+    assert client.seen == {}
+
+
+def test_ask_dept_fails_closed_on_a_truncated_answer():
+    response = _Response("실행부서: 건축과")
+    response.stop_reason = "max_tokens"
+    assert ask_dept(KEYED, "발췌", client=_FakeClient(response)) is None
