@@ -6,7 +6,9 @@ import zipfile
 
 import httpx
 import pytest
+from typer.testing import CliRunner
 
+from nara import cli
 from nara.config import Secrets
 from nara.db import connect, migrate
 from nara.dept import (
@@ -15,6 +17,7 @@ from nara.dept import (
     NOTE_MANUAL,
     NOTE_NO_FILES,
     NOTE_RULE_CANDIDATE,
+    DeptRun,
     pending_dept_projects,
     update_depts,
 )
@@ -269,3 +272,43 @@ def test_the_time_budget_stops_the_run(db, tmp_path):
     ticks = iter([0, 0, 100, 2000, 2000, 2000])
     run, _ = _run(db, tmp_path / "a", _server({}), budget_seconds=1200, now_fn=lambda: next(ticks))
     assert run.stopped_early and run.checked == 2
+
+
+def test_enrich_dept_command_reports_and_logs(tmp_path, monkeypatch):
+    db_path = tmp_path / "data" / "n.db"
+    conn = connect(db_path)
+    migrate(conn)
+    conn.close()
+    seen = {}
+
+    def fake(conn, client, secrets, root, tier, group, limit, counters, asker, budget_seconds):
+        seen.update(root=root, tier=tier, group=group, budget=budget_seconds)
+        counters.processed = 3
+        return DeptRun(checked=3, confirmed_rule=1, confirmed_llm=1, review=1)
+
+    monkeypatch.setattr(cli, "update_depts", fake)
+    result = CliRunner().invoke(
+        cli.app, ["enrich", "dept", "--tier", "rest", "--group", "2", "--db", str(db_path)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "실행부서 — 조회 3건 / 확정 규칙 1·Claude 1 / 검토 필요 1 / 못 찾음 0 / 실패 0" in (
+        result.output
+    )
+    assert seen == {
+        "root": tmp_path / "data" / "attachments",
+        "tier": "rest",
+        "group": 2,
+        "budget": 1200,
+    }
+    conn = connect(db_path)
+    assert (
+        conn.execute("SELECT status FROM run_log WHERE command = 'enrich dept'").fetchone()[0]
+        == "ok"
+    )
+
+
+def test_enrich_dept_refuses_an_unknown_tier(tmp_path):
+    result = CliRunner().invoke(
+        cli.app, ["enrich", "dept", "--tier", "x", "--db", str(tmp_path / "n.db")]
+    )
+    assert result.exit_code == 1

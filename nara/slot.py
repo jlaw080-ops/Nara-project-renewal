@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 
 SLOTS = ("09", "12", "15")
 LOCK_KEY = "slot_running"
-# 가장 긴 슬롯(수집 + 낙찰 + 진행현황 예산 20분)보다 넉넉히. 죽은 슬롯의 표시는 이만큼 뒤 풀린다.
+# 가장 긴 슬롯(수집 + 낙찰 + 진행현황 20분 + 실행부서 20분)보다 넉넉히.
+# 죽은 슬롯의 표시는 이만큼 뒤 풀린다.
 LOCK_MAX_AGE = timedelta(hours=2)
 
 
@@ -25,9 +26,11 @@ def plan(slot: str, weekday: int) -> list[Step]:
         # 비관심 기관은 월~금 다섯 그룹이다. 주말에는 낙찰 조회할 그룹이 없다.
         if weekday <= 5:
             steps.append(Step("enrich award", {"tier": "rest", "group": weekday}))
+            steps.append(Step("enrich dept", {"tier": "rest", "group": weekday}))
         return steps
     steps.append(Step("enrich award", {"tier": "focus", "group": None}))
     steps.append(Step("enrich status", {"tier": "focus"}))
+    steps.append(Step("enrich dept", {"tier": "focus", "group": None}))
     return steps
 
 

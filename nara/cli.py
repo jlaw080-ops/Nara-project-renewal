@@ -17,10 +17,11 @@ from nara.backup import upload as upload_backup
 from nara.collect import backfill as run_backfill
 from nara.collect import collect_range
 from nara.config import load_secrets, load_settings
-from nara.db import connect, migrate
+from nara.db import attachments_dir, connect, migrate
+from nara.dept import update_depts
 from nara.doctor import run_checks
 from nara.google import search_news
-from nara.llm import adjudicate
+from nara.llm import adjudicate, ask_dept
 from nara.migrate_sheets import import_tab
 from nara.runlog import run_log
 from nara.slot import SLOTS
@@ -315,6 +316,49 @@ def enrich_status(
         raise typer.Exit(code=1)
 
 
+@enrich_app.command("dept")
+def enrich_dept(
+    tier: str = typer.Option("all", help="focus | rest | all"),
+    group: int | None = typer.Option(None, help="비관심 기관 요일 그룹 1~5"),
+    limit: int = typer.Option(300, min=1, help="한 번에 볼 최대 사업 수"),
+    budget: int = typer.Option(1200, min=1, help="시간 예산(초). 넘기면 저장하고 멈춘다"),
+    db: Path = typer.Option(DEFAULT_DB),
+) -> None:
+    """공고 첨부에서 실행부서를 찾는다."""
+    if tier not in {"focus", "rest", "all"}:
+        typer.echo(f"--tier는 focus | rest | all 중 하나여야 한다: {tier!r}", err=True)
+        raise typer.Exit(code=1)
+    secrets = load_secrets(DEFAULT_ENV)
+    conn = _open_db(db)
+    selected = None if tier == "all" else tier
+    with run_log(conn, "enrich dept", f"--tier {tier}") as counters:
+        with httpx.Client() as client:
+            run = update_depts(
+                conn,
+                client,
+                secrets,
+                attachments_dir(db),
+                selected,
+                group,
+                limit,
+                counters,
+                asker=ask_dept,
+                budget_seconds=budget,
+            )
+    typer.echo(
+        f"실행부서 — 조회 {run.checked}건 / 확정 규칙 {run.confirmed_rule}·"
+        f"Claude {run.confirmed_llm} / 검토 필요 {run.review} / 못 찾음 {run.not_found} / "
+        f"실패 {run.failed}"
+    )
+    if not secrets.anthropic_api_key:
+        typer.echo("Claude API 키가 없어 애매한 건을 검토 필요로 남긴다")
+    if run.stopped_early:
+        typer.echo("시간 예산을 넘겨 멈췄다 — 다음 회차가 이어서 본다")
+    if run.failed and run.failed == run.checked:
+        typer.echo("전체 조회 실패 — 네트워크를 확인한다.", err=True)
+        raise typer.Exit(code=1)
+
+
 user_app = typer.Typer(help="로그인 계정을 관리한다")
 app.add_typer(user_app, name="user")
 
@@ -391,6 +435,9 @@ _STEP_RUNNERS: dict[str, Callable[..., None]] = {
     ),
     "enrich status": lambda db, config, tier: enrich_status(
         tier=tier, limit=300, budget=1200, db=db
+    ),
+    "enrich dept": lambda db, config, tier, group: enrich_dept(
+        tier=tier, group=group, limit=300, budget=1200, db=db
     ),
 }
 

@@ -25,6 +25,7 @@ def test_morning_and_afternoon_slots_follow_the_schedule():
             Step("collect", {"days": 3}),
             Step("enrich award", {"tier": "focus", "group": None}),
             Step("enrich status", {"tier": "focus"}),
+            Step("enrich dept", {"tier": "focus", "group": None}),
         ]
 
 
@@ -32,6 +33,7 @@ def test_noon_slot_checks_awards_for_todays_weekday_group():
     assert plan("12", 3) == [
         Step("collect", {"days": 3}),
         Step("enrich award", {"tier": "rest", "group": 3}),
+        Step("enrich dept", {"tier": "rest", "group": 3}),
     ]
 
 
@@ -68,7 +70,7 @@ def _fake_runners(monkeypatch, calls, fail=()):
 
         return run
 
-    for name in ("collect", "enrich award", "enrich status"):
+    for name in ("collect", "enrich award", "enrich status", "enrich dept"):
         monkeypatch.setitem(cli._STEP_RUNNERS, name, make(name))
 
 
@@ -77,7 +79,7 @@ def test_run_slot_keeps_going_after_a_failed_step(tmp_path, monkeypatch):
     _fake_runners(monkeypatch, calls, fail={"enrich award"})
     db = tmp_path / "r.db"
     result = CliRunner().invoke(cli.app, ["run", "slot", "09", "--db", str(db)])
-    assert calls == ["collect", "enrich award", "enrich status"]
+    assert calls == ["collect", "enrich award", "enrich status", "enrich dept"]
     assert result.exit_code == 1
     assert "enrich award" in result.output
     c = connect(db)

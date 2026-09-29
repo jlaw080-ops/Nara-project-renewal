@@ -250,6 +250,7 @@ PIPELINE_STAGES = (
     ("collect", "수집"),
     ("enrich award", "낙찰 조회"),
     ("enrich status", "진행현황"),
+    ("enrich dept", "실행부서"),
     ("backup", "백업"),
 )
 # 이보다 오래 새 실행이 없으면 멈춘 것으로 본다. 스케줄러가 멈추면 run_log에 새 줄이
