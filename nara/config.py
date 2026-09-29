@@ -24,6 +24,7 @@ class Secrets:
     secret_key: str | None = None
     host: str | None = None
     backup_remote: str | None = None
+    backup_dir: str | None = None
 
 
 def load_settings(path: Path) -> Settings:
@@ -64,4 +65,5 @@ def load_secrets(env_path: Path | None = None) -> Secrets:
         secret_key=pick("NARA_SECRET_KEY"),
         host=pick("NARA_HOST"),
         backup_remote=pick("NARA_BACKUP_REMOTE"),
+        backup_dir=pick("NARA_BACKUP_DIR"),
     )

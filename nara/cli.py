@@ -12,7 +12,7 @@ from waitress import serve as waitress_serve
 from nara import __version__
 from nara.auth import add_user, list_users, normalize_email, reset_password, set_active
 from nara.award import update_awards
-from nara.backup import make_backup, prune_local
+from nara.backup import copy_to_dir, make_backup, prune_local
 from nara.backup import upload as upload_backup
 from nara.collect import backfill as run_backfill
 from nara.collect import collect_range
@@ -445,26 +445,36 @@ def backup(
     out: Path = typer.Option(Path("data/backup"), help="서버 안 보관 폴더"),
     env: Path = typer.Option(DEFAULT_ENV, help="비밀값 파일"),
 ) -> None:
-    """DB 백업본을 만들고 서버 밖(NARA_BACKUP_REMOTE)으로 보낸다."""
+    """DB 백업본을 만들어 다른 폴더(NARA_BACKUP_DIR)나 원격(NARA_BACKUP_REMOTE)으로 보낸다."""
     if not db.exists():
         typer.echo(f"DB 파일이 없다: {db}", err=True)
         raise typer.Exit(code=1)
-    remote = load_secrets(env).backup_remote
+    secrets = load_secrets(env)
+    remote, folder = secrets.backup_remote, secrets.backup_dir
     conn = _open_db(db)
     today = date.today()
     with run_log(conn, "backup", str(out)) as counters:
         packed = make_backup(db, out, today)
         prune_local(out, today)
         counters.processed = 1
-        if not remote:
+        if not remote and not folder:
             counters.failed = 1
-            typer.echo("NARA_BACKUP_REMOTE가 .env에 없어 서버 안에만 남겼다", err=True)
-        else:
+            typer.echo(
+                "NARA_BACKUP_DIR·NARA_BACKUP_REMOTE가 .env에 없어 이 컴퓨터 안에만 남겼다", err=True
+            )
+        if folder:
+            try:
+                typer.echo(f"폴더로 복사: {copy_to_dir(packed, Path(folder), today)}")
+                counters.updated += 1
+            except OSError as exc:
+                counters.failed += 1
+                typer.echo(f"폴더로 복사하지 못했다: {exc}", err=True)
+        if remote:
             try:
                 upload_backup(packed, remote)
-                counters.updated = 1
+                counters.updated += 1
             except (OSError, subprocess.CalledProcessError) as exc:
-                counters.failed = 1
+                counters.failed += 1
                 typer.echo(f"서버 밖으로 보내지 못했다: {exc}", err=True)
     typer.echo(f"백업: {packed}")
     if counters.failed:
