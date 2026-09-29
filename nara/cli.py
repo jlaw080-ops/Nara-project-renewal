@@ -1,4 +1,5 @@
 import shutil
+import socket
 import subprocess
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
@@ -126,8 +127,9 @@ def serve(
     db: Path = typer.Option(DEFAULT_DB, help="SQLite 경로"),
     env: Path = typer.Option(DEFAULT_ENV, help="비밀값 파일"),
     production: bool = typer.Option(False, "--production", help="서버용: waitress로 띄운다"),
+    lan: bool = typer.Option(False, "--lan", help="사내망 공유: 다른 PC에서 접속하게 연다"),
 ) -> None:
-    """조회·입력 화면을 띄운다. 이 컴퓨터(127.0.0.1)에서만 열리고 밖은 Caddy가 잇는다."""
+    """조회·입력 화면을 띄운다. 기본은 이 컴퓨터(127.0.0.1)에서만 열린다."""
     # _open_db를 쓰지 않는다. 없는 파일이면 위에서 멈춰야 한다 — doctor와 같은 이유.
     if not db.exists():
         typer.echo(f"DB 파일이 없다: {db}", err=True)
@@ -140,6 +142,9 @@ def serve(
     conn = connect(db)
     migrate(conn)
     conn.close()
+    if lan:
+        _serve_lan(db, secrets.secret_key, secrets.host, port)
+        return
     web = create_app(db, secret_key=secrets.secret_key, host=secrets.host)
     if production:
         typer.echo(f"서버 모드: 127.0.0.1:{port} (밖은 Caddy가 https로 잇는다)")
@@ -148,6 +153,40 @@ def serve(
     typer.echo(f"조회 화면: http://127.0.0.1:{port}  (끄려면 Ctrl+C)")
     # debug=True는 브라우저에서 코드를 실행하는 디버거를 연다. 로컬이어도 켜지 않는다.
     web.run(host="127.0.0.1", port=port, debug=False)
+
+
+def _primary_ip() -> str | None:
+    """바깥으로 나가는 기본 경로의 IP. UDP connect는 패킷을 보내지 않고 경로만 고른다."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("10.254.254.254", 1))
+            return probe.getsockname()[0]
+    except OSError:
+        return None
+
+
+def _lan_addresses() -> tuple[str, list[str]]:
+    """(동료에게 알려 줄 IP, 믿을 호스트 이름 목록). 가상 어댑터 주소도 믿을 목록에는 넣는다."""
+    name = socket.gethostname()
+    try:
+        ips = socket.gethostbyname_ex(name)[2]
+    except OSError:
+        ips = []
+    primary = _primary_ip() or next(iter(ips), "127.0.0.1")
+    hosts = [name.lower(), socket.getfqdn().lower(), primary, *ips]
+    return primary, list(dict.fromkeys(h for h in hosts if not h.startswith("127.")))
+
+
+def _serve_lan(db: Path, secret_key: str, host: str | None, port: int) -> None:
+    primary, hosts = _lan_addresses()
+    web = create_app(db, secret_key=secret_key, host=host, lan_hosts=hosts)
+    typer.echo(f"사내망 공유: http://{primary}:{port}  (끄려면 Ctrl+C)")
+    typer.echo(
+        "· 사내망 안에서는 http라 비밀번호가 암호화되지 않는다. 다른 곳의 비밀번호는 쓰지 않는다."
+    )
+    typer.echo("· Windows 방화벽 창이 뜨면 '개인 네트워크'를 허용한다.")
+    # 여러 사람이 동시에 쓰므로 개발용 서버 대신 waitress로 띄운다.
+    waitress_serve(web, host="0.0.0.0", port=port, threads=8)
 
 
 enrich_app = typer.Typer(help="수집한 공고에 정보를 덧붙인다")
