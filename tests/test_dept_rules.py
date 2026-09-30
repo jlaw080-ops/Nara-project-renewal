@@ -193,7 +193,7 @@ def test_a_name_that_starts_with_a_number_is_kept_whole_and_left_for_review():
     숫자로 시작하는 이름은 전화번호가 붙은 것('2842건축과')과 가릴 수 없어 규칙으로
     확정하지 않고 사람이 본다.
     """
-    text = "8. 문의처 : 논산시 100세행복과 어르신시설팀(☏ 041-746-5803)으로 문의"
+    text = "8. 문의처 : 논산시 100세행복과 어르신시설팀(☏ 041-000-0000)으로 문의"
     assert _names(text) == ["100세행복과"]
     assert decide_by_rule(find_candidates(text)) is None
 
