@@ -156,3 +156,48 @@ def test_part_of_a_longer_name_does_not_verify():
     text = f"13. 기타\n{quote}\n"
     assert not verify_answer(text, _answer("건축과", quote))
     assert verify_answer(text, _answer("도시건축과", quote))
+
+
+def _after_cue(phrase: str) -> list[str]:
+    """신호어 바로 뒤에 phrase를 두고, 끝에 진짜 부서를 하나 둔다."""
+    return _names(f"사업부서 문의: {phrase} 담당은 건축과")
+
+
+def test_a_noun_joined_by_and_is_not_a_department():
+    """'~사항과', '~수행과'는 조사 '과'가 붙은 말이다(2026-09-30 슬롯 사례)."""
+    assert _after_cue("명시하지 않은 세부적인 위반사항과 추가 보완") == ["건축과"]
+    assert _after_cue("과업수행과 관련하여 제3자에게") == ["건축과"]
+    assert _after_cue("업무수행과 관련한 일체사항") == ["건축과"]
+
+
+def test_ordinary_words_that_look_like_departments_are_not_candidates():
+    """벌점부과·등록취소·입찰취소·접견실·신고센터는 부서가 아니다(2026-09-30 슬롯 사례)."""
+    assert _after_cue("건설기술용역업자 벌점부과, 등록취소, 영업정지") == ["건축과"]
+    assert _after_cue("입찰취소를 신청할 수 있습니다") == ["건축과"]
+    assert _names("장소 : 대전광역시청 2층 민원인 접견실") == []
+    assert _after_cue("공직자부조리 신고센터(031-000-0000)") == ["건축과"]
+
+
+def test_the_front_of_a_longer_word_is_not_a_department():
+    """'설계과정'의 '설계과', '특정단체'의 '특정단'처럼 낱말 앞부분을 떼어 내지 않는다."""
+    assert _after_cue("모든 설계과정에서 발주자와 협의") == ["건축과"]
+    assert _after_cue("주요 설계과업내용 변경 시 설계과오가 있으면") == ["건축과"]
+    assert _after_cue("개인 또는 특정단체 등의 이익") == ["건축과"]
+    assert _after_cue("눈개승마 재배단지 꽃밭 조성") == ["건축과"]
+    assert _names("사업부서: 건축과에서 담당, 도시계획과장 확인") == ["건축과", "도시계획과"]
+
+
+def test_a_name_that_starts_with_a_number_is_kept_whole_and_left_for_review():
+    """'100세행복과'를 '세행복과'로 자르면 틀린 이름이 확정된다(논산시 사례).
+
+    숫자로 시작하는 이름은 전화번호가 붙은 것('2842건축과')과 가릴 수 없어 규칙으로
+    확정하지 않고 사람이 본다.
+    """
+    text = "8. 문의처 : 논산시 100세행복과 어르신시설팀(☏ 041-746-5803)으로 문의"
+    assert _names(text) == ["100세행복과"]
+    assert decide_by_rule(find_candidates(text)) is None
+
+
+def test_general_affairs_stays_a_candidate():
+    """구청 총무과는 입찰 창구일 때가 많지만 사업을 맡기도 한다 — 빼지 않고 사람이 고른다."""
+    assert "총무과" in _names("사업관련 문의: 총무과 (031-000-0000)")
