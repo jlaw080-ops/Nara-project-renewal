@@ -40,7 +40,15 @@ def collect_range(
         if not _accepts(item, settings):
             continue
         org_id = upsert_org(conn, item.org_name, settings, now)
-        project_id = ensure_project(conn, org_id, item.title, "g2b", now)
+        # 이미 받은 공고면 원래 사업을 쓴다. 변경공고에서 공고명이 바뀌어도 바뀐 이름으로
+        # 사업을 새로 만들면 공고 없는 빈 사업이 남는다.
+        known = conn.execute(
+            "SELECT project_id FROM notice WHERE bid_no = ?", (item.bid_no,)
+        ).fetchone()
+        if known:
+            project_id = known["project_id"]
+        else:
+            project_id = ensure_project(conn, org_id, item.title, "g2b", now)
         if upsert_notice(conn, item, org_id, project_id, now):
             added += 1
             counters.updated += 1

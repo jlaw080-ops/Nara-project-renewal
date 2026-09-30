@@ -114,6 +114,31 @@ def test_collect_range_is_idempotent(conn):
     assert conn.execute("SELECT COUNT(*) FROM notice").fetchone()[0] == 1
 
 
+def test_a_renamed_change_notice_does_not_leave_an_empty_project(conn):
+    """변경공고에서 공고명이 바뀌어도 같은 공고번호면 원래 사업에 남는다.
+
+    예전에는 바뀐 이름으로 사업부터 만들어 공고 없는 빈 사업이 목록에 생겼다
+    (2026-09-29 원불교 문화체험관 사례).
+    """
+    first = [_raw("A1", "전북특별자치도 완주군", "완주 체육관 건축설계공모")]
+    changed = [
+        _raw(
+            "A1",
+            "전북특별자치도 완주군",
+            "완주 체육관 건축설계 및 전시물설계 공모",
+            kind="변경공고",
+        )
+    ]
+    with _client(first) as client:
+        collect_range(conn, client, "KEY", SETTINGS, BEGIN, END, RunCounters())
+    with _client(changed) as client:
+        collect_range(conn, client, "KEY", SETTINGS, BEGIN, END, RunCounters())
+    projects = conn.execute("SELECT id, name FROM project").fetchall()
+    assert [tuple(p) for p in projects] == [(projects[0]["id"], "완주 체육관 건축설계공모")]
+    notice = conn.execute("SELECT project_id, title FROM notice").fetchone()
+    assert tuple(notice) == (projects[0]["id"], "완주 체육관 건축설계 및 전시물설계 공모")
+
+
 def test_collect_range_counts_processed(conn):
     items = [
         _raw("A1", "전북특별자치도 완주군", "완주 체육관 실시설계용역"),
