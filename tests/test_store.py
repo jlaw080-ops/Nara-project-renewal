@@ -57,7 +57,7 @@ def test_upsert_org_assigns_weekday_group_to_rest_agency(conn):
 
 def test_orgs_added_to_the_focus_list_later_are_promoted(conn):
     """관심기관을 설정에 나중에 넣어도 이미 비관심으로 등록된 기관이 관심으로 바뀐다."""
-    before = replace(SETTINGS, focus_orgs=())  # 서울이 목록에 없던 때
+    before = replace(SETTINGS, focus_orgs=(), focus_exact_orgs=())  # 서울이 목록에 없던 때
     seoul = upsert_org(conn, "서울특별시 종로구", before, NOW)
     other = upsert_org(conn, "강원특별자치도 강릉시", before, NOW)
     other_group = conn.execute("SELECT weekday_group FROM org WHERE id = ?", (other,)).fetchone()[0]

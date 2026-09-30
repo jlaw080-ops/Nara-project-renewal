@@ -26,5 +26,7 @@ def org_passes(org: str, settings: Settings) -> bool:
 
 
 def is_focus_org(org: str, settings: Settings) -> bool:
-    """관심 기관 목록의 이름이 수요기관 문자열에 들어 있으면 관심 기관."""
-    return _contains_any((org or "").strip(), settings.focus_orgs)
+    """관심 기관 목록의 이름이 수요기관 문자열에 들어 있거나, 정확히 같은 이름 목록에
+    있으면 관심 기관."""
+    name = (org or "").strip()
+    return name in settings.focus_exact_orgs or _contains_any(name, settings.focus_orgs)

@@ -20,18 +20,22 @@ def test_load_settings_keeps_every_focus_org():
 
     확인해야 하는 것은 '목록이 잘리지 않았다'이다. 시트 설정 탭에서 옮긴
     관심 기관 23개 · 제목 제외 80개 · 기관 제외 8개가 기준선이고, 여기에
-    사용자가 지시한 산림 작업 3개를 더해 제목 제외는 83개, 서울특별시를
-    더해(2026-09-30) 관심 기관은 24개다.
+    사용자가 지시한 산림 작업 3개를 더해 제목 제외는 83개다. 서울은 본청과
+    25개 구청만 이름이 정확히 같을 때 관심이다(2026-09-30 사용자 지시).
     시트 설정 탭에 그것들을 넣으면 숫자는 그대로 간다.
     """
     settings = load_settings(REPO_ROOT / "config.toml")
-    assert len(settings.focus_orgs) == 24
+    assert len(settings.focus_orgs) == 23
     assert len(settings.title_excluded) == 83
     assert len(settings.org_excluded) == 8
     # 시트보다 앞서 있는 것들. 시트에 반영되기 전까지 여기가 유일한 기록이다.
     for keyword in ("덩굴제거", "숲가꾸기", "산불예방"):
         assert keyword in settings.title_excluded
-    assert "서울특별시" in settings.focus_orgs
+    seoul = settings.focus_exact_orgs
+    assert "서울특별시" in seoul and "서울특별시" not in settings.focus_orgs
+    districts = [n for n in seoul if n.startswith("서울특별시 ") and n.endswith("구")]
+    assert len(districts) == len(set(districts)) == 25
+    assert len(seoul) == 26
 
 
 def test_load_secrets_reads_env_file(tmp_path):

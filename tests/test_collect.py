@@ -146,11 +146,14 @@ def test_collect_promotes_orgs_that_joined_the_focus_list(conn):
 
     새 공고가 없는 기관도 바뀌어야 한다 — 낙찰·진행현황·실행부서 조회가 관심기관 기준이다.
     """
-    upsert_org(conn, "서울특별시 미래한강본부", replace(SETTINGS, focus_orgs=()), "2026-09-01")
+    before = replace(SETTINGS, focus_orgs=(), focus_exact_orgs=())
+    upsert_org(conn, "서울특별시 종로구", before, "2026-09-01")
+    upsert_org(conn, "서울특별시 미래한강본부", before, "2026-09-01")
     with _client([]) as client:
         collect_range(conn, client, "KEY", SETTINGS, BEGIN, END, RunCounters())
-    tier = conn.execute("SELECT tier FROM org WHERE name = '서울특별시 미래한강본부'").fetchone()
-    assert tier[0] == "focus"
+    tiers = dict(conn.execute("SELECT name, tier FROM org").fetchall())
+    # 구청은 관심으로, 본부는 그대로(서울은 본청과 구청만)
+    assert tiers == {"서울특별시 종로구": "focus", "서울특별시 미래한강본부": "rest"}
 
 
 def test_collect_range_counts_processed(conn):

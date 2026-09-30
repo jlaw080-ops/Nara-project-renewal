@@ -13,6 +13,8 @@ class Settings:
     focus_orgs: tuple[str, ...]
     service_div_name: str
     skip_cancelled: bool
+    # 이름이 정확히 같을 때만 관심 — 시 이름이 본부·사업소까지 잡으면 안 되는 곳(서울)
+    focus_exact_orgs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,7 @@ def load_settings(path: Path) -> Settings:
         focus_orgs=tuple(focus.get("orgs", [])),
         service_div_name=collect.get("service_div_name", "기술용역"),
         skip_cancelled=bool(collect.get("skip_cancelled", True)),
+        focus_exact_orgs=tuple(focus.get("exact_orgs", [])),
     )
 
 
