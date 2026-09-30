@@ -84,21 +84,22 @@ def fetch_notice_page(
     end: datetime,
     page: int,
     rows: int,
+    org: str | None = None,
 ) -> tuple[list[NoticeItem], int]:
-    """한 페이지를 읽어 (항목, 전체 건수)를 돌려준다."""
-    response = client.get(
-        BASE_URL,
-        params={
-            "serviceKey": api_key,
-            "type": "json",
-            "inqryDiv": "1",
-            "inqryBgnDt": _stamp(begin),
-            "inqryEndDt": _stamp(end),
-            "pageNo": str(page),
-            "numOfRows": str(rows),
-        },
-        timeout=30.0,
-    )
+    """한 페이지를 읽어 (항목, 전체 건수)를 돌려준다. org를 주면 그 이름이 들어간
+    수요기관의 공고만 묻는다."""
+    params = {
+        "serviceKey": api_key,
+        "type": "json",
+        "inqryDiv": "1",
+        "inqryBgnDt": _stamp(begin),
+        "inqryEndDt": _stamp(end),
+        "pageNo": str(page),
+        "numOfRows": str(rows),
+    }
+    if org:
+        params["dminsttNm"] = org
+    response = client.get(BASE_URL, params=params, timeout=30.0)
     body = check_response(response)
     items = [_to_item(raw) for raw in normalise_items(body.get("items"))]
     return items, int(body.get("totalCount") or 0)
@@ -111,6 +112,7 @@ def iter_notices(
     end: datetime,
     rows: int = 500,
     max_pages: int = 60,
+    org: str | None = None,
 ) -> Iterator[NoticeItem]:
     """기간 안의 공고를 페이지를 넘겨 가며 전부 돌려준다.
 
@@ -121,7 +123,7 @@ def iter_notices(
     fetched = 0
     total = 0
     while page <= max_pages:
-        items, total = fetch_notice_page(client, api_key, begin, end, page, rows)
+        items, total = fetch_notice_page(client, api_key, begin, end, page, rows, org)
         if not items:
             if (page - 1) * rows < total:
                 raise G2BError(

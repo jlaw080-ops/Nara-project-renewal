@@ -154,3 +154,17 @@ def test_iter_notices_genuinely_empty_result_returns_without_raising():
     with _client(handler) as client:
         items = list(iter_notices(client, "KEY", BEGIN, END, rows=2, max_pages=60))
     assert items == []
+
+
+def test_the_demand_agency_filter_is_sent_only_when_given():
+    """서울만 소급할 때는 수요기관명으로 거른다. 평소 수집은 거르지 않는다."""
+    seen = []
+
+    def handler(req):
+        seen.append(req.url.params.get("dminsttNm"))
+        return httpx.Response(200, json=PAGE1)
+
+    with _client(handler) as client:
+        fetch_notice_page(client, "KEY", BEGIN, END, page=1, rows=2)
+        fetch_notice_page(client, "KEY", BEGIN, END, page=1, rows=2, org="서울특별시")
+    assert seen == [None, "서울특별시"]

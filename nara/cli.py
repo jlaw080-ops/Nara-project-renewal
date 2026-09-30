@@ -82,6 +82,9 @@ def collect(
 def backfill(
     days: int = typer.Option(365, min=1, help="며칠 전까지 소급할지"),
     chunk: int = typer.Option(3, min=1, help="한 번에 조회할 기간(일)"),
+    org: str | None = typer.Option(
+        None, help="이 이름이 들어간 수요기관만 묻고, 그중 관심기관 공고만 넣는다(예: 서울특별시)"
+    ),
     db: Path = typer.Option(DEFAULT_DB),
     config: Path = typer.Option(DEFAULT_CONFIG),
 ) -> None:
@@ -93,10 +96,11 @@ def backfill(
         raise typer.Exit(code=1)
 
     conn = _open_db(db)
-    with run_log(conn, "backfill", f"--days {days}") as counters:
+    args = f"--days {days}" + (f" --org {org}" if org else "")
+    with run_log(conn, "backfill", args) as counters:
         with httpx.Client() as client:
             result = run_backfill(
-                conn, client, secrets.g2b_api_key, settings, days, chunk, counters
+                conn, client, secrets.g2b_api_key, settings, days, chunk, counters, org=org
             )
     state = "완료" if result.done else f"진행 중 — {result.cursor}까지"
     typer.echo(f"소급 수집 {state} / 신규 {result.added}건")

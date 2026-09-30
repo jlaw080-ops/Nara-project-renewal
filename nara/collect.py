@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 import httpx
 
 from nara.config import Settings
-from nara.filters import org_passes, title_passes
+from nara.filters import is_focus_org, org_passes, title_passes
 from nara.g2b.list_api import NoticeItem, iter_notices
 from nara.runlog import RunCounters
 from nara.store import ensure_project, promote_focus_orgs, upsert_notice, upsert_org
@@ -31,15 +31,22 @@ def collect_range(
     begin: datetime,
     end: datetime,
     counters: RunCounters,
+    org: str | None = None,
 ) -> int:
-    """기간 안의 공고를 수집한다. 새로 넣은 건수를 돌려준다."""
+    """기간 안의 공고를 수집한다. 새로 넣은 건수를 돌려준다.
+
+    org를 주면 그 이름이 들어간 수요기관만 묻고, 그중 관심기관 공고만 넣는다
+    (서울 소급 — 본부·사업소의 과거 공고까지 넣지 않는다).
+    """
     now = datetime.now().isoformat(timespec="seconds")
     # 설정에 관심기관을 더했으면 이미 등록된 기관도 여기서 관심으로 올린다.
     promote_focus_orgs(conn, settings)
     added = 0
-    for item in iter_notices(client, api_key, begin, end):
+    for item in iter_notices(client, api_key, begin, end, org=org):
         counters.processed += 1
         if not _accepts(item, settings):
+            continue
+        if org and not is_focus_org(item.org_name, settings):
             continue
         org_id = upsert_org(conn, item.org_name, settings, now)
         # 이미 받은 공고면 원래 사업을 쓴다. 변경공고에서 공고명이 바뀌어도 바뀐 이름으로
@@ -91,8 +98,12 @@ def backfill(
     counters: RunCounters,
     now: datetime | None = None,
     max_chunks: int | None = None,
+    org: str | None = None,
 ) -> BackfillResult:
-    """과거 공고를 기간을 쪼개 과거에서 현재 방향으로 수집한다."""
+    """과거 공고를 기간을 쪼개 과거에서 현재 방향으로 수집한다.
+
+    org를 주면 그 기관만 소급하고, 이어하기 위치도 기관별로 따로 둔다.
+    """
     # CLI는 min=1로 막지만 이 함수는 직접 부를 수 있다. chunk_days가 0 이하면
     # cursor가 전진하지 않아 while 루프가 끝나지 않는다.
     if chunk_days < 1:
@@ -101,7 +112,8 @@ def backfill(
         raise ValueError(f"days_back은 1 이상이어야 한다: {days_back}")
     now = now or datetime.now()
     floor = (now - timedelta(days=days_back)).date()
-    saved = _get_state(conn, CURSOR_KEY)
+    key = f"{CURSOR_KEY}:{org}" if org else CURSOR_KEY
+    saved = _get_state(conn, key)
     cursor = date.fromisoformat(saved) if saved else floor
     cursor = max(cursor, floor)
 
@@ -109,7 +121,7 @@ def backfill(
     chunks = 0
     while cursor < now.date():
         if max_chunks is not None and chunks >= max_chunks:
-            _set_state(conn, CURSOR_KEY, cursor.isoformat())
+            _set_state(conn, key, cursor.isoformat())
             return BackfillResult(added, cursor.isoformat(), done=False)
         chunk_end = min(cursor + timedelta(days=chunk_days), now.date())
         added += collect_range(
@@ -120,11 +132,12 @@ def backfill(
             datetime.combine(cursor, datetime.min.time()),
             datetime.combine(chunk_end, datetime.min.time()),
             counters,
+            org=org,
         )
         cursor = chunk_end
         chunks += 1
-        _set_state(conn, CURSOR_KEY, cursor.isoformat())
+        _set_state(conn, key, cursor.isoformat())
 
-    conn.execute("DELETE FROM app_state WHERE key = ?", (CURSOR_KEY,))
+    conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
     conn.commit()
     return BackfillResult(added, cursor.isoformat(), done=True)
