@@ -10,7 +10,7 @@ from nara.config import Settings
 from nara.filters import org_passes, title_passes
 from nara.g2b.list_api import NoticeItem, iter_notices
 from nara.runlog import RunCounters
-from nara.store import ensure_project, upsert_notice, upsert_org
+from nara.store import ensure_project, promote_focus_orgs, upsert_notice, upsert_org
 
 
 def _accepts(item: NoticeItem, settings: Settings) -> bool:
@@ -34,6 +34,8 @@ def collect_range(
 ) -> int:
     """기간 안의 공고를 수집한다. 새로 넣은 건수를 돌려준다."""
     now = datetime.now().isoformat(timespec="seconds")
+    # 설정에 관심기관을 더했으면 이미 등록된 기관도 여기서 관심으로 올린다.
+    promote_focus_orgs(conn, settings)
     added = 0
     for item in iter_notices(client, api_key, begin, end):
         counters.processed += 1

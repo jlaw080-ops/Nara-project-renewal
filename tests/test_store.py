@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -7,7 +8,7 @@ from nara.config import load_settings
 from nara.db import connect, migrate
 from nara.g2b.list_api import NoticeItem
 from nara.runlog import run_log
-from nara.store import ensure_project, last_run, upsert_notice, upsert_org
+from nara.store import ensure_project, last_run, promote_focus_orgs, upsert_notice, upsert_org
 
 SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
 NOW = "2026-09-17T09:00:00"
@@ -52,6 +53,21 @@ def test_upsert_org_assigns_weekday_group_to_rest_agency(conn):
     row = conn.execute("SELECT tier, weekday_group FROM org WHERE id = ?", (org_id,)).fetchone()
     assert row["tier"] == "rest"
     assert row["weekday_group"] in {1, 2, 3, 4, 5}
+
+
+def test_orgs_added_to_the_focus_list_later_are_promoted(conn):
+    """관심기관을 설정에 나중에 넣어도 이미 비관심으로 등록된 기관이 관심으로 바뀐다."""
+    before = replace(SETTINGS, focus_orgs=())  # 서울이 목록에 없던 때
+    seoul = upsert_org(conn, "서울특별시 종로구", before, NOW)
+    other = upsert_org(conn, "강원특별자치도 강릉시", before, NOW)
+    other_group = conn.execute("SELECT weekday_group FROM org WHERE id = ?", (other,)).fetchone()[0]
+
+    assert promote_focus_orgs(conn, SETTINGS) == 1
+    row = conn.execute("SELECT tier, weekday_group FROM org WHERE id = ?", (seoul,)).fetchone()
+    assert (row["tier"], row["weekday_group"]) == ("focus", None)
+    row = conn.execute("SELECT tier, weekday_group FROM org WHERE id = ?", (other,)).fetchone()
+    assert (row["tier"], row["weekday_group"]) == ("rest", other_group)
+    assert promote_focus_orgs(conn, SETTINGS) == 0
 
 
 def test_upsert_org_is_idempotent(conn):

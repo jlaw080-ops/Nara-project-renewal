@@ -1,5 +1,6 @@
 import json
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from nara.collect import collect_range
 from nara.config import Secrets, load_settings
 from nara.db import connect, migrate
 from nara.runlog import RunCounters
+from nara.store import upsert_org
 
 SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
 BEGIN = datetime(2026, 9, 1)
@@ -137,6 +139,18 @@ def test_a_renamed_change_notice_does_not_leave_an_empty_project(conn):
     assert [tuple(p) for p in projects] == [(projects[0]["id"], "완주 체육관 건축설계공모")]
     notice = conn.execute("SELECT project_id, title FROM notice").fetchone()
     assert tuple(notice) == (projects[0]["id"], "완주 체육관 건축설계 및 전시물설계 공모")
+
+
+def test_collect_promotes_orgs_that_joined_the_focus_list(conn):
+    """설정에 관심기관을 더한 뒤 첫 수집에서 기존 기관도 관심으로 바뀐다.
+
+    새 공고가 없는 기관도 바뀌어야 한다 — 낙찰·진행현황·실행부서 조회가 관심기관 기준이다.
+    """
+    upsert_org(conn, "서울특별시 미래한강본부", replace(SETTINGS, focus_orgs=()), "2026-09-01")
+    with _client([]) as client:
+        collect_range(conn, client, "KEY", SETTINGS, BEGIN, END, RunCounters())
+    tier = conn.execute("SELECT tier FROM org WHERE name = '서울특별시 미래한강본부'").fetchone()
+    assert tier[0] == "focus"
 
 
 def test_collect_range_counts_processed(conn):

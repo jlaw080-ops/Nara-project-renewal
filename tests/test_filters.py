@@ -75,6 +75,12 @@ def test_org_rejected_by_excluded_keyword(org):
         ("전라북도 전주시", True),
         ("경상북도 상주시", False),
         ("강원특별자치도 강릉시", False),
+        # 서울특별시 하나로 시와 25개 구를 모두 잡는다. 구 이름만 넣으면 다른 시의 구까지 잡힌다.
+        ("서울특별시", True),
+        ("서울특별시 강남구", True),
+        ("서울특별시 중구", True),
+        ("대구광역시 중구", False),
+        ("인천광역시 남동구", False),
     ],
 )
 def test_is_focus_org_matches_by_substring(org, expected):

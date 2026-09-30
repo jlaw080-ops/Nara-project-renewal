@@ -30,6 +30,21 @@ def upsert_org(conn: sqlite3.Connection, name: str, settings: Settings, now: str
     return org_id
 
 
+def promote_focus_orgs(conn: sqlite3.Connection, settings: Settings) -> int:
+    """설정에 나중에 더한 관심기관을 관심으로 올린다. 올린 기관 수를 돌려준다.
+
+    upsert_org는 이미 있는 기관을 건드리지 않는다. 그래서 관심기관을 설정에 더해도 전에
+    비관심으로 등록된 기관은 그대로 남아 낙찰·진행현황·실행부서 조회에서 빠진다.
+    """
+    rows = conn.execute("SELECT id, name FROM org WHERE tier = 'rest'").fetchall()
+    ids = [row["id"] for row in rows if is_focus_org(row["name"], settings)]
+    for org_id in ids:
+        conn.execute("UPDATE org SET tier = 'focus', weekday_group = NULL WHERE id = ?", (org_id,))
+    if ids:
+        conn.commit()
+    return len(ids)
+
+
 def ensure_project(conn: sqlite3.Connection, org_id: int, name: str, source: str, now: str) -> int:
     """같은 기관에 같은 이름의 사업이 있으면 그것을, 없으면 새로 만든다."""
     row = conn.execute(
