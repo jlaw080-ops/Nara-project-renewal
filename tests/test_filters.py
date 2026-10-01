@@ -14,6 +14,11 @@ SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
         "고창군 유아친화형 국민체육센터 건립사업 기본 및 실시설계 설계공모",
         "김제시 청소년 복합문화공간 조성사업 건축설계공모",
         "익산 청년문화센터 건립 건축설계 공모",
+        # 제외어가 낱말 안에 숨어 있는 건축 공고(2026-10-01 실데이터). '제설'은 '국제설계',
+        # '보도'는 '정보도서관', '거리'는 '사거리'에 들어 있어 제외어로 넣으면 이것들이 빠진다.
+        "영등포구 통합 신청사 국제설계공모",
+        "증산정보도서관 그린리모델링 설계 용역",
+        "터미널사거리 주차타워 조성사업 실시설계 용역 (P.Q후 가격입찰)",
     ],
 )
 def test_title_passes_for_building_design_notices(title):
@@ -21,8 +26,8 @@ def test_title_passes_for_building_design_notices(title):
 
 
 def test_title_passes_when_a_near_miss_keyword_appears():
-    """제외어는 부분 문자열로만 걸린다. '숲길'은 제외어지만 '도시숲'은 아니다."""
-    assert title_passes("2026년 도시숲 조성사업 실시설계 용역", SETTINGS) is True
+    """제외어는 부분 문자열로만 걸린다. '숲가꾸기'는 제외어지만 '숲 체험관'은 아니다."""
+    assert title_passes("OO 숲 체험관 건립 실시설계 용역", SETTINGS) is True
 
 
 def test_title_passes_when_keyword_is_a_prefix_only():
@@ -37,6 +42,11 @@ def test_title_passes_when_keyword_is_a_prefix_only():
         "학교 기숙사 신축 실시설계용역",  # 기숙사
         "OO지구 지방하천 정비 실시설계",  # 지방하천
         "상수도 관망 정비 실시설계용역",  # 상수도
+        "2026년 교통사고 잦은 곳 실시설계용역(1구역)",  # 교통사고
+        "흑석 빗물펌프장 시설용량 증대 기본 및 실시설계 용역",  # 빗물펌프장
+        "매봉산 오르락(樂) 엘리베이터 설치 기본 및 실시설계 용역",  # 오르락·엘리베이터
+        "암사역사공원 기후대응 도시숲 조성사업 실시설계용역",  # 도시숲
+        "올림픽대교 B램프 보수공사 실시설계 용역",  # 대교·램프·보수공사
     ],
 )
 def test_title_rejected_by_excluded_keyword(title):

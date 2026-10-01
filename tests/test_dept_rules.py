@@ -204,8 +204,14 @@ def test_general_affairs_stays_a_candidate():
 
 
 def test_the_procurement_call_center_is_not_a_department():
-    """서울 공고문 공통 문구의 '조달청 전자 조달센터'를 실행부서로 확정하면 안 된다(2026-10-01 사례)."""
-    boiler = "입찰서 제출 마감일 전일까지 등록하여야 합니다. ⟨문의처 : 조달청 전자 조달센터(☏ 1588-0000)⟩"
+    """서울 공고문 공통 문구의 '조달청 전자 조달센터'를 실행부서로 확정하면 안 된다.
+
+    2026-10-01 09시 슬롯에서 서울 사업 11건이 이렇게 잘못 확정됐다.
+    """
+    boiler = (
+        "입찰서 제출 마감일 전일까지 등록하여야 합니다. "
+        "⟨문의처 : 조달청 전자 조달센터(☏ 1588-0000)⟩"
+    )
     assert _names(boiler) == []
     assert decide_by_rule(find_candidates(boiler)) is None
     assert _names("문의처 : 조달청 정부조달콜센터 ☏ 1588-0000") == []
