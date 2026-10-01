@@ -219,3 +219,79 @@ def test_the_procurement_call_center_is_not_a_department():
     # 진짜 문의처는 그대로 찾는다
     real = f"{boiler}\n[ 문의처 ] 1. 과업에 관한 사항 : 강남구 공간개발과(☎02-000-0000)"
     assert decide_by_rule(find_candidates(real)).name == "공간개발과"
+
+
+def test_more_nouns_joined_by_and_are_not_departments():
+    """'~과'로 이어진 보통 명사(2026-10-01 서울 검토 후보 사례). 입찰금액과만 38건이었다."""
+    phrases = [
+        "G2B 입찰금액과 산출내역서",
+        "가격입찰금액과 가격투찰금액과 같아야",
+        "기술능력과 경영상태를 평가",
+        "학식과 경험이 풍부한",
+        "관계법령과 측량법과 지침",
+        "현장여건과 설계기준과 작성방법과 일치",
+        "감독관과 감독원과 감독과 협의하여",
+        "수량, 품질과 노무",
+        "계약상대자의 공정과 계획",
+        "평가자료는 성실과 신의의 원칙",
+        "인간의 존엄과 가치",
+        "한글, 영문과 아라비아 숫자",
+        "본 입찰서 제출 집행과 관련하여",
+        "수혜주민과 발주청과 협의",
+        "원가계산프로그램과 설계도서내역과 과업내용과 함께",
+        "에너지 절약과 갖춤과 재질과",
+        "심사위원과 심사평과 연구진과",
+        "화천군과 협의하여",
+    ]
+    for phrase in phrases:
+        assert _after_cue(phrase) == ["건축과"], phrase
+
+
+def test_more_cut_off_words_are_not_departments():
+    """실적·실측·실태의 '실', 단가·단위의 '단', 중소기업의 '소'에서 낱말을 자르지 않는다."""
+    phrases = [
+        "사업수행실적 및 용역수행실적",
+        "최근 준공실적",
+        "국가유산실측설계업 등록",
+        "시중노임단가와 표준단가 적용단가",
+        "국제단위계 사용",
+        "규정에따라중소기업제품",
+        "선진사례의 개발실태",
+    ]
+    for phrase in phrases:
+        assert _after_cue(phrase) == ["건축과"], phrase
+
+
+def test_ordinary_words_and_places_are_not_departments():
+    """허위사실·위험요소·명단과 업체 영업소·매표소·상황실·조리실·치료실은 부서가 아니다."""
+    phrases = [
+        "허위사실 기재 시",
+        "건설기술요소 및 위험요소",
+        "심사위원명단 공개",
+        "재무비율선택시기준비율은한국엔지니어링협회",
+        "법인등기부상 주된영업소 및 영업소 소재지",
+        "매표소 이전",
+        "종합상황실 및 재난안전상황실, 기획상황실",
+        "조리실과 재활치료실",
+    ]
+    for phrase in phrases:
+        assert _after_cue(phrase) == ["건축과"], phrase
+
+
+def test_real_seoul_departments_stay_candidates():
+    """서울시 실·과 이름은 그대로 후보다 — 재난안전실, 신속통합기획과."""
+    assert "재난안전실" in _names("사업부서: 서울특별시 재난안전실 도로계획과")
+    assert _names("문의처: 서울특별시 신속통합기획과 (☎ 02-000-0000)") == ["신속통합기획과"]
+
+
+def test_a_department_in_a_later_sentence_than_the_cue_is_not_confirmed():
+    """신호어와 같은 문장 안에 있어야 확정한다(2026-10-01 성북구 사례).
+
+    '담당부서'는 앞 문장의 말이고, 지리정보담당관은 다음 문장의 지도 제작 부서다.
+    """
+    text = (
+        "자치구(도시계획 담당부서)와 협의하여 축척을 결정 작성한다. 마. 수치현황도 참조 "
+        "지형측량 성과표는 서울시(지리정보담당관)에서 제작한 수치지형도를 검토"
+    )
+    assert decide_by_rule(find_candidates(text)) is None
+    assert _names(text) == ["지리정보담당관"]  # 후보로는 남는다
