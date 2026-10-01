@@ -201,3 +201,15 @@ def test_a_name_that_starts_with_a_number_is_kept_whole_and_left_for_review():
 def test_general_affairs_stays_a_candidate():
     """구청 총무과는 입찰 창구일 때가 많지만 사업을 맡기도 한다 — 빼지 않고 사람이 고른다."""
     assert "총무과" in _names("사업관련 문의: 총무과 (031-000-0000)")
+
+
+def test_the_procurement_call_center_is_not_a_department():
+    """서울 공고문 공통 문구의 '조달청 전자 조달센터'를 실행부서로 확정하면 안 된다(2026-10-01 사례)."""
+    boiler = "입찰서 제출 마감일 전일까지 등록하여야 합니다. ⟨문의처 : 조달청 전자 조달센터(☏ 1588-0000)⟩"
+    assert _names(boiler) == []
+    assert decide_by_rule(find_candidates(boiler)) is None
+    assert _names("문의처 : 조달청 정부조달콜센터 ☏ 1588-0000") == []
+    assert _names("문의처: 조달청 조달서비스센터") == []
+    # 진짜 문의처는 그대로 찾는다
+    real = f"{boiler}\n[ 문의처 ] 1. 과업에 관한 사항 : 강남구 공간개발과(☎02-000-0000)"
+    assert decide_by_rule(find_candidates(real)).name == "공간개발과"
