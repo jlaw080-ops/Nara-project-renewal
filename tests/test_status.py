@@ -983,3 +983,15 @@ def test_pending_still_filters_by_tier_with_the_lock(conn):
     conn.commit()
     ids = {row["id"] for row in pending_status_projects(conn, tier="focus", limit=100)}
     assert ids == {open_one}
+
+
+def test_pending_skips_hidden_projects(conn):
+    """사람이 목록에서 숨긴 사업은 판정에 뉴스 검색·Claude를 쓰지 않는다."""
+    kept = _project(conn, "전북특별자치도 완주군", "남긴 사업")
+    hidden = _project(conn, "전북특별자치도 완주군", "숨긴 사업")
+    conn.execute("UPDATE project SET hidden_at = ? WHERE id = ?", (NOW, hidden))
+    conn.commit()
+
+    rows = pending_status_projects(conn, tier=None, limit=10)
+
+    assert [r["id"] for r in rows] == [kept]

@@ -21,12 +21,14 @@ from nara.web.edit import (
     check_info,
     check_prices,
     check_verdict,
+    hide_projects,
     release_verdict,
     save_dept,
     save_energy,
     save_info,
     save_prices,
     save_verdict,
+    unhide_projects,
 )
 
 CURRENT = {
@@ -352,3 +354,37 @@ def test_save_prices_changes_only_new_prices_and_stamps_date_and_editor(db):
     assert changed == ["PV"]
     assert rows["PV"] == (2_600_000, "2026-10-02", uid)
     assert rows["BIPV"] == (5_000_000, "2026-09-16", None)
+
+
+def _hidden(path, pid):
+    conn = sqlite3.connect(path)
+    row = conn.execute(
+        "SELECT hidden_at, hidden_by, hidden_reason FROM project WHERE id = ?", (pid,)
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def test_hide_projects_records_when_who_and_why_and_logs_it(db):
+    path, pid = db
+    with closing(open_readwrite(path)) as conn:
+        assert hide_projects(conn, [pid], "도로 공사", NOW) == 1
+        assert hide_projects(conn, [pid], "다시", NOW) == 0  # 이미 숨긴 것은 그대로
+    assert _hidden(path, pid) == (NOW, None, "도로 공사")
+    assert _log(path)[-1] == ("hidden", None, "숨김: 도로 공사")
+
+
+def test_unhide_projects_brings_it_back_and_logs_it(db):
+    path, pid = db
+    with closing(open_readwrite(path)) as conn:
+        hide_projects(conn, [pid], "", NOW)
+        assert unhide_projects(conn, [pid], NOW) == 1
+        assert unhide_projects(conn, [pid], NOW) == 0
+    assert _hidden(path, pid) == (None, None, None)
+    assert _log(path)[-2:] == [("hidden", None, "숨김"), ("hidden", "숨김", None)]
+
+
+def test_hide_projects_ignores_unknown_ids(db):
+    path, _ = db
+    with closing(open_readwrite(path)) as conn:
+        assert hide_projects(conn, [99999], "x", NOW) == 0

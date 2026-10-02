@@ -23,6 +23,9 @@
   <label>실행부서
     <span><input type="checkbox" name="dept" value="review"{% if f.dept_review %} checked{% endif %}> 실행부서 검토 필요</span>
   </label>
+  <label>숨김
+    <span><input type="checkbox" name="hidden" value="1"{% if f.hidden %} checked{% endif %}> 숨긴 사업만</span>
+  </label>
   <label>이름 검색
     <input type="search" name="q" value="{{ f.q }}" placeholder="공고명 또는 사업명">
   </label>
@@ -54,8 +57,16 @@
 <ul class="notes">{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul>
 {% endif %}
 
+<form method="post" id="hide-form" action="{{ url_for('unhide' if f.hidden else 'hide') }}">
+<input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+<p class="hide-bar">
+{% if f.hidden %}<button type="submit">선택한 사업 숨김 풀기</button>
+{% else %}<label>숨기는 이유(선택) <input type="text" name="hide_reason" maxlength="200" placeholder="예: 도로 공사"></label>
+<button type="submit">선택한 사업 숨기기</button>{% endif %}
+<span class="muted">숨긴 사업은 목록·PDF에서 빠지고 자동 판정·실행부서 찾기를 건너뜁니다.</span></p>
 <div class="table-wrap"><table>
 <thead><tr>
+  <th><input type="checkbox" id="pick-all" aria-label="모두 고르기"></th>
   {{ sort_th("org", "수요기관") }}
   {{ sort_th("name", "사업명") }}
   {{ sort_th("notice_date", "공고일") }}
@@ -68,6 +79,7 @@
 <tbody>
 {% for r in result.rows %}
 <tr>
+  <td><input type="checkbox" name="pid" value="{{ r.id }}" aria-label="{{ r.name }} 고르기"></td>
   <td>{{ r.org_name }}</td>
   <td><a href="{{ url_for('detail', project_id=r.id) }}">{{ r.name }}</a>
     {% if r.matched_title %}<div class="muted">공고명: {{ r.matched_title }}</div>{% endif %}</td>
@@ -79,8 +91,14 @@
   <td>{{ r.energy|dash }}</td>
 </tr>
 {% else %}
-<tr><td colspan="8" class="muted">조건에 맞는 사업이 없습니다</td></tr>
+<tr><td colspan="9" class="muted">조건에 맞는 사업이 없습니다</td></tr>
 {% endfor %}
 </tbody>
 </table></div>
+</form>
+<script>
+document.getElementById("pick-all").addEventListener("change", function (e) {
+  document.querySelectorAll('#hide-form input[name=pid]').forEach(function (box) { box.checked = e.target.checked; });
+});
+</script>
 {% endblock %}

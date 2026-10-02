@@ -12,6 +12,7 @@ from flask import (
     Flask,
     abort,
     current_app,
+    flash,
     g,
     redirect,
     render_template,
@@ -54,6 +55,7 @@ CONFLICT_BY = "그사이 {}님이 고쳤습니다. 지금 값을 확인하고 �
 CONFLICT = "그사이 값이 바뀌었습니다. 지금 값을 확인하고 다시 저장하세요"
 BLANK_ENERGY_ROWS = 3
 ENERGY_SOURCES = tuple(dict.fromkeys(k.source for k in ENERGY_KINDS))
+MAX_ID = 2**63 - 1
 SESSION_LIFETIME = timedelta(days=14)
 PUBLIC_ENDPOINTS = {"login", "static"}
 PASSWORD_ENDPOINTS = {"change_password", "logout"}
@@ -86,6 +88,8 @@ def _conditions(f: Filters, org_names: dict[int, str]) -> list[str]:
     parts.extend(f.verdicts)
     if f.dept_review:
         parts.append("실행부서 검토 필요")
+    if f.hidden:
+        parts.append("숨긴 사업만")
     return parts
 
 
@@ -112,6 +116,34 @@ def _safe_next(raw: str | None) -> str:
     if target.startswith("/") and not target.startswith(("//", "/\\")):
         return target
     return "/"
+
+
+def _project_ids(raw: list[str]) -> list[int]:
+    """체크한 사업 id. 숫자가 아니거나 범위를 넘는 값은 버린다 — 없는 id와 같다."""
+    return [int(v) for v in raw if v.isdigit() and int(v) <= MAX_ID]
+
+
+def _set_hidden(project_ids: list[int], hide: bool, reason: str = "") -> int | None:
+    """숨기거나 푼 건수. 수집이 DB를 쓰고 있어 못 했으면 None."""
+    now = datetime.now().isoformat(timespec="seconds")
+    try:
+        with closing(_rw_conn()) as conn:
+            if hide:
+                return edit.hide_projects(conn, project_ids, reason, now, g.user.id)
+            return edit.unhide_projects(conn, project_ids, now, g.user.id)
+    except sqlite3.OperationalError as exc:
+        if "locked" not in str(exc):
+            raise
+        return None
+
+
+def _flash_hidden(count: int | None, hide: bool) -> None:
+    if count is None:
+        flash(BUSY_MESSAGE)
+    elif hide:
+        flash(f"{count}건을 숨겼습니다" if count else "숨길 사업이 없습니다")
+    else:
+        flash(f"{count}건의 숨김을 풀었습니다" if count else "숨김을 풀 사업이 없습니다")
 
 
 def _current_user() -> auth.User | None:
@@ -412,6 +444,32 @@ def create_app(
             )
             return page, 503
         return redirect(url_for("prices", saved="·".join(changed) or "-"))
+
+    @app.post("/hide")
+    def hide():
+        count = _set_hidden(
+            _project_ids(request.form.getlist("pid")), True, request.form.get("hide_reason", "")
+        )
+        _flash_hidden(count, True)
+        return redirect(_safe_next(request.form.get("next")))
+
+    @app.post("/unhide")
+    def unhide():
+        count = _set_hidden(_project_ids(request.form.getlist("pid")), False)
+        _flash_hidden(count, False)
+        return redirect(_safe_next(request.form.get("next")))
+
+    @app.post("/project/<int:project_id>/hide")
+    def hide_one(project_id: int):
+        count = _set_hidden([project_id], True, request.form.get("hide_reason", ""))
+        _flash_hidden(count, True)
+        return redirect(url_for("detail", project_id=project_id))
+
+    @app.post("/project/<int:project_id>/unhide")
+    def unhide_one(project_id: int):
+        count = _set_hidden([project_id], False)
+        _flash_hidden(count, False)
+        return redirect(url_for("detail", project_id=project_id))
 
     @app.post("/project/<int:project_id>/release")
     def release(project_id: int):

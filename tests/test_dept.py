@@ -411,3 +411,15 @@ def test_enrich_dept_refuses_an_unknown_tier(tmp_path):
         cli.app, ["enrich", "dept", "--tier", "x", "--db", str(tmp_path / "n.db")]
     )
     assert result.exit_code == 1
+
+
+def test_hidden_projects_are_not_looked_up(db):
+    """숨긴 사업은 첨부를 받지 않는다. 숨김을 풀면 다시 대상이 된다."""
+    _project(db, 1, bid_no="B1")
+    _project(db, 2, bid_no="B2")
+    db.execute("UPDATE project SET hidden_at = ? WHERE id = 2", (NOW,))
+    db.commit()
+    assert [r["id"] for r in pending_dept_projects(db, None, None, 300)] == [1]
+    db.execute("UPDATE project SET hidden_at = NULL WHERE id = 2")
+    db.commit()
+    assert [r["id"] for r in pending_dept_projects(db, None, None, 300)] == [1, 2]

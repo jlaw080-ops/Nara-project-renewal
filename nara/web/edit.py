@@ -409,6 +409,55 @@ def last_editor(conn: sqlite3.Connection, project_id: int, section: str) -> str 
     return row[0] if row else None
 
 
+def _hidden_label(reason: str | None) -> str:
+    return f"숨김: {reason}" if reason else "숨김"
+
+
+def hide_projects(
+    conn: sqlite3.Connection,
+    project_ids: list[int],
+    reason: str,
+    now: str,
+    user_id: int | None = None,
+) -> int:
+    """목록에서 숨긴다. 이미 숨긴 사업·없는 id는 건드리지 않는다. 숨긴 건수를 돌려준다."""
+    reason = reason.strip()[:TEXT_LIMIT] or None
+    hidden = 0
+    with conn:
+        for pid in project_ids:
+            cur = conn.execute(
+                "UPDATE project SET hidden_at = ?, hidden_by = ?, hidden_reason = ? "
+                "WHERE id = ? AND hidden_at IS NULL",
+                (now, user_id, reason, pid),
+            )
+            if cur.rowcount:
+                _log(conn, pid, "hidden", None, _hidden_label(reason), now, user_id)
+                hidden += 1
+    return hidden
+
+
+def unhide_projects(
+    conn: sqlite3.Connection, project_ids: list[int], now: str, user_id: int | None = None
+) -> int:
+    """숨김을 푼다. 다시 목록에 나오고 자동 판정·부서 찾기 대상이 된다."""
+    shown = 0
+    with conn:
+        for pid in project_ids:
+            row = conn.execute(
+                "SELECT hidden_reason FROM project WHERE id = ? AND hidden_at IS NOT NULL", (pid,)
+            ).fetchone()
+            if row is None:
+                continue
+            conn.execute(
+                "UPDATE project SET hidden_at = NULL, hidden_by = NULL, hidden_reason = NULL "
+                "WHERE id = ?",
+                (pid,),
+            )
+            _log(conn, pid, "hidden", _hidden_label(row["hidden_reason"]), None, now, user_id)
+            shown += 1
+    return shown
+
+
 def save_prices(
     conn: sqlite3.Connection, prices: Mapping[str, int], today: str, user_id: int | None = None
 ) -> list[str]:

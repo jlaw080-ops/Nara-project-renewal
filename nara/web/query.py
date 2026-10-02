@@ -26,6 +26,7 @@ class Filters:
     date_to: str = ""
     verdicts: tuple[str, ...] = ()
     dept_review: bool = False
+    hidden: bool = False  # True면 숨긴 사업만, 아니면 숨긴 사업을 뺀다
     sort: str = DEFAULT_SORT
     desc: bool = True
 
@@ -119,6 +120,7 @@ def parse_filters(args: Mapping[str, list[str]]) -> tuple[Filters, list[str]]:
         date_to=date_to,
         verdicts=verdicts,
         dept_review=_first(args, "dept") == "review",
+        hidden=_first(args, "hidden") == "1",
         sort=sort,
         desc=_first(args, "desc") != "0",
     )
@@ -145,6 +147,8 @@ def to_args(f: Filters) -> dict[str, list[str]]:
         args["verdict"] = list(f.verdicts)
     if f.dept_review:
         args["dept"] = ["review"]
+    if f.hidden:
+        args["hidden"] = ["1"]
     args["sort"] = [f.sort]
     args["desc"] = ["1" if f.desc else "0"]
     return args
@@ -225,8 +229,12 @@ def like_pattern(text: str) -> str:
     return f"%{escaped}%"
 
 
+def hidden_clause(f: Filters) -> str:
+    return "p.hidden_at IS NOT NULL" if f.hidden else "p.hidden_at IS NULL"
+
+
 def _where(f: Filters, include_dates: bool) -> tuple[str, list]:
-    clauses: list[str] = []
+    clauses: list[str] = [hidden_clause(f)]
     params: list = []
     if f.orgs:
         clauses.append(f"p.org_id IN ({', '.join('?' * len(f.orgs))})")
@@ -255,7 +263,7 @@ def _where(f: Filters, include_dates: bool) -> tuple[str, list]:
         clauses.append(f"({' OR '.join(parts)})")
     if f.dept_review:
         clauses.append("(lr.project_id IS NOT NULL AND ld.exec_dept IS NULL)")
-    return (" WHERE " + " AND ".join(clauses)) if clauses else "", params
+    return " WHERE " + " AND ".join(clauses), params
 
 
 def _order(f: Filters) -> tuple[str, list]:
@@ -309,6 +317,5 @@ def build_excluded_query(f: Filters) -> tuple[str, list] | None:
     if not f.has_date:
         return None
     where_sql, params = _where(f, include_dates=False)
-    joiner = " AND " if where_sql else " WHERE "
-    sql = _LATEST + "SELECT COUNT(*)" + _FROM + where_sql + joiner + "ln.bid_no IS NULL"
+    sql = _LATEST + "SELECT COUNT(*)" + _FROM + where_sql + " AND ln.bid_no IS NULL"
     return sql, params

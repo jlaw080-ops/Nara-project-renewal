@@ -11,6 +11,15 @@
 {% if saved == '-' %}<p class="saved">바뀐 값이 없습니다</p>
 {% elif saved %}<p class="saved">바꾼 칸: {{ saved }}</p>{% endif %}
 {% if released %}<p class="saved">자동 판정에 다시 맡겼습니다</p>{% endif %}
+{% if d.project.hidden_at %}
+<div class="saved">목록에서 숨긴 사업 — {{ d.project.hidden_at[:10] }} · {{ d.project.hidden_by_name or '—' }}{% if d.project.hidden_reason %} · {{ d.project.hidden_reason }}{% endif %}. 자동 판정·실행부서 찾기를 건너뜁니다.
+  <form method="post" class="inline" action="{{ url_for('unhide_one', project_id=d.project.id) }}"><button type="submit">숨김 풀기</button></form></div>
+{% else %}
+<form method="post" class="hide-one" action="{{ url_for('hide_one', project_id=d.project.id) }}">
+  <label>숨기는 이유(선택) <input type="text" name="hide_reason" maxlength="200"></label>
+  <button type="submit">목록에서 숨기기</button>
+</form>
+{% endif %}
 {% if errors.get('_form') %}<p class="bad">{{ errors['_form'] }}</p>{% endif %}
 
 <h2>사업{{ edit_link('info') }}</h2>

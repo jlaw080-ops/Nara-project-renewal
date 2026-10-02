@@ -110,7 +110,8 @@ def pending_dept_projects(
         f"  (SELECT MAX(d.checked_at) FROM dept_check d WHERE d.project_id = p.id AND {_AUTO})",
         "    AS last_auto",
         "FROM project p JOIN org o ON o.id = p.org_id",
-        "WHERE EXISTS (SELECT 1 FROM notice n WHERE n.project_id = p.id)",
+        "WHERE p.hidden_at IS NULL",
+        "  AND EXISTS (SELECT 1 FROM notice n WHERE n.project_id = p.id)",
         "  AND NOT EXISTS (SELECT 1 FROM dept_check d WHERE d.project_id = p.id",
         "                  AND d.confirmed = 1 AND COALESCE(d.exec_dept, '') != '')",
     ]

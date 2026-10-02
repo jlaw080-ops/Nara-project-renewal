@@ -15,6 +15,7 @@ from nara.web.query import (
     build_count_query,
     build_excluded_query,
     build_list_query,
+    hidden_clause,
 )
 
 _SQLITE_MAX_INT = 2**63 - 1
@@ -75,7 +76,7 @@ def list_projects(conn: sqlite3.Connection, f: Filters) -> ListResult:
     matched는 상한과 관계없는 진짜 건수다. rows가 그보다 적으면 잘린 것이고,
     그 사실을 truncated로 돌려준다 — 화면이 "1,000건만 표시합니다"라고 적는다.
     """
-    total = conn.execute("SELECT COUNT(*) FROM project").fetchone()[0]
+    total = conn.execute(f"SELECT COUNT(*) FROM project p WHERE {hidden_clause(f)}").fetchone()[0]
     matched = conn.execute(*build_count_query(f)).fetchone()[0]
     rows = conn.execute(*build_list_query(f)).fetchall()
     excluded_query = build_excluded_query(f)
@@ -300,8 +301,9 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
         # URL의 정수는 상한이 없다. SQLite 범위를 넘기면 바인딩에서 터진다.
         return None
     project = conn.execute(
-        "SELECT p.*, o.name AS org_name FROM project p JOIN org o ON o.id = p.org_id "
-        "WHERE p.id = ?",
+        "SELECT p.*, o.name AS org_name, u.name AS hidden_by_name "
+        "FROM project p JOIN org o ON o.id = p.org_id "
+        "LEFT JOIN app_user u ON u.id = p.hidden_by WHERE p.id = ?",
         (project_id,),
     ).fetchone()
     if project is None:

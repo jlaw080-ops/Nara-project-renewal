@@ -22,7 +22,10 @@ CREATE TABLE IF NOT EXISTS project (
   guide_equip TEXT,
   note        TEXT,
   created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
+  updated_at  TEXT NOT NULL,
+  hidden_at     TEXT,                           -- 사람이 목록에서 숨긴 때. NULL이면 보임
+  hidden_by     INTEGER REFERENCES app_user(id),
+  hidden_reason TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_project_org ON project(org_id);
 

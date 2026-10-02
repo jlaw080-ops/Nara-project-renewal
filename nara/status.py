@@ -48,8 +48,9 @@ def pending_status_projects(
     params: list[object] = []
     # 최신 판정이 사람 판정이면 건너뛴다(잠금). release·imported가 그 위에 쌓이면 다시 본다.
     conditions = [
+        "p.hidden_at IS NULL",
         "COALESCE((SELECT l.decided_by FROM status_check l WHERE l.project_id = p.id "
-        "ORDER BY l.checked_at DESC, l.id DESC LIMIT 1), '') != 'human'"
+        "ORDER BY l.checked_at DESC, l.id DESC LIMIT 1), '') != 'human'",
     ]
     if tier:
         conditions.append("o.tier = ?")

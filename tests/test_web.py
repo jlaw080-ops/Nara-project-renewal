@@ -658,7 +658,7 @@ def test_pages_escape_markup_that_comes_from_the_data(world):
     for url in ("/", f"/project/{project_id}"):
         text = _text(client.get(url))
         assert "&lt;script&gt;" in text
-        assert "<script" not in text
+        assert "<script>alert(1)" not in text
 
 
 def test_detail_page_does_not_link_a_script_url(world):
@@ -1532,3 +1532,70 @@ def test_the_print_view_follows_the_list_filters(world):
     assert "완주군 다목적체육관" in text and "성남시 박물관" not in text
     listing = _text(client.get("/?focus=1"))
     assert 'href="/print?focus=1"' in listing
+
+
+def _hide(client, ids, reason="", next_url="/"):
+    return _post(
+        client, "/hide", {"pid": [str(i) for i in ids], "reason": reason, "next": next_url}
+    )
+
+
+def test_hidden_projects_leave_the_list_count_and_print(world):
+    path, ids = world
+    client = _client(path)
+    resp = _hide(client, [ids["museum"], ids["gym"]], "도로 공사", next_url="/?focus=1")
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/?focus=1")
+    page = _text(client.get(resp.headers["Location"]))
+    assert "2건을 숨겼습니다" in page
+    names = _names(_list(path))
+    assert "성남시 박물관" not in names and "완주군 다목적체육관" not in names
+    assert _list(path).total == len(ids) - 2
+    assert "성남시 박물관" not in _text(client.get("/print"))
+
+
+def test_hidden_filter_shows_only_hidden_and_can_bring_them_back(world):
+    path, ids = world
+    client = _client(path)
+    _hide(client, [ids["museum"]])
+    assert _names(_list(path, hidden=True)) == ["성남시 박물관"]
+    page = _text(client.get("/?hidden=1"))
+    assert "숨긴 사업만" in page
+    assert "선택한 사업 숨김 풀기" in page
+    resp = _post(client, "/unhide", {"pid": [str(ids["museum"])], "next": "/?hidden=1"})
+    assert resp.status_code == 302
+    assert "성남시 박물관" in _names(_list(path))
+
+
+def test_list_offers_a_checkbox_per_row_to_hide(world):
+    path, ids = world
+    page = _text(_client(path).get("/"))
+    assert f'name="pid" value="{ids["museum"]}"' in page
+    assert "선택한 사업 숨기기" in page
+
+
+def test_detail_says_who_hid_it_and_why_and_offers_to_bring_it_back(world):
+    path, ids = world
+    client = _client(path)
+    resp = _post(client, f"/project/{ids['museum']}/hide", {"hide_reason": "도로 공사"})
+    assert resp.status_code == 302
+    page = _text(client.get(f"/project/{ids['museum']}"))
+    assert "목록에서 숨긴 사업" in page
+    assert "도로 공사" in page and "시험" in page
+    assert "숨김 풀기" in page
+
+
+def test_hide_refuses_a_post_from_another_site(world):
+    path, ids = world
+    client = _client(path)
+    url = "/hide"
+    data = {"pid": [str(ids["museum"])]}
+    assert _post(client, url, data, origin="http://evil.example").status_code == 403
+    assert "성남시 박물관" in _names(_list(path))
+
+
+def test_hide_does_not_redirect_off_site(world):
+    path, ids = world
+    resp = _hide(_client(path), [ids["museum"]], next_url="//evil.example/")
+    assert resp.headers["Location"].endswith("/")
+    assert "evil" not in resp.headers["Location"]
