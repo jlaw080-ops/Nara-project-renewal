@@ -188,6 +188,12 @@ lr AS (
 )
 """
 
+# 목록의 신재생 계획 칸: "PV 21.96kW, BIPV 72.6kW". 입력 순서(id)대로, 없으면 NULL.
+_ENERGY = (
+    "(SELECT group_concat(printf('%s %gkW', e.source_type, e.capacity_kw), ', ' ORDER BY e.id)"
+    " FROM energy_plan e WHERE e.project_id = p.id)"
+)
+
 _FROM = """
 FROM project p
 JOIN org o ON o.id = p.org_id
@@ -280,7 +286,7 @@ def build_list_query(f: Filters) -> tuple[str, list]:
         + "SELECT p.id, o.name AS org_name, p.name, ln.title AS notice_title, "
         + "ln.notice_date, ln.open_date, ls.verdict, ls.decided_by AS verdict_by, a.winner, "
         + "ld.exec_dept, (lr.project_id IS NOT NULL AND ld.exec_dept IS NULL) AS dept_review, "
-        + "p.zeb_grade, "
+        + f"{_ENERGY} AS energy, "
         + f"{matched_sql} AS matched_title"
         + _FROM
         + where_sql

@@ -62,7 +62,7 @@
   {{ sort_th("verdict", "진행현황") }}
   <th>낙찰업체</th>
   <th>실행부서</th>
-  <th>ZEB</th>
+  <th>신재생 계획</th>
 </tr></thead>
 <tbody>
 {% for r in result.rows %}
@@ -75,7 +75,7 @@
   <td>{{ r.verdict or no_verdict }}{% if r.verdict_by == 'human' %} <span class="muted">(사람)</span>{% endif %}</td>
   <td>{{ r.winner|dash }}</td>
   <td>{% if r.exec_dept %}{{ r.exec_dept }}{% elif r.dept_review %}<span class="muted">검토 필요</span>{% else %}—{% endif %}</td>
-  <td>{{ r.zeb_grade|dash }}</td>
+  <td>{{ r.energy|dash }}</td>
 </tr>
 {% else %}
 <tr><td colspan="8" class="muted">조건에 맞는 사업이 없습니다</td></tr>

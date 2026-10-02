@@ -1353,3 +1353,25 @@ def test_attachment_download_never_leaves_the_folder(world):
     client = _client(path)
     assert client.get(f"/attachment/{aid}").status_code == 404
     assert client.get("/attachment/999999").status_code == 404
+
+
+def test_the_list_shows_the_renewable_plan_instead_of_zeb(world):
+    """목록에서 볼 것은 ZEB 등급이 아니라 신재생 계획이다 — 에너지원과 용량을 입력 순서대로."""
+    path, ids = world
+    conn = connect(path)
+    for source, kw in (("PV", 21.96), ("BIPV", 72.6), ("지열", 50.0)):
+        conn.execute(
+            "INSERT INTO energy_plan (project_id, source_type, capacity_kw, entered_by, "
+            "updated_at) VALUES (?, ?, ?, 'imported', ?)",
+            (ids["gym"], source, kw, NOW),
+        )
+    conn.execute("UPDATE project SET zeb_grade = '3등급' WHERE id = ?", (ids["gym"],))
+    conn.commit()
+    conn.close()
+    rows = {r["id"]: r for r in _list(path).rows}
+    assert rows[ids["gym"]]["energy"] == "PV 21.96kW, BIPV 72.6kW, 지열 50kW"
+    assert rows[ids["culture"]]["energy"] is None
+    text = _text(_client(path).get("/"))
+    assert "<th>신재생 계획</th>" in text and "<th>ZEB</th>" not in text
+    assert "PV 21.96kW, BIPV 72.6kW, 지열 50kW" in text
+    assert "3등급" not in text
