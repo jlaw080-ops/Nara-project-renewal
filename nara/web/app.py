@@ -34,6 +34,7 @@ from nara.web.data import (
     open_readonly,
     open_readwrite,
     org_options,
+    print_rows,
     project_detail,
 )
 from nara.web.query import (
@@ -306,6 +307,13 @@ def create_app(
             verdict_choices=VERDICT_CHOICES,
             no_verdict=NO_VERDICT,
         )
+
+    @app.get("/print")
+    def print_list():
+        """목록 조건 그대로 시트 양식(A4 가로) 인쇄 화면. 브라우저 인쇄로 PDF를 만든다."""
+        f, _ = parse_filters({k: request.args.getlist(k) for k in request.args})
+        rows, result = print_rows(get_conn(), f)
+        return render_template("print.html", rows=rows, result=result)
 
     @app.get("/project/<int:project_id>")
     def detail(project_id: int):

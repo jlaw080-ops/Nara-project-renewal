@@ -1375,3 +1375,71 @@ def test_the_list_shows_the_renewable_plan_instead_of_zeb(world):
     assert "<th>신재생 계획</th>" in text and "<th>ZEB</th>" not in text
     assert "PV 21.96kW, BIPV 72.6kW, 지열 50kW" in text
     assert "3등급" not in text
+
+
+PRINT_HEADERS = [
+    "수요기관", "공고명", "주소", "공고일(예정일)", "낙찰일(개찰일)", "착공일", "준공(예정)일",
+    "담당부서", "부서장", "직위", "전화번호", "낙찰업체 설계사무소", "설치계획내용",
+    "신재생에너지원별 예상가", "진행현황",
+]  # fmt: skip
+
+
+def _print_world(path, ids):
+    conn = connect(path)
+    conn.execute(
+        "UPDATE project SET address = '전북 완주군 봉동읍 1', start_date = '2026-05-01', "
+        "end_date = '2027-12-31' WHERE id = ?",
+        (ids["gym"],),
+    )
+    conn.execute(
+        "INSERT INTO dept_check (project_id, exec_dept, head_tel, decided_by, confirmed, "
+        "checked_at) VALUES (?, '체육시설과', '063-000-0000', 'imported', 1, ?)",
+        (ids["gym"], NOW),
+    )
+    _verdict(conn, ids["gym"], BEFORE, when="2026-09-28T09:00:00", reason="26.09 착공 예정")
+    for source, kw in (("PV", 20.0), ("풍력", 10.0)):
+        conn.execute(
+            "INSERT INTO energy_plan (project_id, source_type, capacity_kw, entered_by, "
+            "updated_at) VALUES (?, ?, ?, 'imported', ?)",
+            (ids["gym"], source, kw, NOW),
+        )
+    conn.commit()
+    conn.close()
+
+
+def test_the_print_view_lays_out_the_sheet_columns(world):
+    """사업 조회를 시트 양식 그대로 15칸 A4 가로 표로 출력한다(2026-10-02 사용자 양식)."""
+    path, ids = world
+    _print_world(path, ids)
+    text = _text(_client(path).get("/print"))
+    headers = [
+        re.sub(r"<[^>]+>", "", h).strip() for h in re.findall(r"<th\b[^>]*>(.*?)</th>", text, re.S)
+    ]
+    assert headers == PRINT_HEADERS
+    for value in (
+        "전북 완주군 봉동읍 1",
+        "2026-05-01",
+        "2027-12-31",
+        "체육시설과",
+        "063-000-0000",
+        "태양광 고정식: 20.000 kW",
+        "풍력: 10.000 kW",
+        "PV 50,000,000원",
+        "합계 50,000,000원",
+        "단가 없음: 풍력",
+        f"{BEFORE} - 26.09 착공 예정",
+        "가건축",  # 복지관 낙찰업체
+    ):
+        assert value in text, value
+    assert "size: A4 landscape" in text
+    assert "window.print()" in text
+
+
+def test_the_print_view_follows_the_list_filters(world):
+    """목록에서 건 조건 그대로 출력한다 — 관심기관만 걸면 성남시 사업은 빠진다."""
+    path, ids = world
+    client = _client(path)
+    text = _text(client.get("/print?focus=1"))
+    assert "완주군 다목적체육관" in text and "성남시 박물관" not in text
+    listing = _text(client.get("/?focus=1"))
+    assert 'href="/print?focus=1"' in listing

@@ -42,7 +42,8 @@
 </form>
 
 <p><strong>{{ result.total }}건 중 {{ result.matched }}건</strong>
-{% if conditions %}<span class="muted">조건: {{ conditions|join(' · ') }}</span>{% endif %}</p>
+{% if conditions %}<span class="muted">조건: {{ conditions|join(' · ') }}</span>{% endif %}
+<a href="{{ url_for('print_list') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}" target="_blank" rel="noopener">PDF로 출력</a></p>
 {% if result.excluded_no_notice %}
 <p class="muted">공고일 조건이 걸려 공고가 없는 사업 {{ result.excluded_no_notice }}건이 제외되었습니다</p>
 {% endif %}

@@ -189,6 +189,78 @@ def _energy(conn: sqlite3.Connection, project_id: int) -> tuple[list[EnergyLine]
     return lines, total, unpriced
 
 
+# 출력 양식(시트)의 설치계획 표기. DB는 짧은 이름(PV)으로 둔다.
+ENERGY_LABELS = {
+    "PV": "태양광 고정식",
+    "BIPV": "태양광 BIPV",
+    "PEMFC": "연료전지 PEMFC",
+    "SOFC": "연료전지 SOFC",
+}
+
+
+@dataclass(frozen=True)
+class PrintRow:
+    """출력 양식 한 줄. 부서장·직위는 아직 DB에 없어 칸만 둔다."""
+
+    org_name: str
+    name: str
+    address: str | None
+    notice_date: str | None
+    open_date: str | None
+    start_date: str | None
+    end_date: str | None
+    dept: str | None
+    dept_tel: str | None
+    winner: str | None
+    plan: list[str]
+    costs: list[str]
+    total: int
+    unpriced: list[str]
+    status: str
+
+
+def _print_row(conn: sqlite3.Connection, row: sqlite3.Row) -> PrintRow:
+    pid = row["id"]
+    project = conn.execute(
+        "SELECT address, start_date, end_date FROM project WHERE id = ?", (pid,)
+    ).fetchone()
+    tel = conn.execute(
+        "SELECT head_tel FROM dept_check WHERE project_id = ? AND confirmed = 1 "
+        "AND COALESCE(exec_dept, '') != '' ORDER BY checked_at DESC, id DESC LIMIT 1",
+        (pid,),
+    ).fetchone()
+    history = _history(conn, pid)
+    reason = history[0].reason if history and history[0].verdict == row["verdict"] else ""
+    status = f"{row['verdict']} - {reason}" if row["verdict"] and reason else row["verdict"] or ""
+    lines, total, unpriced = _energy(conn, pid)
+    return PrintRow(
+        org_name=row["org_name"],
+        name=row["name"],
+        address=project["address"],
+        notice_date=row["notice_date"],
+        open_date=row["open_date"],
+        start_date=project["start_date"],
+        end_date=project["end_date"],
+        dept=row["exec_dept"],
+        dept_tel=tel["head_tel"] if tel else None,
+        winner=row["winner"],
+        plan=[
+            f"{ENERGY_LABELS.get(e.source_type, e.source_type)}: {e.capacity_kw:.3f} kW"
+            for e in lines
+        ],
+        costs=[f"{e.source_type} {e.cost:,}원" for e in lines if e.cost is not None],
+        total=total,
+        unpriced=unpriced,
+        status=status,
+    )
+
+
+def print_rows(conn: sqlite3.Connection, f: Filters) -> tuple[list[PrintRow], ListResult]:
+    """목록과 같은 조건·순서로 출력 양식 줄을 만든다. 상한(1,000건)도 목록과 같다."""
+    result = list_projects(conn, f)
+    return [_print_row(conn, row) for row in result.rows], result
+
+
 def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail | None:
     """한 사업의 전부. 없는 id면 None."""
     if project_id > _SQLITE_MAX_INT:
