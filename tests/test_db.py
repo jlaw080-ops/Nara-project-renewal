@@ -39,6 +39,7 @@ def test_migrate_seeds_unit_prices(tmp_path):
         "지열": 2_500_000,
         "PEMFC": 32_000_000,
         "SOFC": 98_250_000,
+        "집광채광": 1_000_000,
     }
 
 

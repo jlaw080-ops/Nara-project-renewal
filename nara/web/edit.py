@@ -9,13 +9,12 @@ from dataclasses import dataclass
 from datetime import date
 from itertools import zip_longest
 
-from nara.energy import EnergyItem
+from nara.energy import EnergyItem, kind_of
 from nara.sheet_memory import FIELD_LABELS, PROJECT_FIELDS, canonical, energy_value
 from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN
 
 TEXT_LIMIT = 200
 LONG_TEXT_LIMIT = 2000
-SOURCE_LIMIT = 50
 EDIT_VERDICTS = (BEFORE, BUILDING, DONE, UNKNOWN)
 INFO_FORM = (
     ("address", "주소", "text"),
@@ -139,31 +138,52 @@ def check_dept(
     return Checked({"exec_dept": exec_dept, "snippet": snippet or None}, errors)
 
 
-def check_energy(sources: list[str], capacities: list[str]) -> Checked:
-    """줄마다 에너지원과 용량. 둘 다 빈 줄은 건너뛴다 — 빈 줄로 줄을 지운다."""
+def check_energy(sources: list[str], kinds: list[str], capacities: list[str]) -> Checked:
+    """줄마다 에너지원·형식·용량. 셋 다 빈 줄은 건너뛴다 — 빈 줄로 줄을 지운다.
+
+    형식(kinds)의 값은 저장할 이름(PV 등)이다. 고른 에너지원의 형식이어야 한다.
+    """
     items: list[EnergyItem] = []
     errors: dict[str, str] = {}
     seen: set[str] = set()
-    for i, (raw_source, raw_capacity) in enumerate(zip_longest(sources, capacities, fillvalue="")):
-        source, capacity_text = raw_source.strip(), raw_capacity.strip()
-        if not source and not capacity_text:
+    rows = zip_longest(sources, kinds, capacities, fillvalue="")
+    for i, (raw_source, raw_kind, raw_capacity) in enumerate(rows):
+        source, code, capacity_text = raw_source.strip(), raw_kind.strip(), raw_capacity.strip()
+        if not source and not code and not capacity_text:
             continue
         if not source:
-            errors[f"source-{i}"] = "에너지원을 적으세요"
+            errors[f"source-{i}"] = "에너지원을 고르세요"
             continue
-        if len(source) > SOURCE_LIMIT:
-            errors[f"source-{i}"] = f"{SOURCE_LIMIT}자까지 적을 수 있습니다"
+        kind = kind_of(code)
+        if kind is None or kind.source != source:
+            errors[f"kind-{i}"] = "형식을 고르세요"
             continue
-        if source in seen:
-            errors[f"source-{i}"] = "같은 에너지원이 두 줄입니다"
+        if code in seen:
+            errors[f"kind-{i}"] = "같은 형식이 두 줄입니다"
             continue
         capacity = _positive(capacity_text, errors, f"capacity-{i}")
         if capacity is None:
             errors.setdefault(f"capacity-{i}", "0보다 큰 숫자로 적으세요")
             continue
-        seen.add(source)
-        items.append(EnergyItem(source, capacity))
+        seen.add(code)
+        items.append(EnergyItem(code, capacity))
     return Checked({"items": items}, errors)
+
+
+def check_prices(codes: list[str], prices: list[str]) -> Checked:
+    """단가(원/kW). 정해진 에너지원마다 1 이상의 정수."""
+    values: dict[str, int] = {}
+    errors: dict[str, str] = {}
+    for code, raw in zip_longest(codes, prices, fillvalue=""):
+        if kind_of(code) is None:
+            errors["_form"] = "모르는 에너지원이 있습니다"
+            continue
+        text = raw.strip().replace(",", "")
+        if not text.isdigit() or int(text) < 1:
+            errors[f"price-{code}"] = "1 이상의 정수로 적으세요"
+            continue
+        values[code] = int(text)
+    return Checked({"prices": values}, errors)
 
 
 def _log(
@@ -387,3 +407,23 @@ def last_editor(conn: sqlite3.Connection, project_id: int, section: str) -> str 
         (project_id, *fields),
     ).fetchone()
     return row[0] if row else None
+
+
+def save_prices(
+    conn: sqlite3.Connection, prices: Mapping[str, int], today: str, user_id: int | None = None
+) -> list[str]:
+    """바뀐 단가만 고치고 적용일·고친 사람을 남긴다. 바뀐 이름을 돌려준다."""
+    current = dict(conn.execute("SELECT source_type, price_per_kw FROM energy_unit_price"))
+    changed = [code for code, price in prices.items() if current.get(code) != price]
+    if not changed:
+        return []
+    with conn:
+        for code in changed:
+            conn.execute(
+                "INSERT INTO energy_unit_price (source_type, price_per_kw, effective_from, "
+                "updated_by) VALUES (?, ?, ?, ?) ON CONFLICT(source_type) DO UPDATE SET "
+                "price_per_kw = excluded.price_per_kw, effective_from = excluded.effective_from, "
+                "updated_by = excluded.updated_by",
+                (code, prices[code], today, user_id),
+            )
+    return changed

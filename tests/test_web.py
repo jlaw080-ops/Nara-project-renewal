@@ -811,26 +811,115 @@ def test_department_can_be_picked_from_a_candidate(world):
     assert tuple(row) == ("체육진흥과", "human")
 
 
+def _energy_codes(path, project_id):
+    conn = connect(path)
+    rows = conn.execute(
+        "SELECT source_type, capacity_kw FROM energy_plan WHERE project_id = ? ORDER BY id",
+        (project_id,),
+    ).fetchall()
+    conn.close()
+    return [tuple(r) for r in rows]
+
+
 def test_energy_form_adds_and_removes_lines(world):
     path, ids = world
     client = _client(path)
     url = f"/project/{ids['gym']}/edit/energy"
-    client.post(
+    _post(
+        client,
         url,
-        data={"source": ["PV", "지열", ""], "capacity": ["20", "10", ""]},
-        headers={"Origin": "http://localhost"},
+        {
+            "source": ["태양광", "지열", ""],
+            "kind": ["PV", "지열", ""],
+            "capacity": ["20", "10", ""],
+        },
     )
-    client.post(
-        url,
-        data={"source": ["PV", ""], "capacity": ["20", ""]},
-        headers={"Origin": "http://localhost"},
+    _post(client, url, {"source": ["태양광", ""], "kind": ["PV", ""], "capacity": ["20", ""]})
+    assert _energy_codes(path, ids["gym"]) == [("PV", 20.0)]
+
+
+def test_energy_form_offers_each_form_with_its_source_and_price(world):
+    """화면이 고른 에너지원의 형식만 남기고 용량 × 단가를 바로 보여 주려면 둘 다 있어야 한다."""
+    path, ids = world
+    client = _client(path)
+    _post(
+        client,
+        f"/project/{ids['gym']}/edit/energy",
+        {"source": ["태양광"], "kind": ["BIPV"], "capacity": ["20"]},
     )
-    conn = connect(path)
-    rows = conn.execute(
-        "SELECT source_type FROM energy_plan WHERE project_id = ?", (ids["gym"],)
-    ).fetchall()
-    conn.close()
-    assert [r[0] for r in rows] == ["PV"]
+    text = _text(client.get(f"/project/{ids['gym']}?edit=energy"))
+    assert re.search(r'<option value="태양광" selected>태양광</option>', text)
+    assert re.search(
+        r'<option value="BIPV" data-source="태양광" data-price="5000000" selected>BIPV</option>',
+        text,
+    )
+    assert 'data-source="태양광" data-price="1000000">집광채광</option>' in text
+    assert 'data-source="지열" data-price="2500000">수직밀폐형</option>' in text
+
+
+def test_energy_form_keeps_a_wrong_pair_and_says_why(world):
+    path, ids = world
+    resp = _post(
+        _client(path),
+        f"/project/{ids['gym']}/edit/energy",
+        {"source": ["지열"], "kind": ["PV"], "capacity": ["7"]},
+    )
+    assert resp.status_code == 422
+    text = _text(resp)
+    assert "형식을 고르세요" in text
+    assert 'value="7"' in text
+    assert _energy_codes(path, ids["gym"]) == []
+
+
+def test_detail_shows_source_form_capacity_and_installation_cost(world):
+    path, ids = world
+    client = _client(path)
+    _post(
+        client,
+        f"/project/{ids['gym']}/edit/energy",
+        {"source": ["태양광"], "kind": ["집광채광"], "capacity": ["10"]},
+    )
+    text = _text(client.get(f"/project/{ids['gym']}"))
+    assert "<th>에너지원</th><th>형식</th><th>용량</th><th>설치비</th>" in text
+    row = r"<td>태양광</td><td>집광채광</td><td>10(\.0)? kW</td><td>10,000,000원</td>"
+    assert re.search(row, text)
+
+
+def test_price_page_lists_every_kind_and_is_linked_from_every_page(world):
+    path, _ = world
+    client = _client(path)
+    assert 'href="/prices"' in _text(client.get("/"))
+    text = _text(client.get("/prices"))
+    assert re.search(r"<td>태양광</td><td>집광채광</td>\s*<td>.*value=\"1,000,000\"", text)
+    assert text.count('name="price"') == 6
+
+
+def test_changing_a_price_changes_every_estimate(world):
+    path, ids = world
+    client = _client(path)
+    _post(
+        client,
+        f"/project/{ids['gym']}/edit/energy",
+        {"source": ["태양광"], "kind": ["PV"], "capacity": ["10"]},
+    )
+    codes = ["BIPV", "PV", "집광채광", "지열", "PEMFC", "SOFC"]
+    prices = ["5,000,000", "3,000,000", "1,000,000", "2,500,000", "32,000,000", "98,250,000"]
+    resp = _post(client, "/prices", {"code": codes, "price": prices})
+    assert resp.status_code == 302
+    page = _text(client.get(resp.headers["Location"]))
+    assert "단가를 고쳤습니다: PV" in page
+    assert "<td>30,000,000원</td>" in _text(client.get(f"/project/{ids['gym']}"))
+
+
+def test_a_bad_price_is_shown_again_with_the_reason(world):
+    path, _ = world
+    codes = ["BIPV", "PV", "집광채광", "지열", "PEMFC", "SOFC"]
+    prices = ["5,000,000", "abc", "1,000,000", "2,500,000", "32,000,000", "98,250,000"]
+    resp = _post(_client(path), "/prices", {"code": codes, "price": prices})
+    assert resp.status_code == 422
+    text = _text(resp)
+    assert "1 이상의 정수로 적으세요" in text
+    assert 'value="abc"' in text
 
 
 def test_a_post_from_another_site_is_refused(world):
@@ -1126,7 +1215,7 @@ def test_a_fresh_version_saves_normally(world):
     version = _version(client, pid, "energy")
     resp = client.post(
         f"/project/{pid}/edit/energy",
-        data={"source": ["PV"], "capacity": ["20"], "version": version},
+        data={"source": ["태양광"], "kind": ["PV"], "capacity": ["20"], "version": version},
         headers=ORIGIN,
     )
     assert resp.status_code == 302

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
-from nara.energy import EnergyItem, estimate_cost
+from nara.energy import ENERGY_KINDS, EnergyItem, EnergyKind, estimate_cost
 from nara.sheet_memory import FIELD_LABELS
 from nara.store import last_run
 from nara.web.query import (
@@ -193,9 +193,42 @@ def _energy(conn: sqlite3.Connection, project_id: int) -> tuple[list[EnergyLine]
 ENERGY_LABELS = {
     "PV": "태양광 고정식",
     "BIPV": "태양광 BIPV",
+    "집광채광": "태양광 집광채광",
+    "지열": "지열 수직밀폐형",
     "PEMFC": "연료전지 PEMFC",
     "SOFC": "연료전지 SOFC",
 }
+
+
+@dataclass(frozen=True)
+class UnitPrice:
+    kind: EnergyKind
+    price: int | None
+    effective_from: str | None
+    updated_by: str | None
+
+
+def unit_prices(conn: sqlite3.Connection) -> list[UnitPrice]:
+    """단가 화면의 줄. 에너지원·형식 목록 순서대로, 단가가 없으면 None."""
+    rows = {
+        r["source_type"]: r
+        for r in conn.execute(
+            "SELECT p.source_type, p.price_per_kw, p.effective_from, u.name "
+            "FROM energy_unit_price p LEFT JOIN app_user u ON u.id = p.updated_by"
+        )
+    }
+    out = []
+    for kind in ENERGY_KINDS:
+        r = rows.get(kind.code)
+        out.append(
+            UnitPrice(
+                kind,
+                r["price_per_kw"] if r else None,
+                r["effective_from"] if r else None,
+                r["name"] if r else None,
+            )
+        )
+    return out
 
 
 @dataclass(frozen=True)

@@ -19,11 +19,13 @@ from nara.web.edit import (
     check_dept,
     check_energy,
     check_info,
+    check_prices,
     check_verdict,
     release_verdict,
     save_dept,
     save_energy,
     save_info,
+    save_prices,
     save_verdict,
 )
 
@@ -130,22 +132,48 @@ def test_check_dept_rejects_an_empty_department_and_an_unknown_candidate():
     assert "exec_dept" in check_dept({"pick": "²", "exec_dept": ""}, {7: ("과", None)}).errors
 
 
-def test_check_energy_reads_lines_and_skips_blank_ones():
-    checked = check_energy(["PV", "지열", ""], ["20", "1,000.5", ""])
-    assert checked.values["items"] == [EnergyItem("PV", 20.0), EnergyItem("지열", 1000.5)]
+def test_check_energy_turns_source_and_form_into_the_stored_code():
+    checked = check_energy(["태양광", "지열", ""], ["BIPV", "지열", ""], ["20", "1,000.5", ""])
+    assert checked.values["items"] == [EnergyItem("BIPV", 20.0), EnergyItem("지열", 1000.5)]
 
 
 def test_check_energy_allows_an_empty_plan():
     """줄을 다 비우면 계획을 지운다."""
-    assert check_energy(["", ""], ["", ""]).values["items"] == []
+    assert check_energy(["", ""], ["", ""], ["", ""]).values["items"] == []
+
+
+def test_check_energy_rejects_a_form_of_another_source():
+    """화면 스크립트가 꺼져 있으면 형식 목록이 좁혀지지 않는다. 서버가 짝을 다시 본다."""
+    checked = check_energy(["지열", "태양광"], ["PV", "풍력"], ["5", "5"])
+    assert checked.errors == {"kind-0": "형식을 고르세요", "kind-1": "형식을 고르세요"}
 
 
 def test_check_energy_rejects_duplicates_and_bad_capacity():
-    checked = check_energy(["PV", "PV", "지열", ""], ["20", "30", "nan", "5"])
+    checked = check_energy(
+        ["태양광", "태양광", "지열", "", "태양광"],
+        ["PV", "PV", "지열", "", "BIPV"],
+        ["20", "30", "nan", "5", ""],
+    )
     assert checked.errors == {
-        "source-1": "같은 에너지원이 두 줄입니다",
+        "kind-1": "같은 형식이 두 줄입니다",
         "capacity-2": "0보다 큰 숫자로 적으세요",
-        "source-3": "에너지원을 적으세요",
+        "source-3": "에너지원을 고르세요",
+        "capacity-4": "0보다 큰 숫자로 적으세요",
+    }
+
+
+def test_check_prices_reads_won_per_kw_for_every_kind():
+    checked = check_prices(["PV", "BIPV"], ["2,600,000", "5000000"])
+    assert checked.values["prices"] == {"PV": 2_600_000, "BIPV": 5_000_000}
+
+
+def test_check_prices_rejects_blank_fractional_and_unknown():
+    checked = check_prices(["PV", "BIPV", "SOFC", "풍력"], ["", "1.5", "0", "1"])
+    assert checked.errors == {
+        "price-PV": "1 이상의 정수로 적으세요",
+        "price-BIPV": "1 이상의 정수로 적으세요",
+        "price-SOFC": "1 이상의 정수로 적으세요",
+        "_form": "모르는 에너지원이 있습니다",
     }
 
 
@@ -303,3 +331,24 @@ def test_confirming_an_imported_candidate_records_a_human_row_but_no_web_edit(db
         ).fetchone()
     assert latest[0] == "human"
     assert _log(path) == []
+
+
+def test_save_prices_changes_only_new_prices_and_stamps_date_and_editor(db):
+    path, _ = db
+    with closing(open_readwrite(path)) as conn:
+        uid = conn.execute(
+            "INSERT INTO app_user (email, name, password_hash, created_at) "
+            "VALUES ('a@example.com', '갑', 'x', ?)",
+            (NOW,),
+        ).lastrowid
+        changed = save_prices(conn, {"PV": 2_600_000, "BIPV": 5_000_000}, "2026-10-02", uid)
+        rows = {
+            r["source_type"]: tuple(r)[1:]
+            for r in conn.execute(
+                "SELECT source_type, price_per_kw, effective_from, updated_by "
+                "FROM energy_unit_price"
+            )
+        }
+    assert changed == ["PV"]
+    assert rows["PV"] == (2_600_000, "2026-10-02", uid)
+    assert rows["BIPV"] == (5_000_000, "2026-09-16", None)

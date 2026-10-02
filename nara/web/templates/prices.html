@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}단가 관리{% endblock %}
+{% block body %}
+<h1>단가 관리</h1>
+<p class="muted">설치비 = 용량(kW) × 단가(원/kW). 단가를 바꾸면 모든 사업의 설치비가 새 단가로 다시 계산됩니다.</p>
+{% if saved == '-' %}<p class="saved">바뀐 단가가 없습니다</p>
+{% elif saved %}<p class="saved">단가를 고쳤습니다: {{ saved }}</p>{% endif %}
+{% if errors.get('_form') %}<p class="field-error">{{ errors['_form'] }}</p>{% endif %}
+<form method="post" action="{{ url_for('prices') }}">
+<div class="table-wrap"><table>
+<thead><tr><th>에너지원</th><th>형식</th><th>단가(원/kW)</th><th>적용일</th><th>고친 사람</th></tr></thead>
+<tbody>
+{% for r in rows %}
+<tr><td>{{ r.kind.source }}</td><td>{{ r.kind.form }}</td>
+<td><input type="hidden" name="code" value="{{ r.kind.code }}"><input type="text" class="price-input" name="price" inputmode="numeric" aria-label="{{ r.kind.source }} {{ r.kind.form }} 단가" value="{{ form.get(r.kind.code, '{:,}'.format(r.price) if r.price is not none else '') }}">{% if errors.get('price-' ~ r.kind.code) %} <span class="field-error">{{ errors['price-' ~ r.kind.code] }}</span>{% endif %}</td>
+<td>{{ r.effective_from|dash }}</td><td>{{ r.updated_by|dash }}</td></tr>
+{% endfor %}
+</tbody>
+</table></div>
+<p><button type="submit">저장</button></p>
+</form>
+{% endblock %}

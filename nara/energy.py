@@ -3,10 +3,36 @@
 import re
 from dataclasses import dataclass
 
+
+@dataclass(frozen=True)
+class EnergyKind:
+    source: str  # 에너지원
+    form: str  # 형식
+    code: str  # energy_plan·energy_unit_price에 적는 이름
+
+
+# 단가표(원/kW) 시트의 에너지원·형식. 입력 화면은 이 목록에서만 고른다.
+ENERGY_KINDS = (
+    EnergyKind("태양광", "BIPV", "BIPV"),
+    EnergyKind("태양광", "PV", "PV"),
+    EnergyKind("태양광", "집광채광", "집광채광"),
+    EnergyKind("지열", "수직밀폐형", "지열"),
+    EnergyKind("연료전지", "PEMFC", "PEMFC"),
+    EnergyKind("연료전지", "SOFC", "SOFC"),
+)
+_BY_CODE = {k.code: k for k in ENERGY_KINDS}
+
+
+def kind_of(code: str) -> EnergyKind | None:
+    return _BY_CODE.get(code)
+
+
 # 긴 표기를 먼저 바꿔야 '태양광 BIPV'가 PV로 새지 않는다.
 _ALIASES = (
     ("태양광 BIPV", "BIPV"),
     ("태양광BIPV", "BIPV"),
+    ("태양광 집광채광", "집광채광"),
+    ("태양광집광채광", "집광채광"),
     ("연료전지 PEMFC", "PEMFC"),
     ("연료전지 SOFC", "SOFC"),
     ("태양광 고정식", "PV"),
@@ -17,7 +43,7 @@ _ALIASES = (
 )
 
 # (?<![A-Z]) 로 BIPV 안의 PV를 걸러낸다.
-_TOKEN = re.compile(r"(BIPV|(?<![A-Z])PV|지열|PEMFC|SOFC)\s*:?\s*([\d,]+(?:\.\d*)?)")
+_TOKEN = re.compile(r"(BIPV|(?<![A-Z])PV|지열|PEMFC|SOFC|집광채광)\s*:?\s*([\d,]+(?:\.\d*)?)")
 
 
 @dataclass(frozen=True)

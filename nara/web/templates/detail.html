@@ -149,22 +149,59 @@
 {% if edit == 'energy' %}
 <form method="post" class="edit-form" action="{{ url_for('save', project_id=d.project.id, section='energy') }}">
   <input type="hidden" name="version" value="{{ versions['energy'] }}">
-  <p class="muted">줄을 비우면 지워집니다. 빈 줄에 적으면 더해집니다.</p>
-  {% for source, capacity in energy_rows %}
+  <p class="muted">줄을 비우면 지워집니다. 빈 줄에 적으면 더해집니다. 설치비는 용량 × <a href="{{ url_for('prices') }}">단가</a>입니다.</p>
+  {% for source, kind, capacity in energy_rows %}
   <div class="energy-row">
-    <label>에너지원 <input type="text" name="source" value="{{ source }}">{{ err('source-' ~ loop.index0) }}</label>
+    <label>에너지원 <select name="source" class="energy-source">
+      <option value="">고르세요</option>
+      {% for s in energy_sources %}<option value="{{ s }}"{% if s == source %} selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>{{ err('source-' ~ loop.index0) }}</label>
+    <label>형식 <select name="kind" class="energy-kind">
+      <option value="">고르세요</option>
+      {% for k in energy_kinds %}<option value="{{ k.code }}" data-source="{{ k.source }}" data-price="{{ prices.get(k.code) or '' }}"{% if k.code == kind %} selected{% endif %}>{{ k.form }}</option>
+      {% endfor %}
+    </select>{{ err('kind-' ~ loop.index0) }}</label>
     <label>용량(kW) <input type="text" name="capacity" value="{{ capacity }}" inputmode="decimal">{{ err('capacity-' ~ loop.index0) }}</label>
+    <p class="energy-cost-box">설치비 <output class="energy-cost">-</output></p>
   </div>
   {% endfor %}
   {{ buttons() }}
 </form>
+<script>
+(function () {
+  // 고른 에너지원의 형식만 남기고, 용량 × 단가를 바로 보인다. 저장할 때 서버가 다시 검사·계산한다.
+  function update(row) {
+    var source = row.querySelector(".energy-source").value;
+    var kind = row.querySelector(".energy-kind");
+    Array.prototype.forEach.call(kind.options, function (o) {
+      var other = o.value !== "" && o.dataset.source !== source;
+      o.hidden = other;
+      o.disabled = other;
+    });
+    if (kind.selectedOptions[0] && kind.selectedOptions[0].disabled) { kind.value = ""; }
+    var opt = kind.selectedOptions[0];
+    var cap = parseFloat(row.querySelector("[name=capacity]").value.replace(/,/g, ""));
+    var price = opt && opt.dataset.price ? Number(opt.dataset.price) : NaN;
+    var out = row.querySelector(".energy-cost");
+    if (opt && opt.value && !opt.dataset.price) { out.textContent = "단가 없음"; }
+    else if (cap > 0 && price > 0) { out.textContent = Math.round(cap * price).toLocaleString("ko-KR") + "원"; }
+    else { out.textContent = "-"; }
+  }
+  document.querySelectorAll(".energy-row").forEach(function (row) {
+    row.addEventListener("input", function () { update(row); });
+    row.addEventListener("change", function () { update(row); });
+    update(row);
+  });
+})();
+</script>
 {% endif %}
 {% if d.energy %}
 <div class="table-wrap"><table>
-<thead><tr><th>에너지원</th><th>용량</th><th>예상가</th></tr></thead>
+<thead><tr><th>에너지원</th><th>형식</th><th>용량</th><th>설치비</th></tr></thead>
 <tbody>
 {% for e in d.energy %}
-<tr><td>{{ e.source_type }}</td><td>{{ e.capacity_kw }} kW</td><td>{{ e.cost|won }}</td></tr>
+{% set k = kind_of(e.source_type) %}<tr><td>{{ k.source if k else e.source_type }}</td><td>{{ k.form if k else '-' }}</td><td>{{ e.capacity_kw }} kW</td><td>{{ e.cost|won }}</td></tr>
 {% endfor %}
 </tbody>
 </table></div>

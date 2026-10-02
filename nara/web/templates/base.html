@@ -41,7 +41,9 @@
   .edit-form textarea { font: inherit; border: 1px solid var(--field-line); padding: 8px; }
   .edit-form fieldset { border: 1px solid var(--line); padding: 8px 12px; }
   .edit-form .choice { flex-direction: row; align-items: baseline; gap: 8px; }
-  .energy-row { display: flex; flex-wrap: wrap; gap: 12px; }
+  .energy-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  .energy-cost-box { margin: 0; min-height: 44px; display: flex; align-items: center; gap: 4px; }
+  .price-input { text-align: right; width: 12rem; }
   .field-error { color: var(--bad); font-size: 12px; }
   .saved { border-left: 4px solid var(--link); padding: 8px 12px; background: var(--head); }
   .account { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin: 0; }
@@ -60,7 +62,7 @@
 </head>
 <body>
 {% if g.user %}
-<div class="account muted">{{ g.user.name }} · <a href="{{ url_for('change_password') }}">비밀번호 바꾸기</a>
+<div class="account muted"><a href="{{ url_for('index') }}">사업 조회</a> · <a href="{{ url_for('prices') }}">단가 관리</a> · {{ g.user.name }} · <a href="{{ url_for('change_password') }}">비밀번호 바꾸기</a>
   <form method="post" class="inline" action="{{ url_for('logout') }}"><button type="submit">로그아웃</button></form></div>
 {% endif %}
 {% block body %}{% endblock %}

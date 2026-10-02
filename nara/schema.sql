@@ -109,7 +109,8 @@ CREATE INDEX IF NOT EXISTS idx_energy_project ON energy_plan(project_id);
 CREATE TABLE IF NOT EXISTS energy_unit_price (
   source_type    TEXT PRIMARY KEY,
   price_per_kw   INTEGER NOT NULL,
-  effective_from TEXT
+  effective_from TEXT,
+  updated_by     INTEGER REFERENCES app_user(id)  -- 웹에서 고친 사람. 처음 값은 NULL
 );
 
 CREATE TABLE IF NOT EXISTS run_log (
@@ -174,4 +175,5 @@ INSERT OR IGNORE INTO energy_unit_price (source_type, price_per_kw, effective_fr
   ('PV',     2500000,  '2026-09-16'),
   ('지열',   2500000,  '2026-09-16'),
   ('PEMFC',  32000000, '2026-09-16'),
-  ('SOFC',   98250000, '2026-09-16');
+  ('SOFC',   98250000, '2026-09-16'),
+  ('집광채광', 1000000,  '2026-10-02');

@@ -1,6 +1,6 @@
 import pytest
 
-from nara.energy import EnergyItem, estimate_cost, parse_energy_plan
+from nara.energy import ENERGY_KINDS, EnergyItem, estimate_cost, kind_of, parse_energy_plan
 
 PRICES = {
     "BIPV": 5_000_000,
@@ -71,3 +71,28 @@ def test_estimate_cost_matches_unit_price_tab_worked_example():
 
 def test_estimate_cost_skips_unknown_source():
     assert estimate_cost([EnergyItem("풍력", 100.0)], PRICES) == {}
+
+
+def test_energy_kinds_follow_the_unit_price_sheet():
+    """입력 화면의 에너지원·형식 목록. 단가표(원/kW) 시트와 같은 6가지다."""
+    assert [(k.source, k.form, k.code) for k in ENERGY_KINDS] == [
+        ("태양광", "BIPV", "BIPV"),
+        ("태양광", "PV", "PV"),
+        ("태양광", "집광채광", "집광채광"),
+        ("지열", "수직밀폐형", "지열"),
+        ("연료전지", "PEMFC", "PEMFC"),
+        ("연료전지", "SOFC", "SOFC"),
+    ]
+
+
+def test_kind_of_names_the_source_and_form_of_a_stored_code():
+    assert (kind_of("지열").source, kind_of("지열").form) == ("지열", "수직밀폐형")
+    assert kind_of("풍력") is None
+
+
+def test_parse_energy_plan_does_not_read_daylighting_as_pv():
+    """'태양광 집광채광'을 '태양광'(PV)으로 읽으면 단가가 2.5배로 잡힌다."""
+    assert parse_energy_plan("태양광 집광채광: 10kW PV: 5kW") == [
+        EnergyItem("집광채광", 10.0),
+        EnergyItem("PV", 5.0),
+    ]
