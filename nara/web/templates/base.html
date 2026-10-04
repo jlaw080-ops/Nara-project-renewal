@@ -64,7 +64,7 @@
 </head>
 <body>
 {% if g.user %}
-<div class="account muted"><a href="{{ url_for('index') }}">사업 조회</a> · <a href="{{ url_for('prices') }}">단가 관리</a> · {{ g.user.name }} · <a href="{{ url_for('change_password') }}">비밀번호 바꾸기</a>
+<div class="account muted"><a href="{{ url_for('index') }}">사업 조회</a> · <a href="{{ url_for('prices') }}">단가 관리</a> · <a href="{{ url_for('nr_list') }}">설치계획</a> · {{ g.user.name }} · <a href="{{ url_for('change_password') }}">비밀번호 바꾸기</a>
   <form method="post" class="inline" action="{{ url_for('logout') }}"><button type="submit">로그아웃</button></form></div>
 {% endif %}
 {% for m in get_flashed_messages() %}<p class="saved">{{ m }}</p>{% endfor %}

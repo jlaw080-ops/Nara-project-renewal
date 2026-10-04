@@ -28,15 +28,21 @@ from nara import auth
 from nara.config import Settings
 from nara.db import attachments_dir
 from nara.energy import EnergyKind, load_kinds
-from nara.nr_apply import ingest
+from nara.nr_apply import ignore_plan, ingest, link_plan
+from nara.nr_match import candidates
+from nara.nr_plan import load_energy
 from nara.runlog import run_log
 from nara.web import edit
 from nara.web.data import (
     BUSY_TIMEOUT_SECONDS,
+    NR_STATE_LABELS,
     DatabaseMissing,
     ProjectDetail,
     last_runs,
     list_projects,
+    nr_counts,
+    nr_plan_detail,
+    nr_rows,
     open_readonly,
     open_readwrite,
     org_options,
@@ -267,6 +273,7 @@ def create_app(
     app.config["ATTACH_DIR"] = attachments_dir(Path(db_path))
     app.add_template_filter(_dash, "dash")
     app.add_template_filter(_won, "won")
+    app.add_template_global(load_energy, "load_energy")
     # DNS 리바인딩으로 외부 페이지가 이 화면을 읽지 못하게 한다.
     # 사내망 공유(lan_hosts)는 http라 host와 달리 Secure 쿠키·프록시 설정을 켜지 않는다.
     app.config["TRUSTED_HOSTS"] = [
@@ -378,6 +385,7 @@ def create_app(
             f=f,
             notes=notes,
             result=list_projects(conn, f),
+            nr_pending=nr_counts(conn).get("pending", 0),
             runs=last_runs(conn),
             orgs=orgs,
             conditions=_conditions(f, {o["id"]: o["name"] for o in orgs}),
@@ -509,6 +517,79 @@ def create_app(
                 raise
             return {"ok": False, "error": BUSY_MESSAGE}, 503
         return {"ok": True, "results": [asdict(r) for r in results]}
+
+    @app.get("/nr")
+    def nr_list():
+        state = request.args.get("state", "pending")
+        if state not in NR_STATE_LABELS:
+            state = "pending"
+        conn = get_conn()
+        return render_template(
+            "nr_list.html",
+            rows=nr_rows(conn, state),
+            state=state,
+            counts=nr_counts(conn),
+            labels=NR_STATE_LABELS,
+        )
+
+    @app.get("/nr/<int:plan_id>")
+    def nr_detail(plan_id: int):
+        conn = get_conn()
+        plan = nr_plan_detail(conn, plan_id)
+        if plan is None:
+            abort(404)
+        settings = current_app.config.get("SETTINGS")
+        aliases = dict(settings.nr_org_aliases) if settings else {}
+        found = candidates(
+            conn, plan["org_name"], plan["building_name"], plan["address"] or "", aliases
+        )
+        return render_template(
+            "nr_detail.html", plan=plan, candidates=found, labels=NR_STATE_LABELS
+        )
+
+    def _nr_write(plan_id: int, action):
+        """설치계획서 쓰기 공통. 잠금이면 이유를 띄우고 그 설치계획서로 돌아간다."""
+        settings = current_app.config.get("SETTINGS")
+        if settings is None:
+            abort(503)
+        now = datetime.now().isoformat(timespec="seconds")
+        try:
+            with closing(_rw_conn()) as conn:
+                return action(conn, settings, now)
+        except LookupError:
+            abort(404)
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc):
+                raise
+            flash(BUSY_MESSAGE)
+            return redirect(url_for("nr_detail", plan_id=plan_id))
+
+    @app.post("/nr/<int:plan_id>/link")
+    def nr_link(plan_id: int):
+        raw = request.form.get("project_id", "").strip()
+        if request.form.get("new"):
+            target = None
+        elif raw.isdigit() and int(raw) <= MAX_ID:
+            target = int(raw)
+        else:
+            flash("연결할 사업 번호를 숫자로 적으세요")
+            return redirect(url_for("nr_detail", plan_id=plan_id))
+
+        def act(conn, settings, now):
+            pid = link_plan(conn, plan_id, target, settings, now)
+            flash("설치계획서를 이 사업에 연결했습니다")
+            return redirect(url_for("detail", project_id=pid))
+
+        return _nr_write(plan_id, act)
+
+    @app.post("/nr/<int:plan_id>/ignore")
+    def nr_ignore(plan_id: int):
+        def act(conn, settings, now):
+            ignore_plan(conn, plan_id)
+            flash("설치계획서를 무시했습니다")
+            return redirect(url_for("nr_list"))
+
+        return _nr_write(plan_id, act)
 
     @app.post("/hide")
     def hide():

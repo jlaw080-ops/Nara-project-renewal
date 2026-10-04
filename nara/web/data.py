@@ -11,6 +11,7 @@ from nara.energy import EnergyItem, EnergyKind, estimate_cost, load_kinds
 from nara.sheet_memory import FIELD_LABELS
 from nara.store import last_run
 from nara.web.query import (
+    LIST_LIMIT,
     Filters,
     build_count_query,
     build_excluded_query,
@@ -91,6 +92,7 @@ DECIDED_BY_LABELS = {
     "llm": "LLM",
     "human": "사람",
     "release": "잠금 해제",
+    "nr": "설치계획서",
 }
 
 
@@ -122,6 +124,7 @@ class ProjectDetail:
     locked: bool = False
     edits: list[dict] = ()
     attachments: list[sqlite3.Row] = ()
+    nr_plans: list[sqlite3.Row] = ()
 
 
 def safe_url(url: str | None) -> str:
@@ -360,6 +363,10 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
         locked=latest is not None and latest["decided_by"] == "human",
         edits=edits,
         attachments=attachments,
+        nr_plans=conn.execute(
+            "SELECT * FROM nr_plan WHERE project_id = ? ORDER BY updated_at DESC, id DESC",
+            (project_id,),
+        ).fetchall(),
     )
 
 
@@ -430,3 +437,33 @@ def org_options(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT id, name, tier FROM org ORDER BY tier = 'focus' DESC, name"
     ).fetchall()
+
+
+NR_STATE_LABELS = {
+    "pending": "확인 필요",
+    "auto": "자동 연결",
+    "new": "새 사업",
+    "human": "사람 연결",
+    "ignored": "무시",
+}
+_NR_SELECT = (
+    "SELECT n.*, p.name AS project_name FROM nr_plan n LEFT JOIN project p ON p.id = n.project_id "
+)
+
+
+def nr_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    rows = conn.execute("SELECT match_state, COUNT(*) FROM nr_plan GROUP BY match_state")
+    return {r[0]: r[1] for r in rows}
+
+
+def nr_rows(conn: sqlite3.Connection, state: str) -> list[sqlite3.Row]:
+    return conn.execute(
+        _NR_SELECT + "WHERE n.match_state = ? ORDER BY n.updated_at DESC, n.id DESC LIMIT ?",
+        (state, LIST_LIMIT),
+    ).fetchall()
+
+
+def nr_plan_detail(conn: sqlite3.Connection, plan_id: int) -> sqlite3.Row | None:
+    if plan_id > _SQLITE_MAX_INT:
+        return None
+    return conn.execute(_NR_SELECT + "WHERE n.id = ?", (plan_id,)).fetchone()

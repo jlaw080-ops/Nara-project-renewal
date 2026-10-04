@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}설치계획{% endblock %}
+{% block body %}
+<h1>설치계획</h1>
+<p class="muted">크롬 확장 프로그램이 신재생에너지센터에서 보낸 설치계획서입니다. 확인 필요 건은 사업을 골라 연결하세요.</p>
+<p>{% for key, label in labels.items() %}<a href="{{ url_for('nr_list', state=key) }}"{% if key == state %} aria-current="page"{% endif %}>{{ label }} {{ counts.get(key, 0) }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+<div class="table-wrap"><table>
+<thead><tr><th>기관명</th><th>건물명</th><th>준공예정일</th><th>연결된 사업</th><th>점수</th><th>받은 때</th></tr></thead>
+<tbody>
+{% for n in rows %}
+<tr><td>{{ n.org_name }}</td><td><a href="{{ url_for('nr_detail', plan_id=n.id) }}">{{ n.building_name }}</a></td>
+<td>{{ n.end_date|dash }}</td>
+<td>{% if n.project_id %}<a href="{{ url_for('detail', project_id=n.project_id) }}">{{ n.project_name }}</a>{% else %}—{% endif %}</td>
+<td>{{ '%.2f'|format(n.match_score) if n.match_score is not none else '—' }}</td><td>{{ n.updated_at[:10] }}</td></tr>
+{% else %}
+<tr><td colspan="6" class="muted">{{ labels[state] }} 설치계획서가 없습니다</td></tr>
+{% endfor %}
+</tbody>
+</table></div>
+{% endblock %}

@@ -18,6 +18,7 @@ from nara.cli import app as cli_app
 from nara.config import load_settings
 from nara.db import connect, migrate
 from nara.energy import kind_for
+from nara.nr_apply import ingest as nr_ingest
 from nara.store import ensure_project, upsert_org
 from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN
 from nara.web import edit
@@ -545,7 +546,7 @@ def _ensure_user(path, email=TEST_EMAIL, name="시험", password=TEST_PASSWORD):
 
 
 def _app(path, **config):
-    app = create_app(path, secret_key=SECRET)
+    app = create_app(path, secret_key=SECRET, settings=SETTINGS)
     app.testing = True
     app.config.update(config)
     return app
@@ -1619,3 +1620,99 @@ def test_a_kind_added_later_shows_in_the_form_and_the_price_page(world):
     prices = _text(client.get("/prices"))
     assert "<td>태양열</td><td>평판형</td>" in prices
     assert "단가 없음" in prices
+
+
+NR_ROW = {
+    "key": "2026-001",
+    "org": "전라북도 완주군",
+    "name": "완주 다목적체육관",
+    "addr": "",
+    "start": "2027-03-01",
+    "end": "2028-06-30",
+    "dept": "체육진흥과",
+    "energy": [{"source": "지열", "form": "수직밀폐형", "capacity_kw": 336.06}],
+}
+
+
+def _nr(path, *rows):
+    conn = connect(path)
+    try:
+        return nr_ingest(conn, list(rows), SETTINGS, NOW)
+    finally:
+        conn.close()
+
+
+def _plan_id(path, key):
+    conn = connect(path)
+    try:
+        return conn.execute("SELECT id FROM nr_plan WHERE key = ?", (key,)).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _second_gym(path, ids):
+    conn = connect(path)
+    org = conn.execute("SELECT org_id FROM project WHERE id = ?", (ids["gym"],)).fetchone()[0]
+    ensure_project(conn, org, "완주군 다목적체육관 리모델링", "g2b", NOW)
+    conn.close()
+
+
+def test_a_linked_plan_shows_on_the_project_page(world):
+    path, ids = world
+    [result] = _nr(path, NR_ROW)
+    assert result.project_id == ids["gym"]
+    page = _text(_client(path).get(f"/project/{ids['gym']}"))
+    assert "<h2>설치계획서</h2>" in page
+    assert "2026-001" in page and "지열 수직밀폐형 336.06 kW" in page
+    assert "설치계획서" in page and "체육진흥과" in page
+
+
+def test_a_pending_plan_is_counted_on_the_list_and_listed_on_the_plan_page(world):
+    path, ids = world
+    _second_gym(path, ids)
+    _nr(path, NR_ROW)
+    client = _client(path)
+    assert "설치계획 확인 필요 1건" in _text(client.get("/"))
+    plans = _text(client.get("/nr"))
+    assert "완주 다목적체육관" in plans and "확인 필요" in plans
+    assert 'href="/nr"' in _text(client.get("/prices"))
+
+
+def test_a_person_links_a_pending_plan_from_its_page(world):
+    path, ids = world
+    _second_gym(path, ids)
+    _nr(path, NR_ROW)
+    plan = _plan_id(path, "2026-001")
+    client = _client(path)
+    page = _text(client.get(f"/nr/{plan}"))
+    assert f'name="project_id" value="{ids["gym"]}"' in page
+    resp = _post(client, f"/nr/{plan}/link", {"project_id": str(ids["gym"])})
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith(f"/project/{ids['gym']}")
+    assert "지열 수직밀폐형 336.06 kW" in _text(client.get(f"/project/{ids['gym']}"))
+
+
+def test_a_person_can_ignore_a_plan_or_make_a_new_project(world):
+    path, _ = world
+    _nr(path, {**NR_ROW, "key": "2026-002", "name": "봉동 체험관"})
+    plan = _plan_id(path, "2026-002")
+    client = _client(path)
+    resp = _post(client, f"/nr/{plan}/link", {"new": "1"})
+    assert resp.status_code == 302
+    assert "봉동 체험관" in _text(client.get(resp.headers["Location"]))
+    assert _post(client, f"/nr/{plan}/ignore", {}).status_code == 302
+    assert "봉동 체험관" in _text(client.get("/nr?state=ignored"))
+
+
+def test_plan_actions_refuse_bad_ids_and_other_sites(world):
+    path, _ = world
+    _nr(path, NR_ROW)
+    plan = _plan_id(path, "2026-001")
+    client = _client(path)
+    assert client.get("/nr/99999").status_code == 404
+    assert _post(client, "/nr/99999/ignore", {}).status_code == 404
+    assert _post(client, f"/nr/{plan}/link", {"project_id": "99999"}).status_code == 404
+    resp = _post(client, f"/nr/{plan}/link", {"project_id": "abc"})
+    assert resp.status_code == 302 and resp.headers["Location"].endswith(f"/nr/{plan}")
+    evil = _post(client, f"/nr/{plan}/ignore", {}, origin="http://evil.example")
+    assert evil.status_code == 403

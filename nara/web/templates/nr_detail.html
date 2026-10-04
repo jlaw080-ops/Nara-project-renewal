@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ plan.building_name }}{% endblock %}
+{% block body %}
+<p><a href="{{ url_for('nr_list', state=plan.match_state) }}">← 설치계획 목록</a></p>
+<h1>{{ plan.building_name }}</h1>
+<p class="muted">{{ plan.org_name }} · 신청번호 {{ plan.key }} · {{ labels[plan.match_state] }}{% if plan.project_id %} · 연결: <a href="{{ url_for('detail', project_id=plan.project_id) }}">{{ plan.project_name }}</a>{% endif %}</p>
+<div class="table-wrap"><table>
+<tr><th>주소</th><td>{{ plan.address|dash }}</td></tr>
+<tr><th>착공예정일</th><td>{{ plan.start_date|dash }}</td></tr>
+<tr><th>준공예정일</th><td>{{ plan.end_date|dash }}</td></tr>
+<tr><th>담당부서</th><td>{{ plan.dept|dash }}</td></tr>
+<tr><th>에너지원</th><td>{% for e in load_energy(plan.energy_json) %}{{ e.source }} {{ e.form }} {{ e.capacity_kw }} kW{% if not loop.last %}<br>{% endif %}{% else %}—{% endfor %}</td></tr>
+</table></div>
+
+<h2>연결할 사업</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>사업</th><th>기관</th><th>점수</th><th></th></tr></thead>
+<tbody>
+{% for c in candidates %}
+<tr><td><a href="{{ url_for('detail', project_id=c.project_id) }}">{{ c.name }}</a></td><td>{{ c.org_name }}</td><td>{{ '%.2f'|format(c.score) }}</td>
+<td><form method="post" class="inline" action="{{ url_for('nr_link', plan_id=plan.id) }}"><input type="hidden" name="project_id" value="{{ c.project_id }}"><button type="submit">이 사업과 연결</button></form></td></tr>
+{% else %}
+<tr><td colspan="4" class="muted">같은 기관의 사업이 없습니다</td></tr>
+{% endfor %}
+</tbody>
+</table></div>
+<form method="post" class="hide-one" action="{{ url_for('nr_link', plan_id=plan.id) }}">
+  <label>사업 번호로 연결 <input type="text" name="project_id" inputmode="numeric"></label>
+  <button type="submit">연결</button>
+</form>
+<p>
+<form method="post" class="inline" action="{{ url_for('nr_link', plan_id=plan.id) }}"><input type="hidden" name="new" value="1"><button type="submit">새 사업으로 추가</button></form>
+<form method="post" class="inline" action="{{ url_for('nr_ignore', plan_id=plan.id) }}"><button type="submit">무시</button></form>
+</p>
+{% endblock %}

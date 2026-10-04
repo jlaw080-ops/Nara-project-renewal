@@ -220,6 +220,23 @@
 <p class="muted">신재생 계획이 없습니다</p>
 {% endif %}
 
+<h2>설치계획서</h2>
+{% if d.nr_plans %}
+<div class="table-wrap"><table>
+<thead><tr><th>신청번호</th><th>건물명</th><th>담당부서</th><th>에너지원</th><th>받은 때</th><th>상태</th></tr></thead>
+<tbody>
+{% for n in d.nr_plans %}
+<tr><td><a href="{{ url_for('nr_detail', plan_id=n.id) }}">{{ n.key }}</a></td><td>{{ n.building_name }}</td><td>{{ n.dept|dash }}</td>
+<td>{% for e in load_energy(n.energy_json) %}{{ e.source }} {{ e.form }} {{ e.capacity_kw }} kW{% if not loop.last %}<br>{% endif %}{% else %}—{% endfor %}</td>
+<td>{{ n.updated_at[:10] }}</td>
+<td>{{ n.match_state }}{% if n.skipped %} <span class="bad">웹에서 고친 값이 있어 반영하지 않음: {{ n.skipped }}</span>{% endif %}</td></tr>
+{% endfor %}
+</tbody>
+</table></div>
+{% else %}
+<p class="muted">연결된 설치계획서가 없습니다</p>
+{% endif %}
+
 <h2>수정 이력 {{ d.edits|length }}건</h2>
 {% if d.edits %}
 <div class="table-wrap"><table>
