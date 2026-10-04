@@ -218,6 +218,14 @@ def _apply_energy(
     text = energy_value(items)
     if not _sheet_changed(conn, project_id, "energy", text):
         return
+    # 설치계획서에서 온 값은 공식 자료라 시트가 덮지 않는다(nr_apply).
+    from_plan = conn.execute(
+        "SELECT 1 FROM energy_plan WHERE project_id = ? AND entered_by = 'nr' LIMIT 1",
+        (project_id,),
+    ).fetchone()
+    if from_plan:
+        remember(conn, project_id, "energy", text, now)
+        return
     rows = conn.execute(
         "SELECT source_type, capacity_kw FROM energy_plan WHERE project_id = ?", (project_id,)
     ).fetchall()

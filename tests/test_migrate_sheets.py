@@ -8,8 +8,10 @@ from nara import cli
 from nara.award import pending_award_bid_nos
 from nara.config import load_settings
 from nara.db import connect, migrate
-from nara.migrate_sheets import _to_float, import_tab
+from nara.energy import EnergyItem
+from nara.migrate_sheets import ImportStats, _apply_energy, _to_float, import_tab
 from nara.runlog import RunCounters
+from nara.store import ensure_project, upsert_org
 
 SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
 NOW = "2026-09-17T09:00:00"
@@ -1124,3 +1126,19 @@ def test_sheet_department_is_imported_over_an_unconfirmed_candidate(conn):
     ).fetchall()
     assert [tuple(r) for r in confirmed] == [("시설과", "imported")]
     assert stats.overwritten == []
+
+
+def test_the_sheet_does_not_overwrite_energy_from_an_installation_plan(tmp_path):
+    """설치계획서는 기관이 공단에 낸 공식 자료다. 시트 값이 덮으면 안 된다."""
+    conn = connect(tmp_path / "s.db")
+    migrate(conn)
+    org = upsert_org(conn, "전북특별자치도 완주군", SETTINGS, NOW)
+    pid = ensure_project(conn, org, "체육관", "nr", NOW)
+    conn.execute(
+        "INSERT INTO energy_plan (project_id, source_type, capacity_kw, entered_by, updated_at) "
+        "VALUES (?, '지열', 300, 'nr', ?)",
+        (pid, NOW),
+    )
+    _apply_energy(conn, pid, "체육관", [EnergyItem("PV", 10.0)], NOW, ImportStats())
+    rows = conn.execute("SELECT source_type, entered_by FROM energy_plan").fetchall()
+    assert [tuple(r) for r in rows] == [("지열", "nr")]
