@@ -1,9 +1,10 @@
 """웹 조회 화면. 요청을 받아 query·data에 넘기고 템플릿을 그린다."""
 
+import hmac
 import sqlite3
 from collections.abc import Sequence
 from contextlib import closing
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta
 from itertools import zip_longest
 from pathlib import Path
@@ -27,6 +28,8 @@ from nara import auth
 from nara.config import Settings
 from nara.db import attachments_dir
 from nara.energy import EnergyKind, load_kinds
+from nara.nr_apply import ingest
+from nara.runlog import run_log
 from nara.web import edit
 from nara.web.data import (
     BUSY_TIMEOUT_SECONDS,
@@ -57,7 +60,11 @@ CONFLICT = "그사이 값이 바뀌었습니다. 지금 값을 확인하고 다�
 BLANK_ENERGY_ROWS = 3
 MAX_ID = 2**63 - 1
 SESSION_LIFETIME = timedelta(days=14)
-PUBLIC_ENDPOINTS = {"login", "static"}
+NR_MAX_ROWS = 200
+MAX_BODY = 1024 * 1024
+# 확장 프로그램이 부르는 주소. 로그인·같은 출처 검사 대신 토큰으로 막는다.
+API_ENDPOINTS = {"nr_import", "nr_ping"}
+PUBLIC_ENDPOINTS = {"login", "static", *API_ENDPOINTS}
 PASSWORD_ENDPOINTS = {"change_password", "logout"}
 
 
@@ -144,6 +151,16 @@ def _flash_hidden(count: int | None, hide: bool) -> None:
         flash(f"{count}건을 숨겼습니다" if count else "숨길 사업이 없습니다")
     else:
         flash(f"{count}건의 숨김을 풀었습니다" if count else "숨김을 풀 사업이 없습니다")
+
+
+def _check_token() -> None:
+    """Authorization: Bearer <토큰>이 정확히 같아야 한다. 토큰이 없으면 주소 자체가 없다."""
+    token = current_app.config.get("IMPORT_TOKEN")
+    if not token:
+        abort(404)
+    sent = request.headers.get("Authorization", "")
+    if not hmac.compare_digest(sent.encode(), f"Bearer {token}".encode()):
+        abort(401)
 
 
 def _current_user() -> auth.User | None:
@@ -262,6 +279,7 @@ def create_app(
     # 확장 프로그램이 설치계획서를 보내는 주소용. 토큰이 없으면 그 주소를 끈다.
     app.config["IMPORT_TOKEN"] = import_token
     app.config["SETTINGS"] = settings
+    app.config["MAX_CONTENT_LENGTH"] = MAX_BODY
     app.config.update(
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
@@ -275,8 +293,11 @@ def create_app(
 
     @app.before_request
     def _guard_writes():
+        if request.endpoint in API_ENDPOINTS:
+            return None
         if request.method == "POST" and not _same_origin():
             abort(403)
+        return None
 
     @app.before_request
     def _require_login():
@@ -459,6 +480,35 @@ def create_app(
             )
             return page, 503
         return redirect(url_for("prices", saved="·".join(changed) or "-"))
+
+    @app.get("/api/nr-plans/ping")
+    def nr_ping():
+        _check_token()
+        return {"ok": True}
+
+    @app.post("/api/nr-plans")
+    def nr_import():
+        _check_token()
+        if (request.content_length or 0) > MAX_BODY:
+            return {"ok": False, "error": "본문이 1MB를 넘습니다"}, 413
+        body = request.get_json(silent=True)
+        rows = body.get("rows") if isinstance(body, dict) else None
+        if not isinstance(rows, list):
+            return {"ok": False, "error": "rows 배열이 없습니다"}, 400
+        if len(rows) > NR_MAX_ROWS:
+            return {"ok": False, "error": f"한 번에 {NR_MAX_ROWS}행까지 받습니다"}, 413
+        settings = current_app.config.get("SETTINGS")
+        if settings is None:
+            return {"ok": False, "error": "설정 파일을 읽지 못해 받을 수 없습니다"}, 500
+        now = datetime.now().isoformat(timespec="seconds")
+        try:
+            with closing(_rw_conn()) as conn, run_log(conn, "nr import", f"{len(rows)}행") as c:
+                results = ingest(conn, rows, settings, now, c)
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc):
+                raise
+            return {"ok": False, "error": BUSY_MESSAGE}, 503
+        return {"ok": True, "results": [asdict(r) for r in results]}
 
     @app.post("/hide")
     def hide():
