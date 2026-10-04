@@ -111,3 +111,17 @@ def test_decide_links_only_a_clear_winner():
     assert decide([Candidate(1, "a", "o", 0.6)]).state == "pending"
     assert decide([Candidate(1, "a", "o", 0.3)]) == Decision("new", None, 0.3)
     assert decide([]) == Decision("new", None, None)
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("완주 하수처리사업소 청사", "하수처리사업소청사"),
+        ("완주 농업기술센터 사업소 체육관", "농업기술센터사업소체육관"),
+        ("완주군 도시재생 조성사업 설계용역", "도시재생조성"),
+        ("완주군 청사 건립공사 설계", "청사"),
+    ],
+)
+def test_name_key_cuts_at_business_or_construction_only_where_a_word_ends(name, expected):
+    """'사업소'·'공사관'의 '사업'·'공사'에서 자르면 다른 건물이 같은 짧은 이름이 된다."""
+    assert name_key(name, "전북특별자치도 완주군") == expected

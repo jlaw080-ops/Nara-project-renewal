@@ -242,3 +242,59 @@ def test_a_hidden_project_is_filled_in_but_stays_hidden(db):
     ingest(conn, [_row()], SETTINGS, NOW)
     assert _energy(conn, gym) == [("지열", 336.06, "nr")]
     assert conn.execute("SELECT hidden_at FROM project WHERE id = ?", (gym,)).fetchone()[0] == NOW
+
+
+def test_a_resent_building_with_an_unreadable_table_keeps_its_capacity(db):
+    """건물 둘이 붙은 사업에서 한 건물이 빈 에너지원으로 다시 오면 그 건물 몫이 사라지면 안 된다."""
+    conn, gym = db
+    ingest(conn, [_row()], SETTINGS, NOW)
+    other = _row(
+        key="2026-009",
+        name="완주 다목적체육관 별관",
+        energy=[{"source": "태양광", "form": "고정식", "capacity_kw": 50}],
+    )
+    ingest(conn, [other], SETTINGS, NOW)
+    plan = conn.execute("SELECT id FROM nr_plan WHERE key = '2026-009'").fetchone()[0]
+    link_plan(conn, plan, gym, SETTINGS, NOW)
+    ingest(conn, [_row(energy=[])], SETTINGS, LATER)
+    assert _energy(conn, gym) == [("PV", 50.0, "nr"), ("지열", 336.06, "nr")]
+
+
+def test_relinking_takes_the_plan_off_the_old_project(db):
+    conn, gym = db
+    org = conn.execute("SELECT org_id FROM project WHERE id = ?", (gym,)).fetchone()[0]
+    pool = ensure_project(conn, org, "완주군 수영장 건립 설계용역", "g2b", NOW)
+    ingest(conn, [_row()], SETTINGS, NOW)
+    plan = conn.execute("SELECT id FROM nr_plan").fetchone()[0]
+    link_plan(conn, plan, pool, SETTINGS, NOW)
+    assert _energy(conn, pool) == [("지열", 336.06, "nr")]
+    assert _energy(conn, gym) == []
+
+
+def test_ignoring_a_linked_plan_takes_its_capacity_out_of_the_total(db):
+    conn, gym = db
+    ingest(conn, [_row()], SETTINGS, NOW)
+    other = _row(
+        key="2026-009",
+        name="완주 다목적체육관 별관",
+        energy=[{"source": "태양광", "form": "고정식", "capacity_kw": 50}],
+    )
+    ingest(conn, [other], SETTINGS, NOW)
+    plan = conn.execute("SELECT id FROM nr_plan WHERE key = '2026-009'").fetchone()[0]
+    link_plan(conn, plan, gym, SETTINGS, NOW)
+    ignore_plan(conn, plan)
+    assert _energy(conn, gym) == [("지열", 336.06, "nr")]
+
+
+def test_making_a_new_project_does_not_commit_halfway(db):
+    """중간 커밋은 쓰기 잠금을 놓는다. 그 틈에 수집이 끼면 연결 안 된 새 사업만 남는다."""
+    conn, _ = db
+    from nara.nr_apply import _new_project
+    from nara.nr_plan import parse_nr_row, save_nr_plan
+
+    plan_id, _ = save_nr_plan(conn, parse_nr_row(_row(org="강원도 강릉시")), NOW)
+    plan = conn.execute("SELECT * FROM nr_plan WHERE id = ?", (plan_id,)).fetchone()
+    _new_project(conn, plan, SETTINGS, NOW)
+    assert conn.in_transaction
+    conn.rollback()
+    assert conn.execute("SELECT COUNT(*) FROM nr_plan").fetchone()[0] == 0

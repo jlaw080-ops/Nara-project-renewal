@@ -5,6 +5,7 @@
 
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime
 
 from nara.config import Settings
 from nara.energy import kind_for
@@ -137,8 +138,9 @@ def _new_project(conn: sqlite3.Connection, plan: sqlite3.Row, settings: Settings
         None,
     )
     if org_id is None:
-        org_id = upsert_org(conn, canonical_org(plan["org_name"], aliases), settings, now)
-    return ensure_project(conn, org_id, plan["building_name"], "nr", now)
+        name = canonical_org(plan["org_name"], aliases)
+        org_id = upsert_org(conn, name, settings, now, commit=False)
+    return ensure_project(conn, org_id, plan["building_name"], "nr", now, commit=False)
 
 
 def ingest(
@@ -181,6 +183,19 @@ def ingest(
     return results
 
 
+def _refresh(conn: sqlite3.Connection, project_id: int, now: str) -> None:
+    """설치계획서가 떨어져 나간 사업을 남은 것으로 다시 맞춘다. 없으면 그 몫의 설비를 지운다.
+
+    주소·일정·부서는 되돌리지 않는다 — 다른 출처와 섞여 있어 사람이 판단한다.
+    """
+    if _plans(conn, project_id):
+        apply_plans(conn, project_id, now)
+        return
+    conn.execute(
+        "DELETE FROM energy_plan WHERE project_id = ? AND entered_by = 'nr'", (project_id,)
+    )
+
+
 def link_plan(
     conn: sqlite3.Connection,
     plan_id: int,
@@ -200,16 +215,21 @@ def link_plan(
         "UPDATE nr_plan SET match_state = 'human', project_id = ? WHERE id = ?",
         (project_id, plan_id),
     )
+    if plan["project_id"] is not None and plan["project_id"] != project_id:
+        _refresh(conn, plan["project_id"], now)
     apply_plans(conn, project_id, now)
     conn.commit()
     return project_id
 
 
-def ignore_plan(conn: sqlite3.Connection, plan_id: int) -> None:
-    """무시한다. 이미 반영한 값은 되돌리지 않는다 — 사람이 상세 화면에서 고친다."""
-    cursor = conn.execute(
+def ignore_plan(conn: sqlite3.Connection, plan_id: int, now: str | None = None) -> None:
+    """무시한다. 연결돼 있던 사업의 설비는 남은 설치계획서로 다시 맞춘다."""
+    plan = conn.execute("SELECT project_id FROM nr_plan WHERE id = ?", (plan_id,)).fetchone()
+    if plan is None:
+        raise LookupError(f"설치계획서 {plan_id}")
+    conn.execute(
         "UPDATE nr_plan SET match_state = 'ignored', project_id = NULL WHERE id = ?", (plan_id,)
     )
-    if cursor.rowcount == 0:
-        raise LookupError(f"설치계획서 {plan_id}")
+    if plan["project_id"] is not None:
+        _refresh(conn, plan["project_id"], now or datetime.now().isoformat(timespec="seconds"))
     conn.commit()

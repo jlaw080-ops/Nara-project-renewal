@@ -10,8 +10,13 @@ from nara.g2b.list_api import NoticeItem
 WEEKDAY_GROUPS = 5
 
 
-def upsert_org(conn: sqlite3.Connection, name: str, settings: Settings, now: str) -> int:
-    """수요기관을 등록하고 id를 돌려준다. 이미 있으면 그대로 둔다."""
+def upsert_org(
+    conn: sqlite3.Connection, name: str, settings: Settings, now: str, commit: bool = True
+) -> int:
+    """수요기관을 등록하고 id를 돌려준다. 이미 있으면 그대로 둔다.
+
+    commit=False면 부른 쪽 트랜잭션에 묶는다(설치계획서 한 행을 한 번에 커밋).
+    """
     row = conn.execute("SELECT id FROM org WHERE name = ?", (name,)).fetchone()
     if row:
         return row["id"]
@@ -26,7 +31,8 @@ def upsert_org(conn: sqlite3.Connection, name: str, settings: Settings, now: str
             "UPDATE org SET weekday_group = ? WHERE id = ?",
             (org_id % WEEKDAY_GROUPS + 1, org_id),
         )
-    conn.commit()
+    if commit:
+        conn.commit()
     return org_id
 
 
@@ -45,7 +51,9 @@ def promote_focus_orgs(conn: sqlite3.Connection, settings: Settings) -> int:
     return len(ids)
 
 
-def ensure_project(conn: sqlite3.Connection, org_id: int, name: str, source: str, now: str) -> int:
+def ensure_project(
+    conn: sqlite3.Connection, org_id: int, name: str, source: str, now: str, commit: bool = True
+) -> int:
     """같은 기관에 같은 이름의 사업이 있으면 그것을, 없으면 새로 만든다."""
     row = conn.execute(
         "SELECT id FROM project WHERE org_id = ? AND name = ?", (org_id, name)
@@ -56,7 +64,8 @@ def ensure_project(conn: sqlite3.Connection, org_id: int, name: str, source: str
         "INSERT INTO project (org_id, name, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         (org_id, name, source, now, now),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return cursor.lastrowid
 
 

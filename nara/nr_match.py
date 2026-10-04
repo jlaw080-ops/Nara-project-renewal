@@ -25,6 +25,9 @@ _OFFICE = re.compile(r"(?<=[시군구])청$")
 _BRACKET = re.compile(r"[\[(（【][^\])）】]*[\])）】]")
 # 사업명(공고명)에 붙는 조달·공사 낱말. 여기서부터 뒤를 버린다.
 _CUT = ("설계", "용역", "공모", "공고", "입찰", "건립", "신축", "증축", "리모델링", "공사", "사업")
+# '사업소'·'공사관'처럼 낱말 가운데 든 '사업'·'공사'에서 자르면 다른 건물이 같은 짧은
+# 이름('하수처리')이 된다. 이 둘은 낱말이 끝나는 자리에서만 자른다('조성사업', '건립공사').
+_CUT_AT_WORD_END = ("사업", "공사")
 _PUNCT = re.compile(r"[\s·,.\-_/]")
 _ROAD = re.compile(r"\S+(?:로|길)(?=\s|\d|$)")
 
@@ -44,13 +47,23 @@ def org_key(name: str, aliases: Mapping[str, str] | None = None) -> str:
     return canonical_org(name, aliases).replace(" ", "")
 
 
+def _cut_index(text: str, marker: str) -> int:
+    i = text.find(marker)
+    while i > 0 and marker in _CUT_AT_WORD_END:
+        end = i + len(marker)
+        if end == len(text) or text[end].isspace():
+            break
+        i = text.find(marker, i + 1)
+    return i
+
+
 def name_key(name: str, org_name: str = "") -> str:
     """비교용 이름. 조달 낱말 뒤를 자르고 맨 앞의 시·군·구 이름을 뗀다.
 
     '완주군 다목적체육관 건립 설계용역'과 '완주 다목적체육관'이 둘 다 '다목적체육관'이 된다.
     """
     text = _BRACKET.sub(" ", name or "")
-    cut = min((i for m in _CUT if (i := text.find(m)) > 0), default=-1)
+    cut = min((i for m in _CUT if (i := _cut_index(text, m)) > 0), default=-1)
     if cut > 0:
         text = text[:cut]
     words = text.split()

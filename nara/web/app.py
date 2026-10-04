@@ -585,7 +585,7 @@ def create_app(
     @app.post("/nr/<int:plan_id>/ignore")
     def nr_ignore(plan_id: int):
         def act(conn, settings, now):
-            ignore_plan(conn, plan_id)
+            ignore_plan(conn, plan_id, now)
             flash("설치계획서를 무시했습니다")
             return redirect(url_for("nr_list"))
 

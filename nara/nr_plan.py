@@ -114,6 +114,9 @@ def save_nr_plan(conn: sqlite3.Connection, row: NrRow, now: str) -> tuple[int, s
     cols = ", ".join(_FIELDS)
     old = conn.execute(f"SELECT id, {cols} FROM nr_plan WHERE key = ?", (row.key,)).fetchone()
     values = _values(row)
+    if old is not None and not row.energy and old["energy_json"] not in (None, "[]"):
+        # 에너지원 표를 못 읽은 재전송이다. 비었다고 설비가 없는 것이 아니다 — 전 값을 둔다.
+        values = (*values[:-1], old["energy_json"])
     if old is None:
         cursor = conn.execute(
             f"INSERT INTO nr_plan (key, {cols}, received_at, updated_at) "
