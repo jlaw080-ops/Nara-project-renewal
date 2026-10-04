@@ -15,6 +15,8 @@ class Settings:
     skip_cancelled: bool
     # 이름이 정확히 같을 때만 관심 — 시 이름이 본부·사업소까지 잡으면 안 되는 곳(서울)
     focus_exact_orgs: tuple[str, ...] = ()
+    # 설치계획서 기관명 → 나라 앱 기관명. 자동 규칙으로 안 되는 것만
+    nr_org_aliases: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,7 @@ class Secrets:
     host: str | None = None
     backup_remote: str | None = None
     backup_dir: str | None = None
+    import_token: str | None = None
 
 
 def load_settings(path: Path) -> Settings:
@@ -41,6 +44,7 @@ def load_settings(path: Path) -> Settings:
         service_div_name=collect.get("service_div_name", "기술용역"),
         skip_cancelled=bool(collect.get("skip_cancelled", True)),
         focus_exact_orgs=tuple(focus.get("exact_orgs", [])),
+        nr_org_aliases=tuple(data.get("nr", {}).get("org_aliases", {}).items()),
     )
 
 
@@ -69,4 +73,5 @@ def load_secrets(env_path: Path | None = None) -> Secrets:
         host=pick("NARA_HOST"),
         backup_remote=pick("NARA_BACKUP_REMOTE"),
         backup_dir=pick("NARA_BACKUP_DIR"),
+        import_token=pick("NARA_IMPORT_TOKEN"),
     )

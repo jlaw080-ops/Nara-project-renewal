@@ -59,3 +59,24 @@ def test_load_secrets_reads_env_file(tmp_path):
 def test_load_secrets_returns_none_when_file_missing(tmp_path):
     secrets = load_secrets(tmp_path / "nope.env")
     assert secrets.g2b_api_key is None
+
+
+def test_load_secrets_reads_the_import_token(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("NARA_IMPORT_TOKEN=test-import-token\n", encoding="utf-8")
+    assert load_secrets(env).import_token == "test-import-token"
+
+
+def test_load_settings_reads_org_aliases_for_installation_plans(tmp_path):
+    config = tmp_path / "config.toml"
+    config.write_text(
+        (REPO_ROOT / "config.toml").read_text(encoding="utf-8")
+        + '\n[nr.org_aliases]\n"전라북도교육청" = "전북특별자치도교육청"\n',
+        encoding="utf-8",
+    )
+    settings = load_settings(config)
+    assert settings.nr_org_aliases == (("전라북도교육청", "전북특별자치도교육청"),)
+
+
+def test_load_settings_has_no_org_aliases_by_default():
+    assert load_settings(REPO_ROOT / "config.toml").nr_org_aliases == ()

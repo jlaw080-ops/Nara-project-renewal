@@ -24,6 +24,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from nara import auth
+from nara.config import Settings
 from nara.db import attachments_dir
 from nara.energy import EnergyKind, load_kinds
 from nara.web import edit
@@ -238,6 +239,8 @@ def create_app(
     secret_key: str,
     host: str | None = None,
     lan_hosts: Sequence[str] = (),
+    import_token: str | None = None,
+    settings: Settings | None = None,
 ) -> Flask:
     if not secret_key:
         raise ValueError("세션 서명 키가 없다 — .env의 NARA_SECRET_KEY를 채운다")
@@ -256,6 +259,9 @@ def create_app(
         *([host] if host else []),
     ]
     app.config["WRITE_TIMEOUT"] = BUSY_TIMEOUT_SECONDS
+    # 확장 프로그램이 설치계획서를 보내는 주소용. 토큰이 없으면 그 주소를 끈다.
+    app.config["IMPORT_TOKEN"] = import_token
+    app.config["SETTINGS"] = settings
     app.config.update(
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",

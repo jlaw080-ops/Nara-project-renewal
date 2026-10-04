@@ -16,7 +16,7 @@ from nara.backup import copy_to_dir, make_backup, prune_local
 from nara.backup import upload as upload_backup
 from nara.collect import backfill as run_backfill
 from nara.collect import collect_range
-from nara.config import load_secrets, load_settings
+from nara.config import Secrets, Settings, load_secrets, load_settings
 from nara.db import attachments_dir, connect, migrate
 from nara.dept import update_depts
 from nara.doctor import run_checks
@@ -133,6 +133,7 @@ def serve(
     env: Path = typer.Option(DEFAULT_ENV, help="비밀값 파일"),
     production: bool = typer.Option(False, "--production", help="서버용: waitress로 띄운다"),
     lan: bool = typer.Option(False, "--lan", help="사내망 공유: 다른 PC에서 접속하게 연다"),
+    config: Path = typer.Option(DEFAULT_CONFIG, help="설정 파일"),
 ) -> None:
     """조회·입력 화면을 띄운다. 기본은 이 컴퓨터(127.0.0.1)에서만 열린다."""
     # _open_db를 쓰지 않는다. 없는 파일이면 위에서 멈춰야 한다 — doctor와 같은 이유.
@@ -147,10 +148,17 @@ def serve(
     conn = connect(db)
     migrate(conn)
     conn.close()
+    settings = load_settings(config)
     if lan:
-        _serve_lan(db, secrets.secret_key, secrets.host, port)
+        _serve_lan(db, secrets, settings, port)
         return
-    web = create_app(db, secret_key=secrets.secret_key, host=secrets.host)
+    web = create_app(
+        db,
+        secret_key=secrets.secret_key,
+        host=secrets.host,
+        import_token=secrets.import_token,
+        settings=settings,
+    )
     if production:
         typer.echo(f"서버 모드: 127.0.0.1:{port} (밖은 Caddy가 https로 잇는다)")
         waitress_serve(web, host="127.0.0.1", port=port, threads=8)
@@ -182,9 +190,16 @@ def _lan_addresses() -> tuple[str, list[str]]:
     return primary, list(dict.fromkeys(h for h in hosts if not h.startswith("127.")))
 
 
-def _serve_lan(db: Path, secret_key: str, host: str | None, port: int) -> None:
+def _serve_lan(db: Path, secrets: Secrets, settings: Settings, port: int) -> None:
     primary, hosts = _lan_addresses()
-    web = create_app(db, secret_key=secret_key, host=host, lan_hosts=hosts)
+    web = create_app(
+        db,
+        secret_key=secrets.secret_key,
+        host=secrets.host,
+        lan_hosts=hosts,
+        import_token=secrets.import_token,
+        settings=settings,
+    )
     typer.echo(f"사내망 공유: http://{primary}:{port}  (끄려면 Ctrl+C)")
     typer.echo(
         "· 사내망 안에서는 http라 비밀번호가 암호화되지 않는다. 다른 곳의 비밀번호는 쓰지 않는다."
