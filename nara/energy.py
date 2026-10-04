@@ -1,6 +1,7 @@
 """설치계획내용 문자열을 에너지원·용량으로 쪼개고 예상가를 계산한다."""
 
 import re
+import sqlite3
 from dataclasses import dataclass
 
 
@@ -11,7 +12,7 @@ class EnergyKind:
     code: str  # energy_plan·energy_unit_price에 적는 이름
 
 
-# 단가표(원/kW) 시트의 에너지원·형식. 입력 화면은 이 목록에서만 고른다.
+# 단가표(원/kW) 시트의 에너지원·형식 — 처음 목록(시드). 실제 목록은 energy_kind 표다.
 ENERGY_KINDS = (
     EnergyKind("태양광", "BIPV", "BIPV"),
     EnergyKind("태양광", "PV", "PV"),
@@ -20,12 +21,6 @@ ENERGY_KINDS = (
     EnergyKind("연료전지", "PEMFC", "PEMFC"),
     EnergyKind("연료전지", "SOFC", "SOFC"),
 )
-_BY_CODE = {k.code: k for k in ENERGY_KINDS}
-
-
-def kind_of(code: str) -> EnergyKind | None:
-    return _BY_CODE.get(code)
-
 
 # 긴 표기를 먼저 바꿔야 '태양광 BIPV'가 PV로 새지 않는다.
 _ALIASES = (
@@ -41,6 +36,43 @@ _ALIASES = (
     ("지열 수직밀폐형", "지열"),
     ("지열수직밀폐형", "지열"),
 )
+
+_ALIAS_CODES = dict(_ALIASES)
+
+
+def _kind(row: sqlite3.Row) -> EnergyKind:
+    return EnergyKind(row["source"], row["form"], row["code"])
+
+
+def load_kinds(conn: sqlite3.Connection) -> list[EnergyKind]:
+    rows = conn.execute("SELECT code, source, form FROM energy_kind ORDER BY sort, code")
+    return [_kind(r) for r in rows]
+
+
+def kind_for(conn: sqlite3.Connection, source: str, form: str) -> EnergyKind:
+    """(에너지원, 형식)의 종류. 목록에 없으면 단가 없이 더한다. 커밋은 부른 쪽이 한다.
+
+    시트 표기('태양광 고정식')는 정확히 같을 때만 기존 종류로 읽는다 —
+    '태양광'만 보고 PV로 읽으면 추적식 같은 다른 형식에 PV 단가가 붙는다.
+    """
+    source, form = source.strip(), form.strip()
+    row = conn.execute(
+        "SELECT code, source, form FROM energy_kind WHERE source = ? AND form = ?", (source, form)
+    ).fetchone()
+    if row is None and (alias := _ALIAS_CODES.get(f"{source} {form}")):
+        row = conn.execute(
+            "SELECT code, source, form FROM energy_kind WHERE code = ?", (alias,)
+        ).fetchone()
+    if row is not None:
+        return _kind(row)
+    code = f"{source} {form}".strip()
+    sort = conn.execute("SELECT COALESCE(MAX(sort), 0) + 10 FROM energy_kind").fetchone()[0]
+    conn.execute(
+        "INSERT OR IGNORE INTO energy_kind (code, source, form, sort) VALUES (?, ?, ?, ?)",
+        (code, source, form, sort),
+    )
+    return EnergyKind(source, form, code)
+
 
 # (?<![A-Z]) 로 BIPV 안의 PV를 걸러낸다.
 _TOKEN = re.compile(r"(BIPV|(?<![A-Z])PV|지열|PEMFC|SOFC|집광채광)\s*:?\s*([\d,]+(?:\.\d*)?)")

@@ -210,7 +210,7 @@
 <thead><tr><th>에너지원</th><th>형식</th><th>용량</th><th>설치비</th></tr></thead>
 <tbody>
 {% for e in d.energy %}
-{% set k = kind_of(e.source_type) %}<tr><td>{{ k.source if k else e.source_type }}</td><td>{{ k.form if k else '-' }}</td><td>{{ e.capacity_kw }} kW</td><td>{{ e.cost|won }}</td></tr>
+{% set k = kinds_by_code.get(e.source_type) %}<tr><td>{{ k.source if k else e.source_type }}</td><td>{{ k.form if k else '-' }}</td><td>{{ e.capacity_kw }} kW</td><td>{{ e.cost|won }}</td></tr>
 {% endfor %}
 </tbody>
 </table></div>

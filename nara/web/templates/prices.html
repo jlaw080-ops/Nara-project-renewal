@@ -12,7 +12,7 @@
 <tbody>
 {% for r in rows %}
 <tr><td>{{ r.kind.source }}</td><td>{{ r.kind.form }}</td>
-<td><input type="hidden" name="code" value="{{ r.kind.code }}"><input type="text" class="price-input" name="price" inputmode="numeric" aria-label="{{ r.kind.source }} {{ r.kind.form }} 단가" value="{{ form.get(r.kind.code, '{:,}'.format(r.price) if r.price is not none else '') }}">{% if errors.get('price-' ~ r.kind.code) %} <span class="field-error">{{ errors['price-' ~ r.kind.code] }}</span>{% endif %}</td>
+<td><input type="hidden" name="code" value="{{ r.kind.code }}"><input type="text" class="price-input" name="price" inputmode="numeric" aria-label="{{ r.kind.source }} {{ r.kind.form }} 단가" value="{{ form.get(r.kind.code, '{:,}'.format(r.price) if r.price is not none else '') }}">{% if r.price is none %} <span class="muted">단가 없음</span>{% endif %}{% if errors.get('price-' ~ r.kind.code) %} <span class="field-error">{{ errors['price-' ~ r.kind.code] }}</span>{% endif %}</td>
 <td>{{ r.effective_from|dash }}</td><td>{{ r.updated_by|dash }}</td></tr>
 {% endfor %}
 </tbody>

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
-from nara.energy import ENERGY_KINDS, EnergyItem, EnergyKind, estimate_cost
+from nara.energy import EnergyItem, EnergyKind, estimate_cost, load_kinds
 from nara.sheet_memory import FIELD_LABELS
 from nara.store import last_run
 from nara.web.query import (
@@ -219,7 +219,7 @@ def unit_prices(conn: sqlite3.Connection) -> list[UnitPrice]:
         )
     }
     out = []
-    for kind in ENERGY_KINDS:
+    for kind in load_kinds(conn):
         r = rows.get(kind.code)
         out.append(
             UnitPrice(

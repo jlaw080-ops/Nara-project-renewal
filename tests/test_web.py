@@ -17,6 +17,7 @@ from nara.auth import BAD_LOGIN, LOCKED, add_user
 from nara.cli import app as cli_app
 from nara.config import load_settings
 from nara.db import connect, migrate
+from nara.energy import kind_for
 from nara.store import ensure_project, upsert_org
 from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN
 from nara.web import edit
@@ -1599,3 +1600,22 @@ def test_hide_does_not_redirect_off_site(world):
     resp = _hide(_client(path), [ids["museum"]], next_url="//evil.example/")
     assert resp.headers["Location"].endswith("/")
     assert "evil" not in resp.headers["Location"]
+
+
+def _add_kind(path, source, form):
+    conn = connect(path)
+    kind_for(conn, source, form)
+    conn.commit()
+    conn.close()
+
+
+def test_a_kind_added_later_shows_in_the_form_and_the_price_page(world):
+    path, ids = world
+    _add_kind(path, "태양열", "평판형")
+    client = _client(path)
+    form = _text(client.get(f"/project/{ids['gym']}?edit=energy"))
+    assert '<option value="태양열">태양열</option>' in form
+    assert 'data-source="태양열" data-price="">평판형</option>' in form
+    prices = _text(client.get("/prices"))
+    assert "<td>태양열</td><td>평판형</td>" in prices
+    assert "단가 없음" in prices

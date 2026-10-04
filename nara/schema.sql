@@ -180,3 +180,19 @@ INSERT OR IGNORE INTO energy_unit_price (source_type, price_per_kw, effective_fr
   ('PEMFC',  32000000, '2026-09-16'),
   ('SOFC',   98250000, '2026-09-16'),
   ('집광채광', 1000000,  '2026-10-02');
+
+-- 입력 화면의 에너지원·형식 목록. 설치계획서에서 새 종류가 오면 단가 없이 더한다.
+CREATE TABLE IF NOT EXISTS energy_kind (
+  code   TEXT PRIMARY KEY,   -- energy_plan·energy_unit_price의 source_type
+  source TEXT NOT NULL,      -- 에너지원
+  form   TEXT NOT NULL,      -- 형식
+  sort   INTEGER NOT NULL,
+  UNIQUE (source, form)
+);
+INSERT OR IGNORE INTO energy_kind (code, source, form, sort) VALUES
+  ('BIPV',     '태양광',   'BIPV',       10),
+  ('PV',       '태양광',   'PV',         20),
+  ('집광채광', '태양광',   '집광채광',   30),
+  ('지열',     '지열',     '수직밀폐형', 40),
+  ('PEMFC',    '연료전지', 'PEMFC',      50),
+  ('SOFC',     '연료전지', 'SOFC',       60);

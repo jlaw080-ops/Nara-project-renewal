@@ -10,6 +10,7 @@ EXPECTED_TABLES = {
     "attachment",
     "energy_plan",
     "energy_unit_price",
+    "energy_kind",
     "run_log",
     "app_state",
 }

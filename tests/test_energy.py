@@ -1,6 +1,15 @@
 import pytest
 
-from nara.energy import ENERGY_KINDS, EnergyItem, estimate_cost, kind_of, parse_energy_plan
+from nara.db import connect, migrate
+from nara.energy import (
+    ENERGY_KINDS,
+    EnergyItem,
+    EnergyKind,
+    estimate_cost,
+    kind_for,
+    load_kinds,
+    parse_energy_plan,
+)
 
 PRICES = {
     "BIPV": 5_000_000,
@@ -85,14 +94,45 @@ def test_energy_kinds_follow_the_unit_price_sheet():
     ]
 
 
-def test_kind_of_names_the_source_and_form_of_a_stored_code():
-    assert (kind_of("지열").source, kind_of("지열").form) == ("지열", "수직밀폐형")
-    assert kind_of("풍력") is None
-
-
 def test_parse_energy_plan_does_not_read_daylighting_as_pv():
     """'태양광 집광채광'을 '태양광'(PV)으로 읽으면 단가가 2.5배로 잡힌다."""
     assert parse_energy_plan("태양광 집광채광: 10kW PV: 5kW") == [
         EnergyItem("집광채광", 10.0),
         EnergyItem("PV", 5.0),
     ]
+
+
+def _db(tmp_path):
+    conn = connect(tmp_path / "k.db")
+    migrate(conn)
+    return conn
+
+
+def test_load_kinds_starts_with_the_six_sheet_kinds(tmp_path):
+    assert load_kinds(_db(tmp_path)) == list(ENERGY_KINDS)
+
+
+def test_kind_for_reads_the_sheet_wording_of_an_existing_kind(tmp_path):
+    """설치계획서는 PV를 '태양광 고정식'으로 적는다. 새 종류로 만들면 단가가 빠진다."""
+    conn = _db(tmp_path)
+    assert kind_for(conn, "태양광", "고정식").code == "PV"
+    assert kind_for(conn, "지열", "수직밀폐형").code == "지열"
+    assert len(load_kinds(conn)) == 6
+
+
+def test_kind_for_adds_an_unknown_kind_without_a_price(tmp_path):
+    conn = _db(tmp_path)
+    kind = kind_for(conn, "태양열", "평판형")
+    assert kind == EnergyKind("태양열", "평판형", "태양열 평판형")
+    assert load_kinds(conn)[-1] == kind
+    price = conn.execute(
+        "SELECT 1 FROM energy_unit_price WHERE source_type = ?", (kind.code,)
+    ).fetchone()
+    assert price is None
+    assert kind_for(conn, "태양열", "평판형") == kind
+    assert len(load_kinds(conn)) == 7
+
+
+def test_kind_for_does_not_read_another_solar_form_as_pv(tmp_path):
+    """'태양광'만 보고 PV로 읽으면 추적식에 고정식 단가가 붙는다."""
+    assert kind_for(_db(tmp_path), "태양광", "추적식").code == "태양광 추적식"

@@ -9,7 +9,7 @@ import pytest
 
 from nara.config import load_settings
 from nara.db import connect, migrate
-from nara.energy import EnergyItem
+from nara.energy import ENERGY_KINDS, EnergyItem, EnergyKind
 from nara.store import ensure_project, upsert_org
 from nara.verdict import BEFORE, BUILDING
 from nara.web.data import DatabaseMissing, open_readwrite
@@ -42,6 +42,12 @@ CURRENT = {
     "guide_equip": None,
     "note": "예정공사비: 10억",
 }
+
+KNOWN = {k.code: k for k in ENERGY_KINDS}
+CURRENT_PRICES = {
+    "BIPV": 5_000_000, "PV": 2_500_000, "집광채광": 1_000_000,
+    "지열": 2_500_000, "PEMFC": 32_000_000, "SOFC": 98_250_000,
+}  # fmt: skip
 
 
 def _form(**overrides):
@@ -135,18 +141,20 @@ def test_check_dept_rejects_an_empty_department_and_an_unknown_candidate():
 
 
 def test_check_energy_turns_source_and_form_into_the_stored_code():
-    checked = check_energy(["태양광", "지열", ""], ["BIPV", "지열", ""], ["20", "1,000.5", ""])
+    checked = check_energy(
+        ["태양광", "지열", ""], ["BIPV", "지열", ""], ["20", "1,000.5", ""], KNOWN
+    )
     assert checked.values["items"] == [EnergyItem("BIPV", 20.0), EnergyItem("지열", 1000.5)]
 
 
 def test_check_energy_allows_an_empty_plan():
     """줄을 다 비우면 계획을 지운다."""
-    assert check_energy(["", ""], ["", ""], ["", ""]).values["items"] == []
+    assert check_energy(["", ""], ["", ""], ["", ""], KNOWN).values["items"] == []
 
 
 def test_check_energy_rejects_a_form_of_another_source():
     """화면 스크립트가 꺼져 있으면 형식 목록이 좁혀지지 않는다. 서버가 짝을 다시 본다."""
-    checked = check_energy(["지열", "태양광"], ["PV", "풍력"], ["5", "5"])
+    checked = check_energy(["지열", "태양광"], ["PV", "풍력"], ["5", "5"], KNOWN)
     assert checked.errors == {"kind-0": "형식을 고르세요", "kind-1": "형식을 고르세요"}
 
 
@@ -155,6 +163,7 @@ def test_check_energy_rejects_duplicates_and_bad_capacity():
         ["태양광", "태양광", "지열", "", "태양광"],
         ["PV", "PV", "지열", "", "BIPV"],
         ["20", "30", "nan", "5", ""],
+        KNOWN,
     )
     assert checked.errors == {
         "kind-1": "같은 형식이 두 줄입니다",
@@ -165,12 +174,12 @@ def test_check_energy_rejects_duplicates_and_bad_capacity():
 
 
 def test_check_prices_reads_won_per_kw_for_every_kind():
-    checked = check_prices(["PV", "BIPV"], ["2,600,000", "5000000"])
+    checked = check_prices(["PV", "BIPV"], ["2,600,000", "5000000"], CURRENT_PRICES)
     assert checked.values["prices"] == {"PV": 2_600_000, "BIPV": 5_000_000}
 
 
 def test_check_prices_rejects_blank_fractional_and_unknown():
-    checked = check_prices(["PV", "BIPV", "SOFC", "풍력"], ["", "1.5", "0", "1"])
+    checked = check_prices(["PV", "BIPV", "SOFC", "풍력"], ["", "1.5", "0", "1"], CURRENT_PRICES)
     assert checked.errors == {
         "price-PV": "1 이상의 정수로 적으세요",
         "price-BIPV": "1 이상의 정수로 적으세요",
@@ -388,3 +397,17 @@ def test_hide_projects_ignores_unknown_ids(db):
     path, _ = db
     with closing(open_readwrite(path)) as conn:
         assert hide_projects(conn, [99999], "x", NOW) == 0
+
+
+def test_check_energy_accepts_a_kind_added_from_an_installation_plan():
+    known = {**KNOWN, "태양열 평판형": EnergyKind("태양열", "평판형", "태양열 평판형")}
+    checked = check_energy(["태양열"], ["태양열 평판형"], ["12"], known)
+    assert checked.values["items"] == [EnergyItem("태양열 평판형", 12.0)]
+
+
+def test_check_prices_lets_a_new_kind_stay_unpriced():
+    """단가 없는 새 종류 때문에 다른 단가를 저장하지 못하면 안 된다."""
+    current = {**CURRENT_PRICES, "태양열 평판형": None}
+    checked = check_prices(["PV", "태양열 평판형"], ["2,600,000", ""], current)
+    assert checked.ok
+    assert checked.values["prices"] == {"PV": 2_600_000}

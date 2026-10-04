@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import date
 from itertools import zip_longest
 
-from nara.energy import EnergyItem, kind_of
+from nara.energy import EnergyItem, EnergyKind
 from nara.sheet_memory import FIELD_LABELS, PROJECT_FIELDS, canonical, energy_value
 from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN
 
@@ -138,10 +138,13 @@ def check_dept(
     return Checked({"exec_dept": exec_dept, "snippet": snippet or None}, errors)
 
 
-def check_energy(sources: list[str], kinds: list[str], capacities: list[str]) -> Checked:
+def check_energy(
+    sources: list[str], kinds: list[str], capacities: list[str], known: Mapping[str, EnergyKind]
+) -> Checked:
     """줄마다 에너지원·형식·용량. 셋 다 빈 줄은 건너뛴다 — 빈 줄로 줄을 지운다.
 
-    형식(kinds)의 값은 저장할 이름(PV 등)이다. 고른 에너지원의 형식이어야 한다.
+    형식(kinds)의 값은 저장할 이름(PV 등)이다. known(energy_kind 표)에 있고
+    고른 에너지원의 형식이어야 한다.
     """
     items: list[EnergyItem] = []
     errors: dict[str, str] = {}
@@ -154,7 +157,7 @@ def check_energy(sources: list[str], kinds: list[str], capacities: list[str]) ->
         if not source:
             errors[f"source-{i}"] = "에너지원을 고르세요"
             continue
-        kind = kind_of(code)
+        kind = known.get(code)
         if kind is None or kind.source != source:
             errors[f"kind-{i}"] = "형식을 고르세요"
             continue
@@ -170,15 +173,17 @@ def check_energy(sources: list[str], kinds: list[str], capacities: list[str]) ->
     return Checked({"items": items}, errors)
 
 
-def check_prices(codes: list[str], prices: list[str]) -> Checked:
-    """단가(원/kW). 정해진 에너지원마다 1 이상의 정수."""
+def check_prices(codes: list[str], prices: list[str], current: Mapping[str, int | None]) -> Checked:
+    """단가(원/kW). 1 이상의 정수. 아직 단가가 없는 종류는 비워 둘 수 있다."""
     values: dict[str, int] = {}
     errors: dict[str, str] = {}
     for code, raw in zip_longest(codes, prices, fillvalue=""):
-        if kind_of(code) is None:
+        if code not in current:
             errors["_form"] = "모르는 에너지원이 있습니다"
             continue
         text = raw.strip().replace(",", "")
+        if not text and current[code] is None:
+            continue
         if not text.isdigit() or int(text) < 1:
             errors[f"price-{code}"] = "1 이상의 정수로 적으세요"
             continue

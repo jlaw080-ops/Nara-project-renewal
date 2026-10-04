@@ -25,7 +25,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from nara import auth
 from nara.db import attachments_dir
-from nara.energy import ENERGY_KINDS, kind_of
+from nara.energy import EnergyKind, load_kinds
 from nara.web import edit
 from nara.web.data import (
     BUSY_TIMEOUT_SECONDS,
@@ -54,7 +54,6 @@ BUSY_MESSAGE = "수집이 DB를 쓰고 있습니다. 잠시 뒤 다시 저장하
 CONFLICT_BY = "그사이 {}님이 고쳤습니다. 지금 값을 확인하고 다시 저장하세요"
 CONFLICT = "그사이 값이 바뀌었습니다. 지금 값을 확인하고 다시 저장하세요"
 BLANK_ENERGY_ROWS = 3
-ENERGY_SOURCES = tuple(dict.fromkeys(k.source for k in ENERGY_KINDS))
 MAX_ID = 2**63 - 1
 SESSION_LIFETIME = timedelta(days=14)
 PUBLIC_ENDPOINTS = {"login", "static"}
@@ -170,7 +169,9 @@ def _check(section: str, d: ProjectDetail) -> edit.Checked:
         return edit.check_verdict(form)
     if section == "dept":
         return edit.check_dept(form, _candidates(d))
-    return edit.check_energy(form.getlist("source"), form.getlist("kind"), form.getlist("capacity"))
+    return edit.check_energy(
+        form.getlist("source"), form.getlist("kind"), form.getlist("capacity"), _kinds()
+    )
 
 
 def _save(section: str, conn: sqlite3.Connection, project_id: int, values: dict) -> list[str]:
@@ -185,6 +186,11 @@ def _save(section: str, conn: sqlite3.Connection, project_id: int, values: dict)
     return edit.save_energy(conn, project_id, values["items"], now, uid)
 
 
+def _kinds() -> dict[str, EnergyKind]:
+    """이 요청의 에너지원·형식 목록. 순서를 지킨다(dict는 넣은 순서)."""
+    return {k.code: k for k in load_kinds(get_conn())}
+
+
 def _energy_rows(d: ProjectDetail, posted: bool) -> list[tuple[str, str, str]]:
     """신재생 폼의 줄 (에너지원, 형식, 용량). 다시 보일 때는 사용자가 친 그대로,
     처음에는 지금 계획 + 빈 줄. 목록에 없는 옛 이름은 에너지원을 비워 다시 고르게 한다."""
@@ -194,9 +200,10 @@ def _energy_rows(d: ProjectDetail, posted: bool) -> list[tuple[str, str, str]]:
             form.getlist("source"), form.getlist("kind"), form.getlist("capacity"), fillvalue=""
         )
         return list(rows)
+    known = _kinds()
     rows = []
     for e in d.energy:
-        kind = kind_of(e.source_type)
+        kind = known.get(e.source_type)
         rows.append((kind.source if kind else "", e.source_type, f"{e.capacity_kw:.10g}"))
     return rows + [("", "", "")] * BLANK_ENERGY_ROWS
 
@@ -216,7 +223,9 @@ def _render_detail(d: ProjectDetail, section: str | None, errors: dict, status: 
             verdict_choices=edit.EDIT_VERDICTS,
             dept_candidates=[row for row in d.depts if row["exec_dept"]],
             energy_rows=_energy_rows(d, posted),
-            energy_sources=ENERGY_SOURCES,
+            energy_kinds=list(_kinds().values()),
+            kinds_by_code=_kinds(),
+            energy_sources=list(dict.fromkeys(k.source for k in _kinds().values())),
             prices={p.kind.code: p.price for p in unit_prices(get_conn())},
             versions={s: edit.version_of(get_conn(), d.project["id"], s) for s in EDIT_SECTIONS},
         ),
@@ -238,8 +247,6 @@ def create_app(
     app.config["ATTACH_DIR"] = attachments_dir(Path(db_path))
     app.add_template_filter(_dash, "dash")
     app.add_template_filter(_won, "won")
-    app.add_template_global(kind_of, "kind_of")
-    app.add_template_global(ENERGY_KINDS, "energy_kinds")
     # DNS 리바인딩으로 외부 페이지가 이 화면을 읽지 못하게 한다.
     # 사내망 공유(lan_hosts)는 http라 host와 달리 Secure 쿠키·프록시 설정을 켜지 않는다.
     app.config["TRUSTED_HOSTS"] = [
@@ -424,7 +431,9 @@ def create_app(
                 "prices.html", rows=rows, form={}, errors={}, saved=request.args.get("saved")
             )
         form = request.form
-        checked = edit.check_prices(form.getlist("code"), form.getlist("price"))
+        checked = edit.check_prices(
+            form.getlist("code"), form.getlist("price"), {r.kind.code: r.price for r in rows}
+        )
         if not checked.ok:
             entered = dict(zip(form.getlist("code"), form.getlist("price"), strict=False))
             page = render_template(
