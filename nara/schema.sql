@@ -196,3 +196,23 @@ INSERT OR IGNORE INTO energy_kind (code, source, form, sort) VALUES
   ('지열',     '지열',     '수직밀폐형', 40),
   ('PEMFC',    '연료전지', 'PEMFC',      50),
   ('SOFC',     '연료전지', 'SOFC',       60);
+
+-- 신재생에너지센터 설치계획서. 크롬 확장 프로그램이 보낸 원문을 신청번호(key)마다 한 줄로 둔다.
+CREATE TABLE IF NOT EXISTS nr_plan (
+  id            INTEGER PRIMARY KEY,
+  key           TEXT NOT NULL UNIQUE,              -- 신청번호, 작성중이면 기관명+건물명
+  org_name      TEXT NOT NULL,
+  building_name TEXT NOT NULL,
+  address       TEXT,
+  start_date    TEXT,
+  end_date      TEXT,
+  dept          TEXT,                              -- 의무기관 담당자 부서
+  energy_json   TEXT NOT NULL DEFAULT '[]',        -- [{source, form, capacity_kw}]
+  received_at   TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  project_id    INTEGER REFERENCES project(id),
+  match_state   TEXT NOT NULL DEFAULT 'pending',   -- pending|auto|new|human|ignored
+  match_score   REAL,
+  skipped       TEXT                               -- 웹 수정 때문에 반영하지 않은 칸, 쉼표로
+);
+CREATE INDEX IF NOT EXISTS idx_nr_plan_project ON nr_plan(project_id);
