@@ -191,6 +191,59 @@ def check_prices(codes: list[str], prices: list[str], current: Mapping[str, int 
     return Checked({"prices": values}, errors)
 
 
+CONTACT_LIMIT = 50
+_TEL = re.compile(r"[0-9-]+")
+CONTACT_FIELDS = ("head_name", "head_position", "head_tel")
+
+
+def check_contact(form: Mapping[str, str]) -> Checked:
+    """부서장 이름·직위·직통번호. 셋 다 비우면 지운다."""
+    values: dict[str, str | None] = {}
+    errors: dict[str, str] = {}
+    for key in ("head_name", "head_position"):
+        text = _text(form, key)
+        if len(text) > CONTACT_LIMIT:
+            errors[key] = f"{CONTACT_LIMIT}자까지 적을 수 있습니다"
+        values[key] = text or None
+    tel = _text(form, "head_tel")
+    digits = re.sub(r"[^0-9]", "", tel)
+    if tel and (not _TEL.fullmatch(tel) or not 9 <= len(digits) <= 11):
+        errors["head_tel"] = "숫자와 -로 9~11자리를 적으세요 (예: 051-000-0000)"
+    values["head_tel"] = tel or None
+    return Checked(values, errors)
+
+
+def save_contact(
+    conn: sqlite3.Connection,
+    org_id: int,
+    dept: str,
+    values: Mapping[str, str | None],
+    now: str,
+    user_id: int | None = None,
+) -> bool:
+    """기관+부서의 연락처를 바꾼다. 바뀐 게 있으면 True."""
+    old = conn.execute(
+        "SELECT head_name, head_position, head_tel FROM dept_contact WHERE org_id = ? AND dept = ?",
+        (org_id, dept),
+    ).fetchone()
+    new = tuple(values[k] for k in CONTACT_FIELDS)
+    if (tuple(old) if old else (None, None, None)) == new:
+        return False
+    with conn:
+        if not any(new):
+            conn.execute("DELETE FROM dept_contact WHERE org_id = ? AND dept = ?", (org_id, dept))
+        else:
+            conn.execute(
+                "INSERT INTO dept_contact (org_id, dept, head_name, head_position, head_tel, "
+                "updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(org_id, dept) DO UPDATE SET head_name = excluded.head_name, "
+                "head_position = excluded.head_position, head_tel = excluded.head_tel, "
+                "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+                (org_id, dept, *new, now, user_id),
+            )
+    return True
+
+
 def _log(
     conn: sqlite3.Connection,
     project_id: int,

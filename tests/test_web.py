@@ -1716,3 +1716,64 @@ def test_plan_actions_refuse_bad_ids_and_other_sites(world):
     assert resp.status_code == 302 and resp.headers["Location"].endswith(f"/nr/{plan}")
     evil = _post(client, f"/nr/{plan}/ignore", {}, origin="http://evil.example")
     assert evil.status_code == 403
+
+
+def _two_projects_in_one_department(path, ids):
+    conn = connect(path)
+    _dept(conn, ids["gym"], "체육진흥과", NOW)
+    _dept(conn, ids["welfare"], "체육진흥과", NOW)
+    conn.commit()
+    conn.close()
+
+
+CONTACT = {"head_name": "홍길동", "head_position": "과장", "head_tel": "063-000-0000"}
+
+
+def test_a_department_head_entered_once_shows_on_every_project_of_that_department(world):
+    path, ids = world
+    _two_projects_in_one_department(path, ids)
+    client = _client(path)
+    form = _text(client.get(f"/project/{ids['gym']}?edit=contact"))
+    assert 'name="head_name"' in form and "체육진흥과" in form
+    resp = _post(client, f"/project/{ids['gym']}/contact", CONTACT)
+    assert resp.status_code == 302
+    assert "부서장 연락처" in _text(client.get(resp.headers["Location"]))
+    other = _text(client.get(f"/project/{ids['welfare']}"))
+    assert "홍길동" in other and "과장" in other and "063-000-0000" in other
+
+
+def test_the_print_sheet_fills_head_position_and_direct_line(world):
+    path, ids = world
+    _two_projects_in_one_department(path, ids)
+    client = _client(path)
+    _post(client, f"/project/{ids['gym']}/contact", CONTACT)
+    sheet = _text(client.get("/print"))
+    assert "<td>홍길동</td>" in sheet and "<td>과장</td>" in sheet
+    assert "<td>063-000-0000</td>" in sheet
+
+
+def test_a_project_without_a_department_asks_for_one_first(world):
+    path, ids = world
+    client = _client(path)
+    assert "실행부서를 먼저 확정하세요" in _text(client.get(f"/project/{ids['museum']}"))
+    resp = _post(client, f"/project/{ids['museum']}/contact", CONTACT)
+    assert resp.status_code == 409
+
+
+def test_a_bad_direct_line_is_shown_again_with_the_reason(world):
+    path, ids = world
+    _two_projects_in_one_department(path, ids)
+    client = _client(path)
+    resp = _post(client, f"/project/{ids['gym']}/contact", {**CONTACT, "head_tel": "내선 12"})
+    assert resp.status_code == 422
+    text = _text(resp)
+    assert "9~11자리" in text and 'value="내선 12"' in text
+
+
+def test_contact_save_refuses_another_site(world):
+    path, ids = world
+    _two_projects_in_one_department(path, ids)
+    resp = _post(
+        _client(path), f"/project/{ids['gym']}/contact", CONTACT, origin="http://evil.example"
+    )
+    assert resp.status_code == 403

@@ -125,6 +125,8 @@ class ProjectDetail:
     edits: list[dict] = ()
     attachments: list[sqlite3.Row] = ()
     nr_plans: list[sqlite3.Row] = ()
+    exec_dept: str | None = None  # 확정된 최신 실행부서
+    contact: sqlite3.Row | None = None  # 그 부서의 부서장 연락처
 
 
 def safe_url(url: str | None) -> str:
@@ -237,7 +239,7 @@ def unit_prices(conn: sqlite3.Connection) -> list[UnitPrice]:
 
 @dataclass(frozen=True)
 class PrintRow:
-    """출력 양식 한 줄. 부서장·직위는 아직 DB에 없어 칸만 둔다."""
+    """출력 양식 한 줄."""
 
     org_name: str
     name: str
@@ -247,6 +249,8 @@ class PrintRow:
     start_date: str | None
     end_date: str | None
     dept: str | None
+    head_name: str | None
+    head_position: str | None
     dept_tel: str | None
     winner: str | None
     plan: list[str]
@@ -256,10 +260,30 @@ class PrintRow:
     status: str
 
 
+def current_dept(conn: sqlite3.Connection, project_id: int) -> str | None:
+    """확정된 최신 실행부서. 목록·상세가 같은 규칙으로 고른다."""
+    row = conn.execute(
+        "SELECT exec_dept FROM dept_check WHERE project_id = ? AND confirmed = 1 "
+        "AND COALESCE(exec_dept, '') != '' ORDER BY checked_at DESC, id DESC LIMIT 1",
+        (project_id,),
+    ).fetchone()
+    return row["exec_dept"] if row else None
+
+
+def dept_contact(conn: sqlite3.Connection, org_id: int, dept: str | None) -> sqlite3.Row | None:
+    if not dept:
+        return None
+    return conn.execute(
+        "SELECT c.*, u.name AS updated_by_name FROM dept_contact c "
+        "LEFT JOIN app_user u ON u.id = c.updated_by WHERE c.org_id = ? AND c.dept = ?",
+        (org_id, dept),
+    ).fetchone()
+
+
 def _print_row(conn: sqlite3.Connection, row: sqlite3.Row) -> PrintRow:
     pid = row["id"]
     project = conn.execute(
-        "SELECT address, start_date, end_date FROM project WHERE id = ?", (pid,)
+        "SELECT org_id, address, start_date, end_date FROM project WHERE id = ?", (pid,)
     ).fetchone()
     tel = conn.execute(
         "SELECT head_tel FROM dept_check WHERE project_id = ? AND confirmed = 1 "
@@ -270,6 +294,7 @@ def _print_row(conn: sqlite3.Connection, row: sqlite3.Row) -> PrintRow:
     reason = history[0].reason if history and history[0].verdict == row["verdict"] else ""
     status = f"{row['verdict']} - {reason}" if row["verdict"] and reason else row["verdict"] or ""
     lines, total, unpriced = _energy(conn, pid)
+    contact = dept_contact(conn, project["org_id"], row["exec_dept"])
     return PrintRow(
         org_name=row["org_name"],
         name=row["name"],
@@ -279,7 +304,10 @@ def _print_row(conn: sqlite3.Connection, row: sqlite3.Row) -> PrintRow:
         start_date=project["start_date"],
         end_date=project["end_date"],
         dept=row["exec_dept"],
-        dept_tel=tel["head_tel"] if tel else None,
+        head_name=contact["head_name"] if contact else None,
+        head_position=contact["head_position"] if contact else None,
+        # 직통번호가 먼저, 없으면 시트에서 가져온 번호
+        dept_tel=(contact and contact["head_tel"]) or (tel["head_tel"] if tel else None),
         winner=row["winner"],
         plan=[
             f"{ENERGY_LABELS.get(e.source_type, e.source_type)}: {e.capacity_kw:.3f} kW"
@@ -363,6 +391,8 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
         locked=latest is not None and latest["decided_by"] == "human",
         edits=edits,
         attachments=attachments,
+        exec_dept=current_dept(conn, project_id),
+        contact=dept_contact(conn, project["org_id"], current_dept(conn, project_id)),
         nr_plans=conn.execute(
             "SELECT * FROM nr_plan WHERE project_id = ? ORDER BY updated_at DESC, id DESC",
             (project_id,),

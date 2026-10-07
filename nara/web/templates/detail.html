@@ -132,6 +132,21 @@
   {{ buttons() }}
 </form>
 {% endif %}
+{% if d.exec_dept %}
+<p>부서장 <strong>{{ (d.contact.head_name if d.contact else none)|dash }}</strong> · {{ (d.contact.head_position if d.contact else none)|dash }} · {{ (d.contact.head_tel if d.contact else none)|dash }}
+<span class="muted">— {{ d.project.org_name }} {{ d.exec_dept }} 공통{% if d.contact %} · {{ d.contact.updated_at[:10] }} {{ d.contact.updated_by_name or '' }}{% endif %}</span>{{ edit_link('contact') }}</p>
+{% if edit == 'contact' %}
+<form method="post" class="edit-form" action="{{ url_for('save_contact', project_id=d.project.id) }}">
+  <p class="muted">{{ d.project.org_name }} {{ d.exec_dept }}의 부서장입니다. 같은 부서가 실행부서인 사업에 모두 보입니다. 셋 다 비우면 지웁니다.</p>
+  <label>부서장 이름 <input type="text" name="head_name" value="{{ val('head_name', d.contact.head_name if d.contact else none) }}">{{ err('head_name') }}</label>
+  <label>직위 <input type="text" name="head_position" value="{{ val('head_position', d.contact.head_position if d.contact else none) }}">{{ err('head_position') }}</label>
+  <label>직통번호 <input type="text" name="head_tel" inputmode="tel" value="{{ val('head_tel', d.contact.head_tel if d.contact else none) }}">{{ err('head_tel') }}</label>
+  {{ buttons() }}
+</form>
+{% endif %}
+{% else %}
+<p class="muted">부서장 연락처: 실행부서를 먼저 확정하세요</p>
+{% endif %}
 {% if d.depts %}
 <div class="table-wrap"><table>
 <thead><tr><th>실행부서</th><th>상태</th><th>판정</th><th>계약부서</th><th>근거 문장</th><th>출처</th><th>사유</th><th>조회 시각</th></tr></thead>

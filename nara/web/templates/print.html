@@ -45,8 +45,8 @@
   <td>{{ r.start_date or '' }}</td>
   <td>{{ r.end_date or '' }}</td>
   <td>{{ r.dept or '' }}</td>
-  <td></td>
-  <td></td>
+  <td>{{ r.head_name or '' }}</td>
+  <td>{{ r.head_position or '' }}</td>
   <td>{{ r.dept_tel or '' }}</td>
   <td>{{ r.winner or '' }}</td>
   <td class="left">{% for line in r.plan %}{{ line }}<br>{% endfor %}</td>

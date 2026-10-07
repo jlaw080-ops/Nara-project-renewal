@@ -12,6 +12,7 @@ EXPECTED_TABLES = {
     "energy_unit_price",
     "energy_kind",
     "nr_plan",
+    "dept_contact",
     "run_log",
     "app_state",
 }

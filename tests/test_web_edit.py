@@ -16,6 +16,7 @@ from nara.web.data import DatabaseMissing, open_readwrite
 from nara.web.edit import (
     LONG_TEXT_LIMIT,
     TEXT_LIMIT,
+    check_contact,
     check_dept,
     check_energy,
     check_info,
@@ -23,6 +24,7 @@ from nara.web.edit import (
     check_verdict,
     hide_projects,
     release_verdict,
+    save_contact,
     save_dept,
     save_energy,
     save_info,
@@ -411,3 +413,48 @@ def test_check_prices_lets_a_new_kind_stay_unpriced():
     checked = check_prices(["PV", "태양열 평판형"], ["2,600,000", ""], current)
     assert checked.ok
     assert checked.values["prices"] == {"PV": 2_600_000}
+
+
+def test_check_contact_reads_name_position_and_direct_line():
+    checked = check_contact(
+        {"head_name": " 홍길동 ", "head_position": "과장", "head_tel": "051-000-0000"}
+    )
+    assert checked.ok
+    assert checked.values == {
+        "head_name": "홍길동", "head_position": "과장", "head_tel": "051-000-0000",
+    }  # fmt: skip
+
+
+def test_check_contact_allows_clearing_everything():
+    """셋 다 비우면 그 부서의 연락처를 지운다."""
+    checked = check_contact({"head_name": "", "head_position": "", "head_tel": ""})
+    assert checked.ok
+    assert checked.values == {"head_name": None, "head_position": None, "head_tel": None}
+
+
+def test_check_contact_rejects_a_number_that_cannot_be_dialled_and_long_text():
+    tel = "숫자와 -로 9~11자리를 적으세요 (예: 051-000-0000)"
+    assert check_contact({"head_tel": "내선 1234"}).errors == {"head_tel": tel}
+    assert check_contact({"head_tel": "1234-5678"}).errors == {"head_tel": tel}
+    assert check_contact({"head_tel": "051-000-00000-1"}).errors == {"head_tel": tel}
+    assert check_contact({"head_name": "가" * 51}).errors == {
+        "head_name": "50자까지 적을 수 있습니다"
+    }
+
+
+def test_save_contact_is_one_row_per_org_and_department(db):
+    path, pid = db
+    with closing(open_readwrite(path)) as conn:
+        org = conn.execute("SELECT org_id FROM project WHERE id = ?", (pid,)).fetchone()[0]
+        values = {"head_name": "홍길동", "head_position": "과장", "head_tel": "051-000-0000"}
+        assert save_contact(conn, org, "체육진흥과", values, NOW) is True
+        assert save_contact(conn, org, "체육진흥과", values, NOW) is False
+        changed = {**values, "head_name": "김철수"}
+        assert save_contact(conn, org, "체육진흥과", changed, "2026-10-08T09:00:00") is True
+        rows = conn.execute(
+            "SELECT dept, head_name, updated_at FROM dept_contact WHERE org_id = ?", (org,)
+        ).fetchall()
+        assert [tuple(r) for r in rows] == [("체육진흥과", "김철수", "2026-10-08T09:00:00")]
+        empty = {"head_name": None, "head_position": None, "head_tel": None}
+        assert save_contact(conn, org, "체육진흥과", empty, NOW) is True
+        assert conn.execute("SELECT COUNT(*) FROM dept_contact").fetchone()[0] == 0

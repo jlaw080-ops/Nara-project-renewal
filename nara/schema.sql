@@ -216,3 +216,15 @@ CREATE TABLE IF NOT EXISTS nr_plan (
   skipped       TEXT                               -- 웹 수정 때문에 반영하지 않은 칸, 쉼표로
 );
 CREATE INDEX IF NOT EXISTS idx_nr_plan_project ON nr_plan(project_id);
+
+-- 부서장 연락처. 기관+부서마다 한 줄 — 같은 부서가 실행부서인 사업이 모두 같이 쓴다.
+CREATE TABLE IF NOT EXISTS dept_contact (
+  org_id        INTEGER NOT NULL REFERENCES org(id),
+  dept          TEXT NOT NULL,
+  head_name     TEXT,
+  head_position TEXT,
+  head_tel      TEXT,                              -- 직통번호
+  updated_at    TEXT NOT NULL,
+  updated_by    INTEGER REFERENCES app_user(id),
+  PRIMARY KEY (org_id, dept)
+);
