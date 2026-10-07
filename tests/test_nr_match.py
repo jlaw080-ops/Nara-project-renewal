@@ -15,6 +15,7 @@ from nara.nr_match import (
     name_key,
     name_score,
     org_key,
+    overlaps,
 )
 from nara.store import ensure_project, upsert_org
 
@@ -151,3 +152,33 @@ def test_candidates_use_the_address_to_tell_busan_from_seoul(conn):
     _project(conn, "서울특별시 강서구", "강서구 통합복지관 건립 설계용역")
     found = candidates(conn, "강서구청", "강서구통합복지관", "부산광역시 강서구 강동송백2길 2")
     assert [c.project_id for c in found] == [busan]
+
+
+def _nr(conn, org, name, address=None):
+    pid = _project(conn, org, name, address)
+    conn.execute("UPDATE project SET source = 'nr' WHERE id = ?", (pid,))
+    conn.commit()
+    return pid
+
+
+def test_overlaps_pair_a_plan_only_project_with_the_same_orgs_procurement(conn):
+    """설치계획서로 만든 사업이 나중에 공고로 들어온 사업과 같은 것인지 찾는다."""
+    g2b = _project(conn, "부산광역시 동구", "좌천 주민활력 어울림파크 조성사업 설계용역")
+    _project(conn, "부산광역시 동구", "동구 공공도서관 건립 설계용역")
+    _project(conn, "부산광역시 서구", "좌천 주민활력 어울림파크 설계용역")  # 다른 기관
+    nr = _nr(conn, "부산광역시 동구", "좌천 주민활력 어울림파크")
+    _nr(conn, "부산광역시 동구", "좌천 주민활력 어울림파크 별관")  # 설치계획서끼리는 비교하지 않음
+    found = overlaps(conn)
+    assert [(o.nr_id, o.project_id) for o in found if o.nr_id == nr] == [(nr, g2b)]
+    assert all(o.org_name == "부산광역시 동구" for o in found)
+
+
+def test_overlaps_skip_hidden_projects_and_filter_by_region(conn):
+    hidden = _project(conn, "부산광역시 동구", "좌천 어울림파크 설계용역")
+    conn.execute("UPDATE project SET hidden_at = ? WHERE id = ?", (NOW, hidden))
+    _project(conn, "서울특별시 서초구", "서초 복합문화센터 설계용역")
+    _nr(conn, "부산광역시 동구", "좌천 어울림파크")
+    seoul = _nr(conn, "서울특별시 서초구", "서초 복합문화센터")
+    assert overlaps(conn, region="부산광역시") == []
+    assert [o.nr_id for o in overlaps(conn)] == [seoul]
+    assert overlaps(conn, min_score=1.01) == []

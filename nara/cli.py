@@ -23,6 +23,7 @@ from nara.doctor import run_checks
 from nara.google import search_news
 from nara.llm import adjudicate, ask_dept
 from nara.migrate_sheets import import_tab
+from nara.nr_match import OVERLAP_MIN, overlaps
 from nara.runlog import run_log
 from nara.slot import SLOTS
 from nara.slot import acquire as acquire_slot
@@ -511,6 +512,24 @@ def run_slot(
         typer.echo(f"실패한 단계: {', '.join(failed)}", err=True)
         raise typer.Exit(code=1)
     typer.echo(f"슬롯 {slot} 완료")
+
+
+@app.command("nr-dupes")
+def nr_dupes(
+    region: str = typer.Option("", help="기관 이름 앞부분 (예: 부산광역시)"),
+    min_score: float = typer.Option(OVERLAP_MIN, "--min", help="이름 점수 하한 (0~1)"),
+    db: Path = typer.Option(DEFAULT_DB, help="SQLite 경로"),
+) -> None:
+    """설치계획서로 만든 사업과 겹쳐 보이는 공고 사업을 보여 준다. 아무것도 고치지 않는다."""
+    conn = _open_db(db)
+    found = overlaps(conn, region, min_score)
+    if not found:
+        typer.echo("겹치는 후보가 없습니다")
+        return
+    for o in found:
+        pair = f"#{o.nr_id} {o.nr_name}	#{o.project_id} {o.name}"
+        typer.echo(f"{o.score:.2f}	{o.org_name}	{pair}")
+    typer.echo(f"후보 {len(found)}쌍 — 같은 사업이면 웹 설치계획 화면에서 연결을 바꾸세요")
 
 
 @app.command()

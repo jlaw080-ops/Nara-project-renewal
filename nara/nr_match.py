@@ -167,6 +167,45 @@ def candidates(
     return found[:limit]
 
 
+OVERLAP_MIN = 0.5
+
+
+@dataclass(frozen=True)
+class Overlap:
+    nr_id: int
+    nr_name: str
+    org_name: str
+    project_id: int
+    name: str
+    score: float
+
+
+def overlaps(
+    conn: sqlite3.Connection, region: str = "", min_score: float = OVERLAP_MIN
+) -> list[Overlap]:
+    """설치계획서로 만든 사업과 같은 기관의 공고 사업 중 같은 사업으로 보이는 쌍. 읽기만 한다.
+
+    설치계획서가 먼저 들어와 새 사업이 된 뒤 같은 건물의 공고가 수집되면 둘로 갈린다.
+    숨긴 사업과 설치계획서 사업끼리는 비교하지 않는다.
+    """
+    others = {
+        r[0]
+        for r in conn.execute("SELECT id FROM project WHERE source != 'nr' AND hidden_at IS NULL")
+    }
+    found = []
+    for r in conn.execute(
+        "SELECT p.id, p.name, p.address, o.name AS org_name FROM project p "
+        "JOIN org o ON o.id = p.org_id WHERE p.source = 'nr' AND p.hidden_at IS NULL "
+        "AND o.name LIKE ? ORDER BY o.name, p.id",
+        (f"{region}%",),
+    ):
+        for c in candidates(conn, r[3], r[1], r[2] or "", limit=len(others) + 1):
+            if c.project_id in others and c.score >= min_score:
+                found.append(Overlap(r[0], r[1], r[3], c.project_id, c.name, c.score))
+    found.sort(key=lambda o: (-o.score, o.nr_id, o.project_id))
+    return found
+
+
 def decide(cands: list[Candidate]) -> Decision:
     if not cands or cands[0].score < NEW_BELOW:
         return Decision("new", None, cands[0].score if cands else None)
