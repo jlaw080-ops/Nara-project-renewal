@@ -44,6 +44,23 @@ def _plans(conn: sqlite3.Connection, project_id: int) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+def _recency(plan: sqlite3.Row) -> tuple:
+    """신청이 최신일수록 크다. 받은 시각이 아니라 신청번호로 본다 — 옛 신청이 늦게 올 수 있다.
+    신청번호가 없는(작성중) 건은 가장 최근으로 본다."""
+    key = plan["key"]
+    if key.isdigit():
+        return (0, int(key), plan["updated_at"])
+    return (1, 0, plan["updated_at"])
+
+
+def _current(plans: list[sqlite3.Row]) -> list[sqlite3.Row]:
+    """건물마다 최신 신청 하나만 남긴다. 같은 건물을 다시 신청하면 이전 신청은 버린다."""
+    newest: dict[str, sqlite3.Row] = {}
+    for plan in sorted(plans, key=_recency, reverse=True):
+        newest.setdefault("".join((plan["building_name"] or "").split()), plan)
+    return list(newest.values())
+
+
 def _apply_energy(
     conn: sqlite3.Connection, pid: int, plans: list[sqlite3.Row], now: str, skipped: list[str]
 ) -> None:
@@ -97,7 +114,7 @@ def _apply_dept(
 
 def apply_plans(conn: sqlite3.Connection, project_id: int, now: str) -> list[str]:
     """그 사업에 연결된 설치계획서를 반영한다. 건너뛴 칸 이름을 돌려준다. 커밋은 부른 쪽이."""
-    plans = _plans(conn, project_id)
+    plans = _current(_plans(conn, project_id))
     if not plans:
         return []
     skipped: list[str] = []

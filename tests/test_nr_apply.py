@@ -310,3 +310,26 @@ def test_a_new_project_goes_under_the_region_from_the_address(db):
         (result.project_id,),
     ).fetchone()
     assert tuple(org) == ("부산광역시 강서구", "focus")
+
+
+def test_a_resubmitted_building_counts_only_its_latest_application(db):
+    """같은 건물을 다시 신청하면 신청번호가 큰 쪽이 최신이다. 늦게 받았다고 최신이 아니다."""
+    conn, gym = db
+    newer = _row(key="2512180004", end="2028-12-31",
+                 energy=[{"source": "태양광", "form": "BIPV", "capacity_kw": 35.2}])  # fmt: skip
+    older = _row(key="2509040011", end="2028-06-30",
+                 energy=[{"source": "태양광", "form": "BIPV", "capacity_kw": 33.28}])  # fmt: skip
+    ingest(conn, [newer], SETTINGS, NOW)
+    ingest(conn, [older], SETTINGS, LATER)
+    assert _energy(conn, gym) == [("BIPV", 35.2, "nr")]
+    end = conn.execute("SELECT end_date FROM project WHERE id = ?", (gym,)).fetchone()[0]
+    assert end == "2028-12-31"
+
+
+def test_a_draft_counts_as_the_newest_application(db):
+    conn, gym = db
+    ingest(conn, [_row(key="2512180004")], SETTINGS, NOW)
+    draft = _row(key="전라북도 완주군|완주 다목적체육관",
+                 energy=[{"source": "지열", "form": "수직밀폐형", "capacity_kw": 400}])  # fmt: skip
+    ingest(conn, [draft], SETTINGS, LATER)
+    assert _energy(conn, gym) == [("지열", 400.0, "nr")]
