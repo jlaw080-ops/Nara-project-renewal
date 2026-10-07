@@ -32,19 +32,44 @@ _PUNCT = re.compile(r"[\s·,.\-_/]")
 _ROAD = re.compile(r"\S+(?:로|길)(?=\s|\d|$)")
 
 
-def canonical_org(name: str, aliases: Mapping[str, str] | None = None) -> str:
+# 시·도 이름. 설치계획서 기관명은 이것을 빼거나('강서구청') 붙여 쓴다('부산광역시기장군청').
+_REGION = re.compile(r"(특별시|광역시|특별자치시|특별자치도|도)$")
+_JOINED = re.compile(r"^(\S+?(?:특별시|광역시|특별자치시|특별자치도|도))(\S+[시군구])$")
+
+
+def _renamed(text: str) -> str:
+    for old, new in _REGION_RENAMES:
+        if text.startswith(old):
+            return new + text[len(old) :]
+    return text
+
+
+def canonical_org(
+    name: str, aliases: Mapping[str, str] | None = None, address: str | None = None
+) -> str:
+    """나라 앱 기관명 꼴로. 시·도가 빠졌으면 주소의 시·도를 붙인다.
+
+    '강서구청'은 서울에도 부산에도 있다. 주소 두 번째 낱말이 기관명과 같을 때만 붙인다 —
+    주소가 다른 곳(본청 소재지 등)이면 잘못 붙이느니 그대로 둔다.
+    """
     text = " ".join((name or "").split())
     if aliases and text in aliases:
         return aliases[text]
-    for old, new in _REGION_RENAMES:
-        if text.startswith(old):
-            text = new + text[len(old) :]
-            break
-    return _OFFICE.sub("", text)
+    text = _OFFICE.sub("", _renamed(text))
+    joined = _JOINED.match(text)
+    if joined:
+        text = f"{joined[1]} {joined[2]}"
+    words = text.split()
+    addr = (address or "").split()
+    if words and not _REGION.search(words[0]) and len(addr) > 1 and addr[1] == words[0]:
+        region = _renamed(addr[0])
+        if _REGION.search(region):
+            text = f"{region} {text}"
+    return text
 
 
-def org_key(name: str, aliases: Mapping[str, str] | None = None) -> str:
-    return canonical_org(name, aliases).replace(" ", "")
+def org_key(name: str, aliases: Mapping[str, str] | None = None, address: str | None = None) -> str:
+    return canonical_org(name, aliases, address).replace(" ", "")
 
 
 def _cut_index(text: str, marker: str) -> int:
@@ -119,7 +144,7 @@ def candidates(
     limit: int = 5,
 ) -> list[Candidate]:
     """같은 기관(정규화 뒤)의 사업을 점수 순으로. 숨긴 사업도 넣는다."""
-    key = org_key(org, aliases)
+    key = org_key(org, aliases, addr)
     orgs = {
         r["id"]: r["name"]
         for r in conn.execute("SELECT id, name FROM org")

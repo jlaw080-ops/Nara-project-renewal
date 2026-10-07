@@ -298,3 +298,15 @@ def test_making_a_new_project_does_not_commit_halfway(db):
     assert conn.in_transaction
     conn.rollback()
     assert conn.execute("SELECT COUNT(*) FROM nr_plan").fetchone()[0] == 0
+
+
+def test_a_new_project_goes_under_the_region_from_the_address(db):
+    conn, _ = db
+    row = _row(key="2026-020", org="강서구청", name="에코델타 복합민원센터",
+               addr="부산광역시 강서구 에코대로 243")  # fmt: skip
+    [result] = ingest(conn, [row], SETTINGS, NOW)
+    org = conn.execute(
+        "SELECT o.name, o.tier FROM project p JOIN org o ON o.id = p.org_id WHERE p.id = ?",
+        (result.project_id,),
+    ).fetchone()
+    assert tuple(org) == ("부산광역시 강서구", "focus")

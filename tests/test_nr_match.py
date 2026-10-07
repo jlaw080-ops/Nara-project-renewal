@@ -125,3 +125,29 @@ def test_decide_links_only_a_clear_winner():
 def test_name_key_cuts_at_business_or_construction_only_where_a_word_ends(name, expected):
     """'사업소'·'공사관'의 '사업'·'공사'에서 자르면 다른 건물이 같은 짧은 이름이 된다."""
     assert name_key(name, "전북특별자치도 완주군") == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "address", "expected"),
+    [
+        ("부산광역시기장군청", "", "부산광역시 기장군"),
+        ("부산광역시남구청", "", "부산광역시 남구"),
+        ("경상남도김해시", "", "경상남도 김해시"),
+        ("강원도교육청", "", "강원특별자치도교육청"),
+        ("강서구청", "부산광역시 강서구 에코대로 243", "부산광역시 강서구"),
+        ("수원시청", "경기도 수원시 권선구 호매실로 237", "경기도 수원시"),
+        ("강서구청", "서울특별시 마포구 월드컵로 1", "강서구"),
+        ("중구청", "", "중구"),
+        ("부산광역시", "부산광역시 해운대구 APEC로 55", "부산광역시"),
+    ],
+)
+def test_canonical_org_fills_in_the_region_from_spacing_or_the_address(raw, address, expected):
+    """설치계획서는 '강서구청'처럼 시·도를 빼고 적는다. 주소의 시·도를 붙여야 서울·부산이 갈린다."""
+    assert canonical_org(raw, address=address) == expected
+
+
+def test_candidates_use_the_address_to_tell_busan_from_seoul(conn):
+    busan = _project(conn, "부산광역시 강서구", "강서구 통합복지관 건립 설계용역")
+    _project(conn, "서울특별시 강서구", "강서구 통합복지관 건립 설계용역")
+    found = candidates(conn, "강서구청", "강서구통합복지관", "부산광역시 강서구 강동송백2길 2")
+    assert [c.project_id for c in found] == [busan]

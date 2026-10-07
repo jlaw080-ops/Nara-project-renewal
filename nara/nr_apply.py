@@ -128,7 +128,7 @@ def apply_plans(conn: sqlite3.Connection, project_id: int, now: str) -> list[str
 
 def _new_project(conn: sqlite3.Connection, plan: sqlite3.Row, settings: Settings, now: str) -> int:
     aliases = dict(settings.nr_org_aliases)
-    key = org_key(plan["org_name"], aliases)
+    key = org_key(plan["org_name"], aliases, plan["address"])
     org_id = next(
         (
             r["id"]
@@ -138,7 +138,7 @@ def _new_project(conn: sqlite3.Connection, plan: sqlite3.Row, settings: Settings
         None,
     )
     if org_id is None:
-        name = canonical_org(plan["org_name"], aliases)
+        name = canonical_org(plan["org_name"], aliases, plan["address"])
         org_id = upsert_org(conn, name, settings, now, commit=False)
     return ensure_project(conn, org_id, plan["building_name"], "nr", now, commit=False)
 

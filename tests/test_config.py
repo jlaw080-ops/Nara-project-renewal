@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from nara.config import load_secrets, load_settings
+from nara.filters import is_focus_org
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 # 2026-10-01 사용자 지시. '제설'·'보도'·'거리'는 '국제설계'·'정보도서관'·'사거리' 안에 들어
@@ -35,7 +36,7 @@ def test_load_settings_keeps_every_focus_org():
     (2026-09-30 사용자 지시). 시트 설정 탭에 그것들을 넣으면 숫자는 그대로 간다.
     """
     settings = load_settings(REPO_ROOT / "config.toml")
-    assert len(settings.focus_orgs) == 23
+    assert len(settings.focus_orgs) == 22  # 부산광역시는 2026-10-07 exact_orgs로 옮김
     assert len(settings.title_excluded) == 115
     assert len(settings.org_excluded) == 8
     # 시트보다 앞서 있는 것들. 시트에 반영되기 전까지 여기가 유일한 기록이다.
@@ -45,7 +46,7 @@ def test_load_settings_keeps_every_focus_org():
     assert "서울특별시" in seoul and "서울특별시" not in settings.focus_orgs
     districts = [n for n in seoul if n.startswith("서울특별시 ") and n.endswith("구")]
     assert len(districts) == len(set(districts)) == 25
-    assert len(seoul) == 26
+    assert len([n for n in seoul if n.startswith("서울특별시")]) == 26
 
 
 def test_load_secrets_reads_env_file(tmp_path):
@@ -80,3 +81,15 @@ def test_load_settings_reads_org_aliases_for_installation_plans(tmp_path):
 
 def test_load_settings_has_no_org_aliases_by_default():
     assert load_settings(REPO_ROOT / "config.toml").nr_org_aliases == ()
+
+
+def test_busan_is_focus_only_for_city_hall_and_district_offices():
+    """2026-10-07 사용자 지시: 부산은 본청과 구·군청만. 사업소·본부까지 딸려 오면 안 된다."""
+    settings = load_settings(REPO_ROOT / "config.toml")
+    assert "부산광역시" not in settings.focus_orgs
+    busan = [n for n in settings.focus_exact_orgs if n.startswith("부산광역시")]
+    assert "부산광역시" in busan
+    districts = [n for n in busan if n.startswith("부산광역시 ") and n[-1] in "구군"]
+    assert len(districts) == len(set(districts)) == 16
+    assert is_focus_org("부산광역시 기장군", settings)
+    assert not is_focus_org("부산광역시 상수도사업본부", settings)
