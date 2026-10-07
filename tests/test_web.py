@@ -1777,3 +1777,36 @@ def test_contact_save_refuses_another_site(world):
         _client(path), f"/project/{ids['gym']}/contact", CONTACT, origin="http://evil.example"
     )
     assert resp.status_code == 403
+
+
+def _sheet(resp):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    return [list(r) for r in load_workbook(BytesIO(resp.data)).active.iter_rows(values_only=True)]
+
+
+def test_the_excel_download_has_the_same_columns_and_values_as_the_print(world):
+    """PDF 출력과 같은 15칸을 엑셀로 내려받는다 — 담당자가 받아서 고치거나 보낼 수 있다."""
+    path, ids = world
+    _print_world(path, ids)
+    resp = _client(path).get("/export.xlsx")
+    assert resp.status_code == 200
+    assert "attachment" in resp.headers["Content-Disposition"]
+    assert ".xlsx" in resp.headers["Content-Disposition"]
+    rows = _sheet(resp)
+    assert rows[0] == PRINT_HEADERS
+    gym = next(r for r in rows[1:] if "완주군 다목적체육관" in r[1])
+    assert gym[2] == "전북 완주군 봉동읍 1" and gym[6] == "2027-12-31"
+    assert gym[7] == "체육시설과" and gym[10] == "063-000-0000"
+    assert "kW" in gym[12] and "합계" in gym[13]
+
+
+def test_the_excel_download_follows_the_list_filters(world):
+    path, ids = world
+    client = _client(path)
+    names = [r[1] for r in _sheet(client.get("/export.xlsx?focus=1"))[1:]]
+    assert any("완주군 다목적체육관" in n for n in names)
+    assert not any("성남시 박물관" in n for n in names)
+    assert 'href="/export.xlsx?focus=1"' in _text(client.get("/?focus=1"))

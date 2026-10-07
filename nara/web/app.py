@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta
+from io import BytesIO
 from itertools import zip_longest
 from pathlib import Path
 
@@ -32,7 +33,7 @@ from nara.nr_apply import ignore_plan, ingest, link_plan
 from nara.nr_match import candidates
 from nara.nr_plan import load_energy
 from nara.runlog import run_log
-from nara.web import edit
+from nara.web import edit, xlsx
 from nara.web.data import (
     BUSY_TIMEOUT_SECONDS,
     NR_STATE_LABELS,
@@ -402,6 +403,23 @@ def create_app(
         f, _ = parse_filters({k: request.args.getlist(k) for k in request.args})
         rows, result = print_rows(get_conn(), f)
         return render_template("print.html", rows=rows, result=result)
+
+    @app.get("/export.xlsx")
+    def export_xlsx():
+        """목록 조건 그대로 출력 양식 15칸을 엑셀로 내려받는다."""
+        f, _ = parse_filters({k: request.args.getlist(k) for k in request.args})
+        rows, result = print_rows(get_conn(), f)
+        note = (
+            f"조건에 맞는 {result.matched}건 중 {len(rows)}건만 담았습니다 — 조건을 좁혀 주세요."
+            if result.truncated
+            else ""
+        )
+        return send_file(
+            BytesIO(xlsx.workbook(rows, note)),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=f"{datetime.now():%Y.%m.%d}_사업조회.xlsx",
+        )
 
     @app.get("/project/<int:project_id>")
     def detail(project_id: int):

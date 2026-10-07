@@ -47,7 +47,7 @@
 {% if nr_pending %}<p class="saved"><a href="{{ url_for('nr_list') }}">설치계획 확인 필요 {{ nr_pending }}건</a></p>{% endif %}
 <p><strong>{{ result.total }}건 중 {{ result.matched }}건</strong>
 {% if conditions %}<span class="muted">조건: {{ conditions|join(' · ') }}</span>{% endif %}
-<a href="{{ url_for('print_list') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}" target="_blank" rel="noopener">PDF로 출력</a></p>
+<a href="{{ url_for('print_list') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}" target="_blank" rel="noopener">PDF로 출력</a> · <a href="{{ url_for('export_xlsx') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}">엑셀로 받기</a></p>
 {% if result.excluded_no_notice %}
 <p class="muted">공고일 조건이 걸려 공고가 없는 사업 {{ result.excluded_no_notice }}건이 제외되었습니다</p>
 {% endif %}
