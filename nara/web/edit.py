@@ -10,6 +10,7 @@ from datetime import date
 from itertools import zip_longest
 
 from nara.energy import EnergyItem, EnergyKind
+from nara.settings_store import KINDS, Change
 from nara.sheet_memory import FIELD_LABELS, PROJECT_FIELDS, canonical, energy_value
 from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN
 
@@ -534,3 +535,60 @@ def save_prices(
                 (code, prices[code], today, user_id),
             )
     return changed
+
+
+SETTING_MIN = 2
+SETTING_LIMIT = 50
+ALIAS_FORMAT = "`설치계획서 기관명 = 나라 앱 기관명` 꼴로 적으세요"
+NO_REQUIRED = "제목 필수 키워드가 없으면 모든 용역을 수집합니다"
+
+
+def _setting_error(value: str) -> str | None:
+    if len(value) < SETTING_MIN:
+        return f"키워드는 2자 이상이어야 합니다: {value}"
+    if len(value) > SETTING_LIMIT:
+        return f"{SETTING_LIMIT}자까지 적을 수 있습니다"
+    return None
+
+
+def _setting_lines(kind: str, raw: str) -> tuple[list[tuple[str, str | None]], str | None]:
+    """한 줄에 하나. 앞뒤 공백만 지운다 — '제설 전진기지'의 안쪽 공백은 키워드의 일부다."""
+    out: list[tuple[str, str | None]] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        target = None
+        if kind == "nr_alias":
+            value, sep, target = (part.strip() for part in line.partition("="))
+            if not sep or not value or not target:
+                return [], ALIAS_FORMAT
+            line = value
+        error = _setting_error(line) or (target and _setting_error(target))
+        if error:
+            return [], error
+        if all(v != line for v, _ in out):
+            out.append((line, target))
+    return out, None
+
+
+def check_settings(form, current: Mapping[str, set[str]]) -> Checked:
+    """설정 화면 입력. 이미 있는 값을 더하거나 없는 값을 빼는 것은 오류가 아니라 무시한다."""
+    adds: list[tuple[str, str, str | None]] = []
+    removes: list[tuple[str, str]] = []
+    errors: dict[str, str] = {}
+    for kind in KINDS:
+        lines, error = _setting_lines(kind, form.get(f"add_{kind}", ""))
+        if error:
+            errors[kind] = error
+            continue
+        adds += [(kind, v, t) for v, t in lines if v not in current[kind]]
+        removes += [(kind, v) for v in form.getlist(f"remove_{kind}") if v in current[kind]]
+    warnings = []
+    left = (current["title_required"] - {v for k, v in removes if k == "title_required"}) | {
+        v for k, v, _ in adds if k == "title_required"
+    }
+    if current["title_required"] and not left:
+        warnings.append(NO_REQUIRED)
+    change = Change(tuple(adds), tuple(removes))
+    return Checked({"change": change, "warnings": warnings}, errors)

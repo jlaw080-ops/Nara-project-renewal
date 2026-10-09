@@ -109,3 +109,68 @@ def test_the_web_app_seeds_at_start_and_reads_settings_per_request(tmp_path):
     c.close()
     with app.app_context():
         assert ("시험군청", "전북특별자치도 완주군") in _settings(get_conn()).nr_org_aliases
+
+
+from werkzeug.datastructures import MultiDict  # noqa: E402
+
+from nara.settings_store import Change  # noqa: E402
+from nara.web.edit import check_settings  # noqa: E402
+
+CURRENT = {
+    k: set()
+    for k in (
+        "title_required", "title_excluded", "org_excluded",
+        "focus_org", "focus_exact_org", "nr_alias",
+    )
+}  # fmt: skip
+
+
+def _check(current=None, **form):
+    return check_settings(MultiDict(form), current or {**CURRENT, "title_excluded": {"감리"}})
+
+
+def test_check_settings_keeps_inner_spaces_and_drops_blank_and_duplicate_lines():
+    checked = _check(add_title_excluded=" 제설 전진기지 \n\n제설 전진기지\n감리\n")
+    assert checked.ok
+    assert checked.values["change"].adds == (("title_excluded", "제설 전진기지", None),)
+
+
+def test_check_settings_rejects_short_and_long_values():
+    assert _check(add_org_excluded="감").errors == {
+        "org_excluded": "키워드는 2자 이상이어야 합니다: 감"
+    }
+    assert _check(add_focus_org="가" * 51).errors == {"focus_org": "50자까지 적을 수 있습니다"}
+
+
+def test_check_settings_splits_an_alias_at_the_first_equals_sign():
+    checked = _check(add_nr_alias="서초구청 = 서울특별시 서초구\n가군청=나=다")
+    assert checked.values["change"].adds == (
+        ("nr_alias", "서초구청", "서울특별시 서초구"),
+        ("nr_alias", "가군청", "나=다"),
+    )
+    bad = _check(add_nr_alias="서초구청")
+    assert bad.errors == {"nr_alias": "`설치계획서 기관명 = 나라 앱 기관명` 꼴로 적으세요"}
+
+
+def test_check_settings_ignores_removing_a_value_that_is_already_gone():
+    """다른 사람이 먼저 뺀 값이면 오류 없이 넘어간다."""
+    checked = _check(remove_title_excluded=["감리", "없는값"])
+    assert checked.values["change"].removes == (("title_excluded", "감리"),)
+
+
+def test_check_settings_warns_when_every_required_keyword_goes():
+    current = {**CURRENT, "title_required": {"설계"}}
+    checked = check_settings(MultiDict({"remove_title_required": "설계"}), current)
+    assert checked.ok
+    assert checked.values["warnings"] == ["제목 필수 키워드가 없으면 모든 용역을 수집합니다"]
+
+
+def test_change_apply_to_removes_then_appends():
+    change = Change(
+        adds=(("title_excluded", "체육", None), ("nr_alias", "가군청", "가군")),
+        removes=(("title_excluded", "감리"),),
+    )
+    got = change.apply_to(BASE)
+    assert "감리" not in got.title_excluded and got.title_excluded[-1] == "체육"
+    assert ("가군청", "가군") in got.nr_org_aliases
+    assert Change().empty and not change.empty

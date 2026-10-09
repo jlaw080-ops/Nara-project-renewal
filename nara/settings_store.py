@@ -2,7 +2,7 @@
 
 import hashlib
 import sqlite3
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from nara.config import Settings
 
@@ -90,3 +90,25 @@ def fingerprint(conn: sqlite3.Connection) -> str:
     ).fetchall()
     text = "\n".join("\t".join(r) for r in rows)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class Change:
+    adds: tuple[tuple[str, str, str | None], ...] = ()  # (kind, value, target)
+    removes: tuple[tuple[str, str], ...] = ()  # (kind, value)
+
+    @property
+    def empty(self) -> bool:
+        return not self.adds and not self.removes
+
+    def apply_to(self, settings: Settings) -> Settings:
+        """빼고 나서 더한다. 더한 값은 목록 끝에 붙는다."""
+        gone = set(self.removes)
+        lists = {}
+        for kind, attr in FIELDS.items():
+            kept = [v for v in getattr(settings, attr) if (kind, v) not in gone]
+            kept += [v for k, v, _ in self.adds if k == kind and v not in kept]
+            lists[attr] = tuple(kept)
+        aliases = [(a, b) for a, b in settings.nr_org_aliases if ("nr_alias", a) not in gone]
+        aliases += [(v, t) for k, v, t in self.adds if k == "nr_alias"]
+        return replace(settings, **lists, nr_org_aliases=tuple(aliases))
