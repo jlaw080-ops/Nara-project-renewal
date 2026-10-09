@@ -10,6 +10,7 @@ from nara.dept_rules import (
     find_staff,
     unspace,
     verify_answer,
+    verify_staff,
 )
 
 PAIR = (
@@ -332,3 +333,15 @@ def test_find_staff_reads_a_name_with_a_position_or_after_a_label():
 def test_find_staff_ignores_call_centre_numbers_and_returns_none_when_nothing():
     assert find_staff("문의: 건축과 콜센터 1588-0800", "건축과") is None
     assert find_staff("건축과에서 시행한다. 담당 주무관이 안내한다.", "건축과") is None
+
+
+def test_verify_staff_keeps_only_what_the_notice_really_says():
+    text = "용역 문의: 건축과 김철수 주무관 (☎ 051-605-6231)"
+    assert verify_staff(text, StaffContact("김철수", "주무관", "051-605-6231")) == StaffContact(
+        "김철수", "주무관", "051-605-6231"
+    )
+    assert verify_staff(text, StaffContact("박영희", "주무관", "051-605-9999")) is None
+    assert verify_staff(text, StaffContact("김철수", "과장", None)) == StaffContact(
+        "김철수", None, None
+    )
+    assert verify_staff(text, None) is None

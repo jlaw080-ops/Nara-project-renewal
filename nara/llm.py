@@ -4,10 +4,12 @@
 호출부는 그걸 '미확인'으로 남긴다 — 추측한 판정을 쓰는 것보다 낫다.
 """
 
+import re
+
 import anthropic
 
 from nara.config import Secrets
-from nara.dept_rules import DeptAnswer
+from nara.dept_rules import POSITION, DeptAnswer, StaffContact, normalize_tel
 from nara.verdict import BEFORE, BUILDING, DONE, UNKNOWN, Article
 
 MODEL = "claude-opus-5"
@@ -26,14 +28,17 @@ SYSTEM = (
 )
 SYSTEM_DEPT = (
     "너는 한국 지자체 입찰 공고문에서 사업을 맡은 실행부서를 찾는다.\n"
-    "다음 세 줄로만 답한다:\n"
+    "다음 다섯 줄로만 답한다:\n"
     "실행부서: <부서 이름 또는 없음>\n"
     "계약부서: <부서 이름 또는 없음>\n"
     "근거: <공고문에서 글자를 바꾸지 않고 그대로 옮긴 문장>\n"
+    "담당자: <실행부서 담당자 이름 직위 또는 없음>\n"
+    "전화: <실행부서 전화번호 또는 없음>\n"
     "규칙:\n"
     "- 공고문에 적힌 것만 답한다. 조직도나 사업 성격으로 짐작하지 않는다.\n"
     "- 계약·입찰·개찰·회계 문의 부서(재무과·회계과 등)는 실행부서가 아니다.\n"
     "- 실행부서는 과 단위로 적는다. 팀 이름은 적지 않는다.\n"
+    "- 담당자·전화도 공고문에 적힌 것만 적는다. 계약부서 전화는 적지 않는다.\n"
     "- 확신이 없으면 '실행부서: 없음'이라고 적는다."
 )
 _NONE = {"", "없음", "없음.", "-"}
@@ -132,4 +137,16 @@ def ask_dept(secrets: Secrets, excerpt: str, client=None) -> DeptAnswer | None:
         exec_dept=None if exec_dept in _NONE else exec_dept,
         contract_dept=None if contract in _NONE else contract,
         quote=_field(text, "근거"),
+        staff=_staff(_field(text, "담당자"), _field(text, "전화")),
     )
+
+
+def _staff(who: str, tel: str) -> StaffContact | None:
+    """'김철수 주무관' → 이름·직위. 직위 낱말이 없으면 전부 이름."""
+    name = position = None
+    if who not in _NONE:
+        m = re.fullmatch(rf"\s*([가-힣]{{2,4}})\s*({POSITION})?\s*", who)
+        if m:
+            name, position = m.group(1), m.group(2)
+    staff = StaffContact(name, position, None if tel in _NONE else normalize_tel(tel))
+    return None if staff.empty else staff

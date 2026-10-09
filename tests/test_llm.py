@@ -2,7 +2,7 @@ import anthropic
 import httpx2
 
 from nara.config import Secrets
-from nara.dept_rules import DeptAnswer
+from nara.dept_rules import DeptAnswer, StaffContact
 from nara.llm import MODEL, SYSTEM_DEPT, adjudicate, ask_dept
 from nara.verdict import BEFORE, BUILDING, Article
 
@@ -210,3 +210,22 @@ def test_ask_dept_fails_closed_on_a_truncated_answer():
     response = _Response("실행부서: 건축과")
     response.stop_reason = "max_tokens"
     assert ask_dept(KEYED, "발췌", client=_FakeClient(response)) is None
+
+
+def test_ask_dept_reads_the_staff_lines_too():
+    client = _FakeClient(
+        _Response(
+            "실행부서: 건축과\n계약부서: 재무과\n근거: 용역 문의: 건축과 김철수 주무관\n"
+            "담당자: 김철수 주무관\n전화: ☎ 051-605-6231"
+        )
+    )
+    answer = ask_dept(KEYED, "발췌", client=client)
+    assert answer.staff == StaffContact("김철수", "주무관", "051-605-6231")
+    assert "담당자:" in SYSTEM_DEPT and "계약부서 전화" in SYSTEM_DEPT
+
+
+def test_ask_dept_staff_none_when_both_lines_say_none():
+    client = _FakeClient(
+        _Response("실행부서: 건축과\n계약부서: 없음\n근거: x\n담당자: 없음\n전화: 없음")
+    )
+    assert ask_dept(KEYED, "발췌", client=client).staff is None

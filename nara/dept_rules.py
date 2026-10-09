@@ -101,6 +101,7 @@ class DeptAnswer:
     exec_dept: str | None
     contract_dept: str | None
     quote: str
+    staff: StaffContact | None = None  # 담당자·전화. 호출부가 원문과 대조한 뒤에만 쓴다
 
 
 def unspace(text: str) -> str:
@@ -260,3 +261,16 @@ def find_staff(text: str, dept: str) -> StaffContact | None:
         if not staff.empty:
             found.append(staff)
     return next((s for s in found if s.tel), found[0] if found else None)
+
+
+def verify_staff(text: str, staff: StaffContact | None) -> StaffContact | None:
+    """번호는 숫자만 남겨 원문에 있을 때, 이름은 글자 그대로 있을 때만. 직위는 이름이 살았을 때만."""
+    if staff is None:
+        return None
+    flat = squash(text)
+    digits = re.sub(r"\D", "", flat)
+    tel = staff.tel if staff.tel and re.sub(r"\D", "", staff.tel) in digits else None
+    name = staff.name if staff.name and staff.name in flat else None
+    position = staff.position if name and staff.position and staff.position in flat else None
+    kept = StaffContact(name, position, tel)
+    return None if kept.empty else kept
