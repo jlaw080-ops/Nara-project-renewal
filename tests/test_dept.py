@@ -472,3 +472,55 @@ def test_auto_fill_never_overwrites_a_value_a_person_entered(db, tmp_path):
     # auto_fields가 비어 있으면 사람이 넣은 값이다 — 그대로 둔다
     assert _contact(db, 1, "문화관광과") == (None, None, "063-000-7777", None, None)
     assert run.contacts_filled == 0
+
+
+def _confirm_dept(conn, pid, dept, decided_by="human"):
+    conn.execute(
+        "INSERT INTO dept_check (project_id, exec_dept, decided_by, confirmed, checked_at) "
+        "VALUES (?, ?, ?, 1, ?)",
+        (pid, dept, decided_by, NOW),
+    )
+    conn.commit()
+
+
+def test_saved_notices_fill_contacts_for_already_confirmed_departments(db, tmp_path):
+    from nara.dept import fill_saved_contacts
+
+    _project(db, 1, bid_no="B1")
+    _run(db, tmp_path / "a", _server({"B1": ONE}))  # 받아 둔다 + 규칙 확정
+    db.execute("DELETE FROM dept_contact")  # 자동 채움 전 상태로
+    _project(db, 2, bid_no="B2")  # 사람이 확정한 사업, 첨부 없음
+    _confirm_dept(db, 2, "건축과")
+    db.commit()
+    preview = fill_saved_contacts(db, tmp_path / "a", dry_run=True)
+    assert [(p[0], p[1], p[2], p[3]) for p in preview] == [
+        ("관심군", "문화관광과", 1, ["staff_tel"])
+    ]
+    assert db.execute("SELECT COUNT(*) FROM dept_contact").fetchone()[0] == 0
+    done = fill_saved_contacts(db, tmp_path / "a", dry_run=False)
+    assert len(done) == 1
+    assert _contact(db, 1, "문화관광과") == (None, None, "063-000-0001", "staff_tel", None)
+    assert fill_saved_contacts(db, tmp_path / "a", dry_run=False) == []  # 이미 찼다
+
+
+def test_enrich_contacts_command_previews_then_fills(tmp_path, monkeypatch):
+    db_path = tmp_path / "data" / "n.db"
+    conn = connect(db_path)
+    migrate(conn)
+    conn.close()
+    seen = []
+
+    def fake(conn, root, dry_run):
+        seen.append((root, dry_run))
+        staff = StaffContact(None, None, "063-000-0001")
+        return [("관심군", "문화관광과", 1, ["staff_tel"], staff)]
+
+    monkeypatch.setattr(cli, "fill_saved_contacts", fake)
+    result = CliRunner().invoke(cli.app, ["enrich", "contacts", "--dry-run", "--db", str(db_path)])
+    assert result.exit_code == 0, result.output
+    assert "관심군 문화관광과 #1: staff_tel=063-000-0001" in result.output
+    assert "미리보기 1건 — 실제로 채우려면 --dry-run 없이" in result.output
+    result = CliRunner().invoke(cli.app, ["enrich", "contacts", "--db", str(db_path)])
+    assert "연락처 1건을 채웠습니다" in result.output
+    attach = tmp_path / "data" / "attachments"
+    assert seen == [(attach, True), (attach, False)]

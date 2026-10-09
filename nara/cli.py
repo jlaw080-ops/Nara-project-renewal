@@ -18,7 +18,7 @@ from nara.collect import backfill as run_backfill
 from nara.collect import collect_range
 from nara.config import Secrets, Settings, load_secrets, load_settings
 from nara.db import attachments_dir, connect, migrate
-from nara.dept import update_depts
+from nara.dept import fill_saved_contacts, update_depts
 from nara.doctor import run_checks
 from nara.google import search_news
 from nara.llm import adjudicate, ask_dept
@@ -390,9 +390,33 @@ def enrich_dept(
         )
     if run.stopped_early:
         typer.echo("시간 예산을 넘겨 멈췄다 — 다음 회차가 이어서 본다")
+    if run.contacts_filled:
+        typer.echo(f"담당자 연락처를 공고문에서 채운 사업 {run.contacts_filled}건")
     if run.failed and run.failed == run.checked:
         typer.echo("전체 조회 실패 — 네트워크를 확인한다.", err=True)
         raise typer.Exit(code=1)
+
+
+@enrich_app.command("contacts")
+def enrich_contacts(
+    dry_run: bool = typer.Option(False, "--dry-run", help="무엇을 채울지만 보여 주고 쓰지 않는다"),
+    db: Path = typer.Option(DEFAULT_DB),
+) -> None:
+    """받아 둔 공고문으로 확정된 실행부서의 실무 담당자 연락처를 한 번 채운다."""
+    conn = _open_db(db)
+    found = fill_saved_contacts(conn, attachments_dir(db), dry_run)
+    for org, dept, pid, fields, staff in found:
+        values = {
+            "staff_name": staff.name,
+            "staff_position": staff.position,
+            "staff_tel": staff.tel,
+        }
+        shown = ", ".join(f"{f}={values[f]}" for f in fields)
+        typer.echo(f"{org} {dept} #{pid}: {shown}")
+    if dry_run:
+        typer.echo(f"미리보기 {len(found)}건 — 실제로 채우려면 --dry-run 없이 실행")
+    else:
+        typer.echo(f"연락처 {len(found)}건을 채웠습니다")
 
 
 user_app = typer.Typer(help="로그인 계정을 관리한다")

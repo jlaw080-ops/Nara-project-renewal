@@ -442,3 +442,55 @@ def update_depts(
             counters.failed += 1
     counters.updated = run.confirmed_rule + run.confirmed_llm
     return run
+
+
+def fill_saved_contacts(
+    conn: sqlite3.Connection, root: Path, dry_run: bool
+) -> list[tuple[str, str, int, list[str], StaffContact]]:
+    """확정된 실행부서의 실무 담당자 칸이 다 비어 있으면 받아 둔 첨부로 채운다.
+
+    내려받기·Claude 호출은 하지 않는다. dry_run이면 쓰지 않고 무엇을 채울지만 돌려준다.
+    (기관, 부서, 사업 id, 채운 칸, 찾은 값)의 목록.
+    """
+    targets = conn.execute(
+        "SELECT p.id, p.org_id, o.name AS org_name, "
+        "(SELECT exec_dept FROM dept_check d WHERE d.project_id = p.id AND d.confirmed = 1 "
+        " AND COALESCE(d.exec_dept, '') != '' ORDER BY d.checked_at DESC, d.id DESC LIMIT 1) "
+        "AS dept FROM project p JOIN org o ON o.id = p.org_id "
+        "WHERE p.hidden_at IS NULL ORDER BY o.name, p.id"
+    ).fetchall()
+    done = []
+    for t in targets:
+        if not t["dept"]:
+            continue
+        row = conn.execute(
+            "SELECT staff_name, staff_position, staff_tel FROM dept_contact "
+            "WHERE org_id = ? AND dept = ?",
+            (t["org_id"], t["dept"]),
+        ).fetchone()
+        if row and any(row):
+            continue
+        texts = conn.execute(
+            "SELECT a.text_path FROM attachment a JOIN notice n ON n.bid_no = a.bid_no "
+            "WHERE n.project_id = ? AND a.status = 'ok' "
+            "ORDER BY COALESCE(n.notice_date, '') DESC, n.bid_no DESC, a.seq",
+            (t["id"],),
+        ).fetchall()
+        staff = None
+        for (text_path,) in texts:
+            path = root / text_path
+            if path.is_file():
+                staff = find_staff(path.read_text(encoding="utf-8"), t["dept"])
+            if staff:
+                break
+        if staff is None:
+            continue
+        now = datetime.now().isoformat(timespec="seconds")
+        filled = fill_contact(conn, t["id"], t["dept"], staff, now)
+        if dry_run:
+            conn.rollback()
+        else:
+            conn.commit()
+        if filled:
+            done.append((t["org_name"], t["dept"], t["id"], filled, staff))
+    return done
