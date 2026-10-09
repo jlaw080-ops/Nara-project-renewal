@@ -1810,3 +1810,31 @@ def test_the_excel_download_follows_the_list_filters(world):
     assert any("완주군 다목적체육관" in n for n in names)
     assert not any("성남시 박물관" in n for n in names)
     assert 'href="/export.xlsx?focus=1"' in _text(client.get("/?focus=1"))
+
+
+def _org_id(path, name):
+    with closing(open_readonly(path)) as conn:
+        return conn.execute("SELECT id FROM org WHERE name = ?", (name,)).fetchone()[0]
+
+
+def test_orgs_are_picked_with_checkboxes_and_a_search_box(world):
+    """기관이 150곳이 넘어 Ctrl+클릭 목록으로는 고르기 어렵다 — 검색해서 체크로 고른다."""
+    path, _ = world
+    wanju = _org_id(path, "전북특별자치도 완주군")
+    text = _text(_client(path).get(f"/?org={wanju}"))
+    assert '<select name="org"' not in text
+    assert re.search(rf'<input type="checkbox" name="org" value="{wanju}" checked', text)
+    seongnam = _org_id(path, "경기도 성남시")
+    assert re.search(rf'<input type="checkbox" name="org" value="{seongnam}">', text)
+    search = re.search(r'<input[^>]*id="org-search"[^>]*>', text).group(0)
+    assert "name=" not in search  # 검색어는 조회 조건으로 보내지 않는다
+    assert 'id="org-all"' in text and 'id="org-none"' in text
+
+
+def test_checking_two_orgs_lists_both_orgs_projects(world):
+    path, _ = world
+    wanju, seongnam = _org_id(path, "전북특별자치도 완주군"), _org_id(path, "경기도 성남시")
+    names = _text(_client(path).get(f"/?org={wanju}&org={seongnam}"))
+    assert "완주군 다목적체육관" in names and "성남시 박물관" in names
+    only = _text(_client(path).get(f"/?org={wanju}"))
+    assert "완주군 다목적체육관" in only and "성남시 박물관" not in only

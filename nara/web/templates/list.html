@@ -10,13 +10,19 @@
 </p>
 
 <form class="filters" method="get" action="{{ url_for('index') }}">
-  <label>수요기관
-    <select name="org" multiple size="6">
+  <fieldset class="org-pick">
+    <legend>수요기관 <span id="org-count" class="muted">{% if f.orgs %}{{ f.orgs|length }}곳 선택{% endif %}</span></legend>
+    <div class="org-tools">
+      <input type="search" id="org-search" placeholder="기관 이름 검색" aria-label="수요기관 검색" autocomplete="off">
+      <button type="button" id="org-all">보이는 기관 모두 선택</button>
+      <button type="button" id="org-none">선택 해제</button>
+    </div>
+    <div class="org-list">
       {% for o in orgs %}
-      <option value="{{ o.id }}"{% if o.id in f.orgs %} selected{% endif %}>{{ o.name }}{% if o.tier == 'focus' %} ★{% endif %}</option>
+      <label><input type="checkbox" name="org" value="{{ o.id }}"{% if o.id in f.orgs %} checked{% endif %}> {{ o.name }}{% if o.tier == 'focus' %} ★{% endif %}</label>
       {% endfor %}
-    </select>
-  </label>
+    </div>
+  </fieldset>
   <label>관심기관
     <span><input type="checkbox" name="focus" value="1"{% if f.focus_only %} checked{% endif %}> 관심기관만</span>
   </label>
@@ -98,6 +104,30 @@
 </table></div>
 </form>
 <script>
+(function () {
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.org-list input[name=org]'));
+  var count = document.getElementById("org-count");
+  function shown(box) { return !box.parentElement.hidden; }
+  function recount() {
+    var n = boxes.filter(function (b) { return b.checked; }).length;
+    count.textContent = n ? n + "곳 선택" : "";
+  }
+  document.getElementById("org-search").addEventListener("input", function (e) {
+    var q = e.target.value.replace(/\s+/g, "");
+    boxes.forEach(function (b) {
+      b.parentElement.hidden = q !== "" && b.parentElement.textContent.replace(/\s+/g, "").indexOf(q) < 0;
+    });
+  });
+  document.getElementById("org-all").addEventListener("click", function () {
+    boxes.filter(shown).forEach(function (b) { b.checked = true; });
+    recount();
+  });
+  document.getElementById("org-none").addEventListener("click", function () {
+    boxes.forEach(function (b) { b.checked = false; });
+    recount();
+  });
+  boxes.forEach(function (b) { b.addEventListener("change", recount); });
+})();
 document.getElementById("pick-all").addEventListener("change", function (e) {
   document.querySelectorAll('#hide-form input[name=pid]').forEach(function (box) { box.checked = e.target.checked; });
 });
