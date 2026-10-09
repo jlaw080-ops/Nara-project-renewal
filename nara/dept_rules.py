@@ -74,6 +74,28 @@ class Candidate:
     near: bool  # 문의처·담당 신호어 바로 뒤(90자 안)에서 찾았는가
 
 
+STAFF_FIELDS = ("staff_name", "staff_position", "staff_tel")
+STAFF_WINDOW = 120  # 부서 이름 뒤로 담당자·번호를 찾는 폭
+POSITION = r"주무관|사무관|서기관|주사보|주사|주임|계장|팀장"
+_TEL = re.compile(r"(?<!\d)(0\d{1,2})\s*[-.)]?\s*(\d{3,4})\s*[-.]\s*(\d{4})(?!\d)")
+_CALL_CENTRE = re.compile(r"^(1588|1577|1544|080)")
+_NAME_POS = re.compile(rf"(?<![가-힣])([가-힣]{{2,4}})\s*({POSITION})(?![가-힣])")
+_LABEL_NAME = re.compile(r"담당(?:자)?\s*[:：]\s*([가-힣]{2,4})(?![가-힣])")
+# '담당 주무관'·'건축과 주무관'의 앞 낱말은 이름이 아니다
+_NOT_NAME = re.compile(r"(담당|부서|소속|문의|과|팀|계|실|국)$")
+
+
+@dataclass(frozen=True)
+class StaffContact:
+    name: str | None
+    position: str | None
+    tel: str | None
+
+    @property
+    def empty(self) -> bool:
+        return not (self.name or self.position or self.tel)
+
+
 @dataclass(frozen=True)
 class DeptAnswer:
     exec_dept: str | None
@@ -201,3 +223,40 @@ def verify_answer(text: str, answer: DeptAnswer) -> bool:
     if not _names_whole(answer.quote, dept):
         return False
     return is_division(dept) and not EXCL.match(dept)
+
+
+def normalize_tel(raw: str) -> str | None:
+    """'☎ 051 - 605 - 6231' → '051-605-6231'. 콜센터 번호는 None."""
+    m = _TEL.search(raw or "")
+    if m is None or _CALL_CENTRE.match(m.group(1)):
+        return None
+    return "-".join(m.groups())
+
+
+def _staff_window(txt: str, start: int, dept: str) -> str:
+    """부서 이름 뒤 120자. 다른 부서 이름이 나오면 거기서 끊는다."""
+    window = txt[start : start + STAFF_WINDOW]
+    for m in DEPT.finditer(window):
+        if m.group(1) != dept and is_division(m.group(1)):
+            return window[: m.start()]
+    return window
+
+
+def find_staff(text: str, dept: str) -> StaffContact | None:
+    """실행부서 뒤에 적힌 직통번호·담당자. 번호가 있는 자리를 먼저, 없으면 이름이 있는 자리."""
+    txt = _clean(text).replace("\n", " ")
+    # 뒤에 조사가 붙어도('건축과에서') 찾는다. 앞은 낱말 경계여야 '도시건축과'를 피한다.
+    pattern = r"(?<![가-힣])" + r"\s*".join(map(re.escape, dept))
+    found: list[StaffContact] = []
+    for m in re.finditer(pattern, txt):
+        window = _staff_window(txt, m.end(), dept)
+        tel = normalize_tel(window)
+        name = position = None
+        if (np := _NAME_POS.search(window)) and not _NOT_NAME.search(np.group(1)):
+            name, position = np.group(1), np.group(2)
+        elif ln := _LABEL_NAME.search(window):
+            name = ln.group(1)
+        staff = StaffContact(name, position, tel)
+        if not staff.empty:
+            found.append(staff)
+    return next((s for s in found if s.tel), found[0] if found else None)

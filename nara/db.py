@@ -44,6 +44,10 @@ def migrate(conn: sqlite3.Connection) -> int:
     _add_column(conn, "project", "hidden_at", "TEXT")
     _add_column(conn, "project", "hidden_by", "INTEGER REFERENCES app_user(id)")
     _add_column(conn, "project", "hidden_reason", "TEXT")
+    _add_column(conn, "dept_contact", "staff_name", "TEXT")
+    _add_column(conn, "dept_contact", "staff_position", "TEXT")
+    _add_column(conn, "dept_contact", "staff_tel", "TEXT")
+    _add_column(conn, "dept_contact", "auto_fields", "TEXT")
     conn.execute(
         "INSERT INTO app_state (key, value) VALUES ('schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",

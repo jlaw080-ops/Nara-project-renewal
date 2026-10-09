@@ -224,6 +224,10 @@ CREATE TABLE IF NOT EXISTS dept_contact (
   head_name     TEXT,
   head_position TEXT,
   head_tel      TEXT,                              -- 직통번호
+  staff_name     TEXT,                            -- 실무 담당자
+  staff_position TEXT,
+  staff_tel      TEXT,                            -- 직통번호
+  auto_fields    TEXT,                            -- 공고문에서 자동으로 채운 칸. 쉼표로 잇는다
   updated_at    TEXT NOT NULL,
   updated_by    INTEGER REFERENCES app_user(id),
   PRIMARY KEY (org_id, dept)

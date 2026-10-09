@@ -2,10 +2,12 @@
 
 from nara.dept_rules import (
     DeptAnswer,
+    StaffContact,
     decide_by_rule,
     excerpt_for_llm,
     find_candidates,
     find_contract_dept,
+    find_staff,
     unspace,
     verify_answer,
 )
@@ -295,3 +297,38 @@ def test_a_department_in_a_later_sentence_than_the_cue_is_not_confirmed():
     )
     assert decide_by_rule(find_candidates(text)) is None
     assert _names(text) == ["지리정보담당관"]  # 후보로는 남는다
+
+
+def test_find_staff_reads_the_number_after_the_department_not_the_contract_one():
+    text = (
+        "【 세부사항 확인 및 문의처 안내 】 전자입찰 이용안내: 조달청 콜센터 ☎ 1588-0800 "
+        "용역에 관한 사항: 부산진구청 건축과 ☎ 051-605-6231 "
+        "입찰공고에 관한 사항: 부산진구청 재무과 ☎ 051-605-4154"
+    )
+    assert find_staff(text, "건축과") == StaffContact(None, None, "051-605-6231")
+    assert find_staff(text, "재무과") == StaffContact(None, None, "051-605-4154")
+
+
+def test_find_staff_stops_at_the_next_department():
+    text = "건축과와 협의하여 작성한다. 입찰에 관한 사항은 재무과(051-709-4141)로 문의"
+    assert find_staff(text, "건축과") is None
+
+
+def test_find_staff_accepts_brackets_spaces_and_a_team_in_between():
+    assert find_staff("문의: 건축과(051-605-6231)", "건축과").tel == "051-605-6231"
+    assert find_staff("문의: 건축과 ☎ 051 - 605 - 6231", "건축과").tel == "051-605-6231"
+    pair = "사업관련 문의: 문화관광과 관광팀 (063-000-0001)"
+    assert find_staff(pair, "문화관광과").tel == "063-000-0001"
+
+
+def test_find_staff_reads_a_name_with_a_position_or_after_a_label():
+    got = find_staff("용역 문의: 건축과 김철수 주무관 (☎ 051-605-6231)", "건축과")
+    assert got == StaffContact("김철수", "주무관", "051-605-6231")
+    assert find_staff("사업담당: 건축과 담당자: 홍길동", "건축과") == StaffContact(
+        "홍길동", None, None
+    )
+
+
+def test_find_staff_ignores_call_centre_numbers_and_returns_none_when_nothing():
+    assert find_staff("문의: 건축과 콜센터 1588-0800", "건축과") is None
+    assert find_staff("건축과에서 시행한다. 담당 주무관이 안내한다.", "건축과") is None
