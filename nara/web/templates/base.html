@@ -60,6 +60,10 @@
   .runs { margin: 0 0 12px; }
   form.filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 12px 0; }
   form.filters label { display: flex; flex-direction: column; gap: 4px; }
+  fieldset.setting { border: 1px solid var(--field-line); padding: 8px; margin: 0 0 12px; }
+  .setting-values { display: flex; flex-wrap: wrap; gap: 4px 12px; max-height: 12rem; overflow-y: auto; margin-bottom: 8px; }
+  fieldset.setting textarea { width: 100%; box-sizing: border-box; }
+  .setting-values label[hidden] { display: none; }
   form.filters fieldset.org-pick { border: 1px solid var(--field-line); padding: 6px 8px; margin: 0; min-width: 18rem; }
   .org-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
   .org-list { max-height: 12rem; overflow-y: auto; display: flex; flex-direction: column; }
@@ -69,7 +73,7 @@
 </head>
 <body>
 {% if g.user %}
-<div class="account muted"><a href="{{ url_for('index') }}">사업 조회</a> · <a href="{{ url_for('prices') }}">단가 관리</a> · <a href="{{ url_for('nr_list') }}">설치계획</a> · {{ g.user.name }} · <a href="{{ url_for('change_password') }}">비밀번호 바꾸기</a>
+<div class="account muted"><a href="{{ url_for('index') }}">사업 조회</a> · <a href="{{ url_for('prices') }}">단가 관리</a> · <a href="{{ url_for('settings') }}">설정</a> · <a href="{{ url_for('nr_list') }}">설치계획</a> · {{ g.user.name }} · <a href="{{ url_for('change_password') }}">비밀번호 바꾸기</a>
   <form method="post" class="inline" action="{{ url_for('logout') }}"><button type="submit">로그아웃</button></form></div>
 {% endif %}
 {% for m in get_flashed_messages() %}<p class="saved">{{ m }}</p>{% endfor %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>설정 변경 확인</h1>
+{% if message %}<p class="bad">{{ message }}</p>{% endif %}
+{% for w in warnings %}<p class="bad">{{ w }}</p>{% endfor %}
+<form method="post" action="{{ url_for('settings_apply') }}">
+  {% for kind in kinds %}
+    {% for v in form.getlist('remove_' ~ kind) %}<input type="hidden" name="remove_{{ kind }}" value="{{ v }}">{% endfor %}
+    <input type="hidden" name="add_{{ kind }}" value="{{ form.get('add_' ~ kind, '') }}">
+  {% endfor %}
+  <input type="hidden" name="fingerprint" value="{{ plan.fingerprint }}">
+
+  <h2>바뀌는 값</h2>
+  <ul>
+  {% for kind in kinds %}
+    {% set added = plan.change.adds|selectattr(0, 'equalto', kind)|list %}
+    {% set gone = plan.change.removes|selectattr(0, 'equalto', kind)|list %}
+    {% if added or gone %}
+    <li>{{ labels[kind] }} —
+      {% if added %}더함: {% for a in added %}{{ a[1] }}{% if a[2] %} → {{ a[2] }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+      {% if added and gone %} / {% endif %}
+      {% if gone %}뺌: {{ gone|map(attribute=1)|join(', ') }}{% endif %}
+    </li>
+    {% endif %}
+  {% endfor %}
+  </ul>
+
+  {% if plan.widened %}<p class="muted">전에 걸러진 공고는 다시 수집해야 들어옵니다(<code>nara backfill</code>)</p>{% endif %}
+
+  {% if plan.hide %}
+  <h2>이미 수집된 사업 중 {{ plan.hide|length }}건이 걸립니다</h2>
+  <p class="muted">숨길 사업만 체크하세요. 체크하지 않은 사업은 그대로 둡니다. 숨긴 사업은 "숨긴 사업"에서 되돌릴 수 있습니다.</p>
+  <label><input type="checkbox" id="hide-all"> 모두 선택</label>
+  <div class="table-wrap"><table>
+  <thead><tr><th>숨김</th><th>수요기관</th><th>사업</th><th>걸린 이유</th></tr></thead>
+  <tbody>
+  {% for c in plan.hide %}
+  <tr><td><input type="checkbox" name="hide" value="{{ c.project_id }}"></td><td>{{ c.org_name }}</td><td><a href="{{ url_for('detail', project_id=c.project_id) }}" target="_blank" rel="noopener">{{ c.name }}</a></td><td>{{ c.reason }}</td></tr>
+  {% endfor %}
+  </tbody></table></div>
+  {% endif %}
+
+  {% if plan.demote %}
+  <h2>관심에서 빠질 기관 {{ plan.demote|length }}곳 (사업 {{ plan.demote|sum(attribute='projects') }}건)</h2>
+  <p class="muted">일반 기관이 되어 요일별로 조회합니다. 사업과 판정 기록은 그대로입니다.</p>
+  <ul>{% for m in plan.demote %}<li>{{ m.name }} ({{ m.projects }}건)</li>{% endfor %}</ul>
+  {% endif %}
+  {% if plan.promote %}
+  <h2>관심으로 올릴 기관 {{ plan.promote|length }}곳</h2>
+  <ul>{% for m in plan.promote %}<li>{{ m.name }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  <button type="submit">확인 저장</button>
+  <a href="{{ url_for('settings') }}">취소</a>
+</form>
+<script>
+(function () {
+  var all = document.getElementById("hide-all");
+  if (!all) return;
+  all.addEventListener("change", function (e) {
+    document.querySelectorAll('input[name=hide]').forEach(function (b) { b.checked = e.target.checked; });
+  });
+})();
+</script>
+{% endblock %}

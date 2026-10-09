@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>설정</h1>
+<p class="muted">여기가 정본입니다. 저장하면 다음 수집부터 쓰입니다. 저장 전에 이미 모은 사업에 미칠 영향을 먼저 보여 줍니다.</p>
+{% if errors._form %}<p class="bad">{{ errors._form }}</p>{% endif %}
+<form method="post" action="{{ url_for('settings_preview') }}">
+{% for kind in kinds %}
+<fieldset class="setting">
+  <legend>{{ labels[kind] }} <span class="muted">{{ values[kind]|length }}개</span></legend>
+  {% if errors[kind] %}<p class="bad">{{ errors[kind] }}</p>{% endif %}
+  {% if values[kind]|length > 10 %}<input type="search" class="setting-search" placeholder="값 검색" aria-label="{{ labels[kind] }} 검색" autocomplete="off">{% endif %}
+  <div class="setting-values">
+  {% for r in values[kind] %}
+    <label><input type="checkbox" name="remove_{{ kind }}" value="{{ r.value }}"{% if r.value in form.getlist('remove_' ~ kind) %} checked{% endif %}> {{ r.value }}{% if r.target %} → {{ r.target }}{% endif %}</label>
+  {% else %}
+    <span class="muted">비어 있음</span>
+  {% endfor %}
+  </div>
+  <label>더할 값 (한 줄에 하나{% if kind == 'nr_alias' %}, <code>설치계획서 기관명 = 나라 앱 기관명</code>{% endif %})
+    <textarea name="add_{{ kind }}" rows="3">{{ form.get('add_' ~ kind, '') }}</textarea>
+  </label>
+  <p class="muted">체크한 값은 뺍니다.</p>
+</fieldset>
+{% endfor %}
+<button type="submit">저장 (확인 화면으로)</button>
+</form>
+
+<h2>최근 변경</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>때</th><th>사람</th><th>종류</th><th>변경</th><th>값</th></tr></thead>
+<tbody>
+{% for r in log %}
+<tr><td>{{ r.at }}</td><td>{{ r.user_name|dash }}</td><td>{{ labels[r.kind] }}</td><td>{{ '더함' if r.action == 'add' else '뺌' }}</td><td>{{ r.value }}{% if r.target %} → {{ r.target }}{% endif %}</td></tr>
+{% else %}
+<tr><td colspan="5" class="muted">아직 바꾼 기록이 없습니다</td></tr>
+{% endfor %}
+</tbody>
+</table></div>
+<script>
+document.querySelectorAll(".setting-search").forEach(function (box) {
+  box.addEventListener("input", function () {
+    var q = box.value.replace(/\s+/g, "");
+    box.parentElement.querySelectorAll(".setting-values label").forEach(function (l) {
+      l.hidden = q !== "" && l.textContent.replace(/\s+/g, "").indexOf(q) < 0;
+    });
+  });
+});
+</script>
+{% endblock %}

@@ -23,9 +23,10 @@ from flask import (
     session,
     url_for,
 )
+from werkzeug.datastructures import MultiDict
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from nara import auth
+from nara import auth, settings_store
 from nara.config import Settings
 from nara.db import attachments_dir
 from nara.energy import EnergyKind, load_kinds
@@ -432,6 +433,82 @@ def create_app(
             as_attachment=True,
             download_name=f"{datetime.now():%Y.%m.%d}_사업조회.xlsx",
         )
+
+    def _setting_items(conn) -> dict[str, list]:
+        return {k: settings_store.items(conn, k) for k in settings_store.KINDS}
+
+    def _render_settings(form: MultiDict, errors, status=200):
+        conn = get_conn()
+        return render_template(
+            "settings.html",
+            kinds=settings_store.KINDS,
+            labels=settings_store.LABELS,
+            values=_setting_items(conn),
+            log=settings_store.recent_log(conn),
+            form=form,
+            errors=errors,
+        ), status
+
+    def _setting_plan():
+        """폼을 검사하고 미리보기를 만든다. (plan, warnings) 또는 (오류 응답, None)."""
+        conn = get_conn()
+        current = {k: {r["value"] for r in v} for k, v in _setting_items(conn).items()}
+        checked = edit.check_settings(request.form, current)
+        if not checked.ok:
+            return _render_settings(request.form, checked.errors, 422), None
+        change = checked.values["change"]
+        if change.empty:
+            flash("바뀐 것이 없습니다")
+            return redirect(url_for("settings")), None
+        plan = settings_store.plan_change(conn, current_app.config["SETTINGS"], change)
+        return plan, checked.values["warnings"]
+
+    def _render_preview(plan, warnings, message=None, status=200):
+        return render_template(
+            "settings_preview.html",
+            plan=plan,
+            warnings=warnings,
+            labels=settings_store.LABELS,
+            form=request.form,
+            kinds=settings_store.KINDS,
+            message=message,
+        ), status
+
+    @app.get("/settings")
+    def settings():
+        return _render_settings(MultiDict(), {})
+
+    @app.post("/settings/preview")
+    def settings_preview():
+        plan, warnings = _setting_plan()
+        if warnings is None:
+            return plan
+        return _render_preview(plan, warnings)
+
+    @app.post("/settings/apply")
+    def settings_apply():
+        plan, warnings = _setting_plan()
+        if warnings is None:
+            return plan
+        stale = "그사이 설정이 바뀌었습니다. 다시 확인하세요"
+        if request.form.get("fingerprint") != plan.fingerprint:
+            return _render_preview(plan, warnings, stale, 409)
+        hide_ids = {int(v) for v in request.form.getlist("hide") if v.isdigit()}
+        now = datetime.now().isoformat(timespec="seconds")
+        try:
+            with closing(_rw_conn()) as conn:
+                done = settings_store.apply_change(conn, plan, hide_ids, g.user.id, now)
+        except settings_store.StaleSettings:
+            return _render_preview(plan, warnings, stale, 409)
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc):
+                raise
+            return _render_preview(plan, warnings, BUSY_MESSAGE, 503)
+        flash(
+            f"설정 {done['items']}건을 바꿨습니다 — 숨김 {done['hidden']}건, "
+            f"관심 내림 {done['demoted']}곳, 관심 올림 {done['promoted']}곳"
+        )
+        return redirect(url_for("settings"))
 
     @app.get("/project/<int:project_id>")
     def detail(project_id: int):

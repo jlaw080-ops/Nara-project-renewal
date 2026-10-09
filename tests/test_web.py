@@ -1838,3 +1838,83 @@ def test_checking_two_orgs_lists_both_orgs_projects(world):
     assert "완주군 다목적체육관" in names and "성남시 박물관" in names
     only = _text(_client(path).get(f"/?org={wanju}"))
     assert "완주군 다목적체육관" in only and "성남시 박물관" not in only
+
+
+def test_the_settings_page_lists_every_kind_with_current_values(world):
+    path, _ = world
+    text = _text(_client(path).get("/settings"))
+    for label in (
+        "제목 필수 키워드",
+        "제목 제외 키워드",
+        "기관 제외 키워드",
+        "설치계획서 기관 별칭",
+    ):
+        assert label in text
+    assert 'name="remove_title_excluded" value="감리"' in text
+    assert 'href="/settings"' in text  # 상단 메뉴
+    assert 'class="setting-search"' in text  # 115개짜리 제외 키워드 목록은 검색으로 거른다
+
+
+def test_settings_preview_then_apply_hides_only_checked_candidates(world):
+    path, ids = world
+    client = _client(path)
+    form = {"add_title_excluded": "다목적"}
+    preview = _post(client, "/settings/preview", form)
+    text = _text(preview)
+    assert preview.status_code == 200
+    assert "완주군 다목적체육관" in text  # 공고 '완주군 다목적체육관 건립 설계용역'
+    assert f'name="hide" value="{ids["gym"]}">' in text  # 기본값 체크 안 함
+    fp = re.search(r'name="fingerprint" value="([0-9a-f]+)"', text).group(1)
+    resp = _post(
+        client,
+        "/settings/apply",
+        {**form, "fingerprint": fp, "hide": [str(ids["gym"]), str(ids["museum"])]},
+    )
+    assert resp.status_code == 302
+    c = sqlite3.connect(path)
+    hidden = dict(c.execute("SELECT id, hidden_reason FROM project WHERE hidden_at IS NOT NULL"))
+    c.close()
+    assert hidden == {ids["gym"]: "설정 변경: 제외 키워드 '다목적'"}  # 후보 아닌 박물관은 그대로
+    assert 'value="다목적"' in _text(client.get("/settings"))
+
+
+def test_settings_apply_after_someone_else_saved_shows_the_preview_again(world):
+    path, _ = world
+    client = _client(path)
+    form = {"add_org_excluded": "시험청"}
+    fp = re.search(
+        r'name="fingerprint" value="([0-9a-f]+)"', _text(_post(client, "/settings/preview", form))
+    ).group(1)
+    c = sqlite3.connect(path)
+    c.execute(
+        "INSERT INTO setting_item (kind, value, added_at) VALUES ('org_excluded', '먼저청', 'x')"
+    )
+    c.commit()
+    c.close()
+    resp = _post(client, "/settings/apply", {**form, "fingerprint": fp})
+    assert resp.status_code == 409
+    assert "그사이 설정이 바뀌었습니다. 다시 확인하세요" in _text(resp)
+
+
+def test_a_bad_settings_line_is_shown_again_with_the_reason(world):
+    path, _ = world
+    resp = _post(_client(path), "/settings/preview", {"add_org_excluded": "감\n교육원"})
+    assert resp.status_code == 422
+    text = _text(resp)
+    assert "키워드는 2자 이상이어야 합니다: 감" in text and "교육원" in text
+
+
+def test_unchanged_settings_say_so(world):
+    path, _ = world
+    client = _client(path)
+    resp = _post(client, "/settings/preview", {"add_title_excluded": "감리"})
+    assert resp.status_code == 302
+    assert "바뀐 것이 없습니다" in _text(client.get(resp.headers["Location"]))
+
+
+def test_settings_writes_refuse_another_site(world):
+    path, _ = world
+    client = _client(path)
+    for url in ("/settings/preview", "/settings/apply"):
+        resp = _post(client, url, {"add_org_excluded": "시험청"}, origin="http://evil.example")
+        assert resp.status_code == 403
