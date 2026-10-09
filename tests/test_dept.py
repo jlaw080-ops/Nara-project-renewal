@@ -22,7 +22,7 @@ from nara.dept import (
     pending_dept_projects,
     update_depts,
 )
-from nara.dept_rules import DeptAnswer
+from nara.dept_rules import DeptAnswer, StaffContact
 from nara.g2b.attach import probe_url
 from nara.runlog import RunCounters
 
@@ -423,3 +423,52 @@ def test_hidden_projects_are_not_looked_up(db):
     db.execute("UPDATE project SET hidden_at = NULL WHERE id = 2")
     db.commit()
     assert [r["id"] for r in pending_dept_projects(db, None, None, 300)] == [1, 2]
+
+
+def _contact(conn, org_id, dept):
+    row = conn.execute(
+        "SELECT staff_name, staff_position, staff_tel, auto_fields, updated_by "
+        "FROM dept_contact WHERE org_id = ? AND dept = ?",
+        (org_id, dept),
+    ).fetchone()
+    return tuple(row) if row else None
+
+
+def test_a_rule_confirmed_department_fills_the_staff_number_from_the_notice(db, tmp_path):
+    _project(db, 1, bid_no="B1")
+    run, _ = _run(db, tmp_path / "a", _server({"B1": ONE}))
+    assert _contact(db, 1, "문화관광과") == (None, None, "063-000-0001", "staff_tel", None)
+    assert run.contacts_filled == 1
+
+
+def test_a_claude_confirmed_department_fills_only_verified_staff(db, tmp_path):
+    _project(db, 1, bid_no="B1")
+    text = TWO + "\n도시재생과 박영희 주무관 ☎ 063-000-0002"
+    answer = DeptAnswer(
+        "도시재생과", "재무과", "설계서 열람 문의: 도시재생과",
+        staff=StaffContact("박영희", "과장", "063-000-9999"),
+    )  # fmt: skip
+    run, _ = _run(db, tmp_path / "a", _server({"B1": text}), KEYED, lambda s, e: answer)
+    # 규칙이 먼저 읽고(이름·직위·번호 모두 원문에 있음), Claude의 틀린 직위·번호는 버린다
+    assert _contact(db, 1, "도시재생과") == (
+        "박영희",
+        "주무관",
+        "063-000-0002",
+        "staff_name,staff_position,staff_tel",
+        None,
+    )
+    assert run.contacts_filled == 1
+
+
+def test_auto_fill_never_overwrites_a_value_a_person_entered(db, tmp_path):
+    db.execute(
+        "INSERT INTO dept_contact (org_id, dept, staff_tel, updated_at) "
+        "VALUES (1, '문화관광과', '063-000-7777', ?)",
+        (NOW,),
+    )
+    db.commit()
+    _project(db, 1, bid_no="B1")
+    run, _ = _run(db, tmp_path / "a", _server({"B1": ONE}))
+    # auto_fields가 비어 있으면 사람이 넣은 값이다 — 그대로 둔다
+    assert _contact(db, 1, "문화관광과") == (None, None, "063-000-7777", None, None)
+    assert run.contacts_filled == 0

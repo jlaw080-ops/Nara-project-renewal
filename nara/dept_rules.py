@@ -264,7 +264,7 @@ def find_staff(text: str, dept: str) -> StaffContact | None:
 
 
 def verify_staff(text: str, staff: StaffContact | None) -> StaffContact | None:
-    """번호는 숫자만 남겨 원문에 있을 때, 이름은 글자 그대로 있을 때만. 직위는 이름이 살았을 때만."""
+    """번호는 숫자만 남겨 원문에 있을 때, 이름은 글자 그대로 있을 때만. 직위는 이름이 있을 때만."""
     if staff is None:
         return None
     flat = squash(text)

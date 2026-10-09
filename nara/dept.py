@@ -18,14 +18,18 @@ import httpx
 
 from nara.config import Secrets
 from nara.dept_rules import (
+    STAFF_FIELDS,
     Candidate,
     DeptAnswer,
+    StaffContact,
     decide_by_rule,
     excerpt_for_llm,
     find_candidates,
     find_contract_dept,
+    find_staff,
     squash,
     verify_answer,
+    verify_staff,
 )
 from nara.doctext import extract_text
 from nara.g2b.attach import AttachError, Download, gather, safe_name
@@ -59,6 +63,7 @@ class DeptRun:
     asked_llm: int = 0
     llm_unanswered: int = 0
     stopped_early: bool = False
+    contacts_filled: int = 0  # 담당자 연락처를 채운 사업 수
 
 
 @dataclass(frozen=True)
@@ -285,6 +290,9 @@ def _process(
             source_file=source,
             confirmed=1,
         )
+        run.contacts_filled += bool(
+            fill_contact(conn, project_id, chosen.name, find_staff(full_text, chosen.name), now)
+        )
         run.confirmed_rule += 1
         return
 
@@ -309,6 +317,10 @@ def _process(
             decided_by="llm",
             confirmed=1,
         )
+        staff = merge_staff(
+            find_staff(full_text, answer.exec_dept), verify_staff(full_text, answer.staff)
+        )
+        run.contacts_filled += bool(fill_contact(conn, project_id, answer.exec_dept, staff, now))
         run.confirmed_llm += 1
         return
 
@@ -342,6 +354,53 @@ def _process(
     note = (NOTE_CONTRACT_ONLY if contract else NOTE_NOT_FOUND) + tail
     _record(conn, project_id, marker, now, contract_dept=contract, note=note)
     run.not_found += 1
+
+
+def merge_staff(rule: StaffContact | None, llm: StaffContact | None) -> StaffContact | None:
+    """규칙이 읽은 값이 먼저. Claude 값은 빈 칸만 채운다."""
+    if rule is None:
+        return llm
+    if llm is None:
+        return rule
+    return StaffContact(rule.name or llm.name, rule.position or llm.position, rule.tel or llm.tel)
+
+
+def fill_contact(
+    conn: sqlite3.Connection, project_id: int, dept: str, staff: StaffContact | None, now: str
+) -> list[str]:
+    """기관+부서 연락처의 빈 칸만 채우고 auto_fields에 남긴다. 채운 칸 이름을 돌려준다.
+
+    사람이 넣은 값(auto_fields에 없는 값)은 덮지 않는다.
+    """
+    if staff is None or staff.empty:
+        return []
+    org_id = conn.execute("SELECT org_id FROM project WHERE id = ?", (project_id,)).fetchone()[0]
+    row = conn.execute(
+        "SELECT staff_name, staff_position, staff_tel, auto_fields FROM dept_contact "
+        "WHERE org_id = ? AND dept = ?",
+        (org_id, dept),
+    ).fetchone()
+    current = dict(zip(STAFF_FIELDS, tuple(row)[:3] if row else (None, None, None), strict=True))
+    wanted = dict(zip(STAFF_FIELDS, (staff.name, staff.position, staff.tel), strict=True))
+    filled = [f for f in STAFF_FIELDS if wanted[f] and not current[f]]
+    if not filled:
+        return []
+    auto = [a for a in (row["auto_fields"] or "").split(",") if a] if row else []
+    auto_fields = ",".join(dict.fromkeys(auto + filled))
+    if row is None:
+        values = [wanted[f] if f in filled else None for f in STAFF_FIELDS]
+        conn.execute(
+            "INSERT INTO dept_contact (org_id, dept, staff_name, staff_position, staff_tel, "
+            "auto_fields, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (org_id, dept, *values, auto_fields, now),
+        )
+    else:
+        sets = ", ".join(f"{f} = ?" for f in filled)
+        conn.execute(
+            f"UPDATE dept_contact SET {sets}, auto_fields = ? WHERE org_id = ? AND dept = ?",
+            (*(wanted[f] for f in filled), auto_fields, org_id, dept),
+        )
+    return filled
 
 
 def update_depts(
