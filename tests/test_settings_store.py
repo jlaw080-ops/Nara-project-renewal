@@ -281,3 +281,23 @@ def test_apply_rolls_everything_back_when_one_write_fails(conn):
     assert hall[0] is None
     assert conn.execute("SELECT tier FROM org WHERE id = ?", (yongin,)).fetchone()[0] == "focus"
     assert "공사관리" not in current_settings(conn, BASE).title_excluded
+
+
+def test_an_alias_is_retargeted_by_removing_and_re_adding_it_in_one_save():
+    """체크해서 빼고 같은 이름을 새 대상으로 적으면 바꾸기다. 별칭이 사라지면 안 된다."""
+    current = {**CURRENT, "nr_alias": {"가군청"}}
+    checked = check_settings(
+        MultiDict({"remove_nr_alias": "가군청", "add_nr_alias": "가군청 = 새군"}), current
+    )
+    assert checked.values["change"].removes == (("nr_alias", "가군청"),)
+    assert checked.values["change"].adds == (("nr_alias", "가군청", "새군"),)
+
+
+def test_re_adding_an_existing_alias_without_removing_it_says_how_to_retarget():
+    """조용히 버리면 '바뀐 것이 없습니다'만 보여 사람이 헷갈린다."""
+    current = {**CURRENT, "nr_alias": {"가군청"}}
+    checked = check_settings(MultiDict({"add_nr_alias": "가군청 = 새군"}), current)
+    assert checked.errors == {
+        "nr_alias": "이미 있는 별칭입니다: 가군청 — "
+        "대상을 바꾸려면 기존 값을 체크하고 함께 저장하세요"
+    }

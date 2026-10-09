@@ -552,6 +552,7 @@ SETTING_MIN = 2
 SETTING_LIMIT = 50
 ALIAS_FORMAT = "`설치계획서 기관명 = 나라 앱 기관명` 꼴로 적으세요"
 NO_REQUIRED = "제목 필수 키워드가 없으면 모든 용역을 수집합니다"
+ALIAS_EXISTS = "이미 있는 별칭입니다: {} — 대상을 바꾸려면 기존 값을 체크하고 함께 저장하세요"
 
 
 def _setting_error(value: str) -> str | None:
@@ -593,8 +594,16 @@ def check_settings(form, current: Mapping[str, set[str]]) -> Checked:
         if error:
             errors[kind] = error
             continue
-        adds += [(kind, v, t) for v, t in lines if v not in current[kind]]
-        removes += [(kind, v) for v in form.getlist(f"remove_{kind}") if v in current[kind]]
+        gone = [v for v in form.getlist(f"remove_{kind}") if v in current[kind]]
+        # 체크해서 빼고 같은 값을 다시 적으면 바꾸기다(별칭 대상 변경). 빼기가 먼저 반영된다.
+        present = current[kind] - set(gone)
+        if kind == "nr_alias":
+            kept = next((v for v, _ in lines if v in present), None)
+            if kept:
+                errors[kind] = ALIAS_EXISTS.format(kept)
+                continue
+        adds += [(kind, v, t) for v, t in lines if v not in present]
+        removes += [(kind, v) for v in gone]
     warnings = []
     left = (current["title_required"] - {v for k, v in removes if k == "title_required"}) | {
         v for k, v, _ in adds if k == "title_required"
