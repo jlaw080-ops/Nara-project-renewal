@@ -472,6 +472,28 @@ def _hidden_label(reason: str | None) -> str:
     return f"숨김: {reason}" if reason else "숨김"
 
 
+def mark_hidden(
+    conn: sqlite3.Connection,
+    project_ids: list[int],
+    reason: str,
+    now: str,
+    user_id: int | None = None,
+) -> int:
+    """트랜잭션을 열지 않는다 — 설정 저장처럼 부른 쪽이 한 번에 커밋할 때 쓴다."""
+    reason = reason.strip()[:TEXT_LIMIT] or None
+    hidden = 0
+    for pid in project_ids:
+        cur = conn.execute(
+            "UPDATE project SET hidden_at = ?, hidden_by = ?, hidden_reason = ? "
+            "WHERE id = ? AND hidden_at IS NULL",
+            (now, user_id, reason, pid),
+        )
+        if cur.rowcount:
+            _log(conn, pid, "hidden", None, _hidden_label(reason), now, user_id)
+            hidden += 1
+    return hidden
+
+
 def hide_projects(
     conn: sqlite3.Connection,
     project_ids: list[int],
@@ -480,19 +502,8 @@ def hide_projects(
     user_id: int | None = None,
 ) -> int:
     """목록에서 숨긴다. 이미 숨긴 사업·없는 id는 건드리지 않는다. 숨긴 건수를 돌려준다."""
-    reason = reason.strip()[:TEXT_LIMIT] or None
-    hidden = 0
     with conn:
-        for pid in project_ids:
-            cur = conn.execute(
-                "UPDATE project SET hidden_at = ?, hidden_by = ?, hidden_reason = ? "
-                "WHERE id = ? AND hidden_at IS NULL",
-                (now, user_id, reason, pid),
-            )
-            if cur.rowcount:
-                _log(conn, pid, "hidden", None, _hidden_label(reason), now, user_id)
-                hidden += 1
-    return hidden
+        return mark_hidden(conn, project_ids, reason, now, user_id)
 
 
 def unhide_projects(

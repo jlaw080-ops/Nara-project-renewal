@@ -5,6 +5,8 @@ import sqlite3
 from dataclasses import dataclass, replace
 
 from nara.config import Settings
+from nara.filters import is_focus_org, org_passes, title_passes
+from nara.store import WEEKDAY_GROUPS
 
 KINDS = (
     "title_required", "title_excluded", "org_excluded",
@@ -112,3 +114,167 @@ class Change:
         aliases = [(a, b) for a, b in settings.nr_org_aliases if ("nr_alias", a) not in gone]
         aliases += [(v, t) for k, v, t in self.adds if k == "nr_alias"]
         return replace(settings, **lists, nr_org_aliases=tuple(aliases))
+
+
+class StaleSettings(Exception):
+    """확인 화면을 띄운 뒤 다른 사람이 설정을 바꿨다."""
+
+
+@dataclass(frozen=True)
+class HideCandidate:
+    project_id: int
+    name: str
+    org_name: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class OrgMove:
+    org_id: int
+    name: str
+    projects: int
+
+
+@dataclass(frozen=True)
+class Plan:
+    change: Change
+    hide: tuple[HideCandidate, ...]
+    demote: tuple[OrgMove, ...]
+    promote: tuple[OrgMove, ...]
+    widened: bool
+    fingerprint: str
+
+
+def _first_hit(text: str, words: list[str]) -> str | None:
+    return next((w for w in words if w in text), None)
+
+
+def _hide_candidates(
+    conn: sqlite3.Connection, before: Settings, after: Settings, change: Change
+) -> tuple[HideCandidate, ...]:
+    """바뀌기 전에는 통과했고 바뀐 뒤에는 막히는 사업만. 공고 없는 사업은 제목으로 고르지 않는다."""
+    new_title = [v for k, v, _ in change.adds if k == "title_excluded"]
+    gone_required = [v for k, v in change.removes if k == "title_required"]
+    new_org = [v for k, v, _ in change.adds if k == "org_excluded"]
+    rows = conn.execute(
+        "SELECT p.id, p.name, o.name, n.title FROM project p "
+        "JOIN org o ON o.id = p.org_id LEFT JOIN notice n ON n.project_id = p.id "
+        "WHERE p.hidden_at IS NULL ORDER BY o.name, p.id"
+    ).fetchall()
+    projects: dict[int, dict] = {}
+    for r in rows:
+        p = projects.setdefault(r[0], {"name": r[1], "org": r[2], "titles": []})
+        if r[3]:
+            p["titles"].append(r[3])
+    found = []
+    for pid, p in projects.items():
+        reason = None
+        if org_passes(p["org"], before) and not org_passes(p["org"], after):
+            reason = f"설정 변경: 기관 제외 키워드 '{_first_hit(p['org'], new_org)}'"
+        elif (
+            p["titles"]
+            and any(title_passes(t, before) for t in p["titles"])
+            and not any(title_passes(t, after) for t in p["titles"])
+        ):
+            hit = next(filter(None, (_first_hit(t, new_title) for t in p["titles"])), None)
+            reason = (
+                f"설정 변경: 제외 키워드 '{hit}'"
+                if hit
+                else f"설정 변경: 필수 키워드 '{', '.join(gone_required)}' 뺌"
+            )
+        if reason:
+            found.append(HideCandidate(pid, p["name"], p["org"], reason))
+    return tuple(found)
+
+
+def _org_moves(
+    conn: sqlite3.Connection, before: Settings, after: Settings
+) -> tuple[tuple[OrgMove, ...], tuple[OrgMove, ...]]:
+    demote, promote = [], []
+    for r in conn.execute(
+        "SELECT o.id, o.name, o.tier, COUNT(p.id) FROM org o "
+        "LEFT JOIN project p ON p.org_id = o.id AND p.hidden_at IS NULL "
+        "GROUP BY o.id ORDER BY o.name"
+    ):
+        was, will = is_focus_org(r[1], before), is_focus_org(r[1], after)
+        if r[2] == "focus" and was and not will:
+            demote.append(OrgMove(r[0], r[1], r[3]))
+        elif r[2] == "rest" and will:
+            promote.append(OrgMove(r[0], r[1], r[3]))
+    return tuple(demote), tuple(promote)
+
+
+def plan_change(conn: sqlite3.Connection, base: Settings, change: Change) -> Plan:
+    """저장 전 확인 화면. DB를 바꾸지 않는다."""
+    before = current_settings(conn, base)
+    after = change.apply_to(before)
+    demote, promote = _org_moves(conn, before, after)
+    widened = any(k in ("title_excluded", "org_excluded") for k, _ in change.removes) or any(
+        k == "title_required" for k, _, _ in change.adds
+    )
+    return Plan(
+        change,
+        _hide_candidates(conn, before, after, change),
+        demote,
+        promote,
+        widened,
+        fingerprint(conn),
+    )
+
+
+def apply_change(
+    conn: sqlite3.Connection, plan: Plan, hide_ids: set[int], user_id: int | None, now: str
+) -> dict[str, int]:
+    """설정·숨김·관심 조정·기록을 한 트랜잭션으로. 확인 화면 뒤 설정이 바뀌었으면 거부한다."""
+    from nara.web.edit import mark_hidden  # 웹 숨김과 같은 기록을 남긴다(모듈끼리 순환 방지)
+
+    if fingerprint(conn) != plan.fingerprint:
+        raise StaleSettings
+    done = {"items": 0, "hidden": 0, "demoted": 0, "promoted": 0}
+    with conn:
+        for kind, value in plan.change.removes:
+            conn.execute("DELETE FROM setting_item WHERE kind = ? AND value = ?", (kind, value))
+            conn.execute(
+                "INSERT INTO setting_log (at, user_id, kind, action, value) "
+                "VALUES (?, ?, ?, 'remove', ?)",
+                (now, user_id, kind, value),
+            )
+            done["items"] += 1
+        for kind, value, target in plan.change.adds:
+            conn.execute(
+                "INSERT INTO setting_item (kind, value, target, added_at, added_by) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (kind, value, target, now, user_id),
+            )
+            conn.execute(
+                "INSERT INTO setting_log (at, user_id, kind, action, value, target) "
+                "VALUES (?, ?, ?, 'add', ?, ?)",
+                (now, user_id, kind, value, target),
+            )
+            done["items"] += 1
+        for c in plan.hide:
+            if c.project_id in hide_ids:
+                done["hidden"] += mark_hidden(conn, [c.project_id], c.reason, now, user_id)
+        for m in plan.demote:
+            conn.execute(
+                "UPDATE org SET tier = 'rest', weekday_group = ? WHERE id = ?",
+                (m.org_id % WEEKDAY_GROUPS + 1, m.org_id),
+            )
+            done["demoted"] += 1
+        for m in plan.promote:
+            conn.execute(
+                "UPDATE org SET tier = 'focus', weekday_group = NULL WHERE id = ?", (m.org_id,)
+            )
+            done["promoted"] += 1
+    return done
+
+
+def recent_log(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row]:
+    cur = conn.cursor()
+    cur.row_factory = sqlite3.Row
+    return cur.execute(
+        "SELECT l.at, u.name AS user_name, l.kind, l.action, l.value, l.target "
+        "FROM setting_log l LEFT JOIN app_user u ON u.id = l.user_id "
+        "WHERE l.action != 'seed' ORDER BY l.id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()

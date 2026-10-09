@@ -174,3 +174,110 @@ def test_change_apply_to_removes_then_appends():
     assert "감리" not in got.title_excluded and got.title_excluded[-1] == "체육"
     assert ("가군청", "가군") in got.nr_org_aliases
     assert Change().empty and not change.empty
+
+
+from nara.settings_store import StaleSettings, apply_change, plan_change, recent_log  # noqa: E402
+from nara.store import ensure_project, upsert_org  # noqa: E402
+
+
+def _world(conn):
+    """공고가 있는 사업 둘(체육관·문화관), 공고 없는 사업 하나, 관심기관 둘."""
+    seed_settings(conn, BASE, NOW)
+    wanju = upsert_org(conn, "전북특별자치도 완주군", BASE, NOW)
+    yongin = upsert_org(conn, "경기도 용인시", BASE, NOW)
+    ids = {}
+    for key, org, name, title in (
+        ("gym", wanju, "완주 체육관", "완주 체육관 건립 설계용역"),
+        ("hall", yongin, "용인 문화관", "용인 문화관 건축설계 및 공사관리 용역"),
+    ):
+        ids[key] = ensure_project(conn, org, name, "g2b", NOW)
+        org_name = conn.execute("SELECT name FROM org WHERE id = ?", (org,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO notice (bid_no, project_id, org_id, org_name, title, notice_date, "
+            "collected_at) VALUES (?, ?, ?, ?, ?, '2026-09-01', ?)",
+            (key, ids[key], org, org_name, title, NOW),
+        )
+    ids["manual"] = ensure_project(conn, wanju, "완주 공사관리 센터", "manual", NOW)
+    conn.commit()
+    return ids, wanju, yongin
+
+
+def test_preview_lists_only_projects_the_change_newly_blocks(conn):
+    """이미 다른 이유로 걸린 사업이나 공고 없는 사업은 끌어오지 않는다."""
+    ids, _, _ = _world(conn)
+    plan = plan_change(conn, BASE, Change(adds=(("title_excluded", "공사관리", None),)))
+    assert [(h.project_id, h.reason) for h in plan.hide] == [
+        (ids["hall"], "설정 변경: 제외 키워드 '공사관리'")
+    ]
+    assert plan.widened is False
+
+
+def test_preview_flags_a_widening_change(conn):
+    _world(conn)
+    plan = plan_change(conn, BASE, Change(removes=(("title_excluded", "감리"),)))
+    assert plan.widened is True and plan.hide == ()
+
+
+def test_preview_lists_orgs_leaving_and_joining_the_focus_list(conn):
+    _, _, yongin = _world(conn)
+    trial = upsert_org(conn, "경기도 시험시", BASE, NOW)
+    plan = plan_change(
+        conn,
+        BASE,
+        Change(adds=(("focus_org", "시험시", None),), removes=(("focus_org", "용인시"),)),
+    )
+    assert [(m.org_id, m.projects) for m in plan.demote] == [(yongin, 1)]
+    assert [m.org_id for m in plan.promote] == [trial]
+
+
+def test_apply_hides_only_checked_candidates_and_moves_orgs(conn):
+    ids, _, yongin = _world(conn)
+    change = Change(
+        adds=(("title_excluded", "공사관리", None),), removes=(("focus_org", "용인시"),)
+    )
+    plan = plan_change(conn, BASE, change)
+    done = apply_change(conn, plan, {ids["hall"], ids["gym"]}, None, NOW)
+    assert done == {"items": 2, "hidden": 1, "demoted": 1, "promoted": 0}
+    row = conn.execute(
+        "SELECT hidden_at, hidden_reason FROM project WHERE id = ?", (ids["hall"],)
+    ).fetchone()
+    assert row[0] == NOW and row[1] == "설정 변경: 제외 키워드 '공사관리'"
+    gym = conn.execute("SELECT hidden_at FROM project WHERE id = ?", (ids["gym"],)).fetchone()
+    assert gym[0] is None  # 후보가 아니면 체크해도 숨기지 않는다
+    org = conn.execute("SELECT tier, weekday_group FROM org WHERE id = ?", (yongin,)).fetchone()
+    assert tuple(org) == ("rest", yongin % 5 + 1)
+    got = current_settings(conn, BASE)
+    assert "공사관리" in got.title_excluded and "용인시" not in got.focus_orgs
+    # 뺀 것을 먼저 기록하고 더한 것을 나중에 기록한다. 최근 것이 위.
+    assert [r["action"] for r in recent_log(conn)][:2] == ["add", "remove"]
+
+
+def test_apply_refuses_when_settings_changed_after_the_preview(conn):
+    """두 사람이 동시에 고칠 때 한쪽 변경이 조용히 사라지면 안 된다."""
+    _world(conn)
+    plan = plan_change(conn, BASE, Change(adds=(("title_excluded", "공사관리", None),)))
+    conn.execute(
+        "INSERT INTO setting_item (kind, value, added_at) VALUES ('org_excluded', '다른사람', ?)",
+        (NOW,),
+    )
+    conn.commit()
+    with pytest.raises(StaleSettings):
+        apply_change(conn, plan, set(), None, NOW)
+    assert "공사관리" not in current_settings(conn, BASE).title_excluded
+
+
+def test_apply_rolls_everything_back_when_one_write_fails(conn):
+    ids, _, yongin = _world(conn)
+    change = Change(
+        adds=(("title_excluded", "공사관리", None),), removes=(("focus_org", "용인시"),)
+    )
+    plan = plan_change(conn, BASE, change)
+    conn.execute(
+        "CREATE TRIGGER boom BEFORE UPDATE OF tier ON org BEGIN SELECT RAISE(ABORT, 'boom'); END"
+    )
+    with pytest.raises(sqlite3.DatabaseError):
+        apply_change(conn, plan, {ids["hall"]}, None, NOW)
+    hall = conn.execute("SELECT hidden_at FROM project WHERE id = ?", (ids["hall"],)).fetchone()
+    assert hall[0] is None
+    assert conn.execute("SELECT tier FROM org WHERE id = ?", (yongin,)).fetchone()[0] == "focus"
+    assert "공사관리" not in current_settings(conn, BASE).title_excluded
