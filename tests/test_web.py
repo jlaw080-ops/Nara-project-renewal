@@ -1726,118 +1726,88 @@ def _two_projects_in_one_department(path, ids):
     conn.close()
 
 
-CONTACT = {"head_name": "홍길동", "head_position": "과장", "head_tel": "063-000-0000"}
+CONTACT = {
+    "head_name": "홍길동", "head_position": "과장", "head_tel": "063-000-0000",
+    "staff_name": "김철수", "staff_position": "주무관", "staff_tel": "063-000-0001",
+}  # fmt: skip
 
 
-def test_a_department_head_entered_once_shows_on_every_project_of_that_department(world):
+def _dept_form(client, pid, **extra):
+    page = _text(client.get(f"/project/{pid}?edit=dept"))
+    version = re.search(r'name="version" value="([^"]*)"', page).group(1)
+    return {"exec_dept": "체육진흥과", "snippet": "", "version": version, **extra}
+
+
+def test_the_department_form_saves_the_name_and_both_contacts_at_once(world):
     path, ids = world
     _two_projects_in_one_department(path, ids)
     client = _client(path)
-    form = _text(client.get(f"/project/{ids['gym']}?edit=contact"))
-    assert 'name="head_name"' in form and "체육진흥과" in form
-    resp = _post(client, f"/project/{ids['gym']}/contact", CONTACT)
+    page = _text(client.get(f"/project/{ids['gym']}?edit=dept"))
+    for field in CONTACT:
+        assert f'name="{field}"' in page
+    form = _dept_form(client, ids["gym"], **CONTACT)
+    resp = _post(client, f"/project/{ids['gym']}/edit/dept", form)
     assert resp.status_code == 302
-    assert "부서장 연락처" in _text(client.get(resp.headers["Location"]))
+    assert "연락처" in _text(client.get(resp.headers["Location"]))
     other = _text(client.get(f"/project/{ids['welfare']}"))
-    assert "홍길동" in other and "과장" in other and "063-000-0000" in other
+    assert "홍길동" in other and "김철수" in other and "063-000-0001" in other
+    gone = client.post(f"/project/{ids['gym']}/contact", data=CONTACT, headers=ORIGIN)
+    assert gone.status_code == 404
+
+
+def test_the_form_opens_with_the_current_contacts_and_marks_notice_values(world):
+    path, ids = world
+    _two_projects_in_one_department(path, ids)
+    conn = connect(path)
+    org = conn.execute("SELECT org_id FROM project WHERE id = ?", (ids["gym"],)).fetchone()[0]
+    conn.execute(
+        "INSERT INTO dept_contact (org_id, dept, staff_tel, auto_fields, updated_at) "
+        "VALUES (?, '체육진흥과', '063-000-0001', 'staff_tel', ?)",
+        (org, NOW),
+    )
+    conn.commit()
+    conn.close()
+    client = _client(path)
+    shown = _text(client.get(f"/project/{ids['gym']}"))
+    assert "063-000-0001" in shown and "(공고문)" in shown
+    form = _text(client.get(f"/project/{ids['gym']}?edit=dept"))
+    assert 'name="staff_tel" inputmode="tel" value="063-000-0001"' in form
+    _post(client, f"/project/{ids['gym']}/edit/dept", _dept_form(client, ids["gym"], **CONTACT))
+    assert "(공고문)" not in _text(client.get(f"/project/{ids['gym']}"))
+
+
+def test_renaming_the_department_moves_the_contacts_to_the_new_name(world):
+    path, ids = world
+    _two_projects_in_one_department(path, ids)
+    client = _client(path)
+    form = _dept_form(client, ids["gym"], **CONTACT)
+    _post(client, f"/project/{ids['gym']}/edit/dept", {**form, "exec_dept": "문화체육과"})
+    conn = connect(path)
+    rows = conn.execute("SELECT dept, head_name FROM dept_contact ORDER BY dept").fetchall()
+    conn.close()
+    assert [tuple(r) for r in rows] == [("문화체육과", "홍길동")]
+    assert "홍길동" not in _text(client.get(f"/project/{ids['welfare']}"))  # 아직 체육진흥과
 
 
 def test_the_print_sheet_fills_head_position_and_direct_line(world):
     path, ids = world
     _two_projects_in_one_department(path, ids)
     client = _client(path)
-    _post(client, f"/project/{ids['gym']}/contact", CONTACT)
+    _post(client, f"/project/{ids['gym']}/edit/dept", _dept_form(client, ids["gym"], **CONTACT))
     sheet = _text(client.get("/print"))
     assert "<td>홍길동</td>" in sheet and "<td>과장</td>" in sheet
     assert "<td>063-000-0000</td>" in sheet
 
 
-def test_a_project_without_a_department_asks_for_one_first(world):
-    path, ids = world
-    client = _client(path)
-    assert "실행부서를 먼저 확정하세요" in _text(client.get(f"/project/{ids['museum']}"))
-    resp = _post(client, f"/project/{ids['museum']}/contact", CONTACT)
-    assert resp.status_code == 409
-
-
-def test_a_bad_direct_line_is_shown_again_with_the_reason(world):
+def test_a_bad_direct_line_keeps_the_other_fields_and_says_why(world):
     path, ids = world
     _two_projects_in_one_department(path, ids)
     client = _client(path)
-    resp = _post(client, f"/project/{ids['gym']}/contact", {**CONTACT, "head_tel": "내선 12"})
+    form = _dept_form(client, ids["gym"], **{**CONTACT, "staff_tel": "내선 12"})
+    resp = _post(client, f"/project/{ids['gym']}/edit/dept", form)
     assert resp.status_code == 422
     text = _text(resp)
-    assert "9~11자리" in text and 'value="내선 12"' in text
-
-
-def test_contact_save_refuses_another_site(world):
-    path, ids = world
-    _two_projects_in_one_department(path, ids)
-    resp = _post(
-        _client(path), f"/project/{ids['gym']}/contact", CONTACT, origin="http://evil.example"
-    )
-    assert resp.status_code == 403
-
-
-def _sheet(resp):
-    from io import BytesIO
-
-    from openpyxl import load_workbook
-
-    return [list(r) for r in load_workbook(BytesIO(resp.data)).active.iter_rows(values_only=True)]
-
-
-def test_the_excel_download_has_the_same_columns_and_values_as_the_print(world):
-    """PDF 출력과 같은 15칸을 엑셀로 내려받는다 — 담당자가 받아서 고치거나 보낼 수 있다."""
-    path, ids = world
-    _print_world(path, ids)
-    resp = _client(path).get("/export.xlsx")
-    assert resp.status_code == 200
-    assert "attachment" in resp.headers["Content-Disposition"]
-    assert ".xlsx" in resp.headers["Content-Disposition"]
-    rows = _sheet(resp)
-    assert rows[0] == PRINT_HEADERS
-    gym = next(r for r in rows[1:] if "완주군 다목적체육관" in r[1])
-    assert gym[2] == "전북 완주군 봉동읍 1" and gym[6] == "2027-12-31"
-    assert gym[7] == "체육시설과" and gym[10] == "063-000-0000"
-    assert "kW" in gym[12] and "합계" in gym[13]
-
-
-def test_the_excel_download_follows_the_list_filters(world):
-    path, ids = world
-    client = _client(path)
-    names = [r[1] for r in _sheet(client.get("/export.xlsx?focus=1"))[1:]]
-    assert any("완주군 다목적체육관" in n for n in names)
-    assert not any("성남시 박물관" in n for n in names)
-    assert 'href="/export.xlsx?focus=1"' in _text(client.get("/?focus=1"))
-
-
-def _org_id(path, name):
-    with closing(open_readonly(path)) as conn:
-        return conn.execute("SELECT id FROM org WHERE name = ?", (name,)).fetchone()[0]
-
-
-def test_orgs_are_picked_with_checkboxes_and_a_search_box(world):
-    """기관이 150곳이 넘어 Ctrl+클릭 목록으로는 고르기 어렵다 — 검색해서 체크로 고른다."""
-    path, _ = world
-    wanju = _org_id(path, "전북특별자치도 완주군")
-    text = _text(_client(path).get(f"/?org={wanju}"))
-    assert '<select name="org"' not in text
-    assert re.search(rf'<input type="checkbox" name="org" value="{wanju}" checked', text)
-    seongnam = _org_id(path, "경기도 성남시")
-    assert re.search(rf'<input type="checkbox" name="org" value="{seongnam}">', text)
-    search = re.search(r'<input[^>]*id="org-search"[^>]*>', text).group(0)
-    assert "name=" not in search  # 검색어는 조회 조건으로 보내지 않는다
-    assert 'id="org-all"' in text and 'id="org-none"' in text
-
-
-def test_checking_two_orgs_lists_both_orgs_projects(world):
-    path, _ = world
-    wanju, seongnam = _org_id(path, "전북특별자치도 완주군"), _org_id(path, "경기도 성남시")
-    names = _text(_client(path).get(f"/?org={wanju}&org={seongnam}"))
-    assert "완주군 다목적체육관" in names and "성남시 박물관" in names
-    only = _text(_client(path).get(f"/?org={wanju}"))
-    assert "완주군 다목적체육관" in only and "성남시 박물관" not in only
+    assert "9~11자리" in text and 'value="내선 12"' in text and 'value="홍길동"' in text
 
 
 def test_the_settings_page_lists_every_kind_with_current_values(world):

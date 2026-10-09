@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import date
 from itertools import zip_longest
 
+from nara.dept_rules import STAFF_FIELDS
 from nara.energy import EnergyItem, EnergyKind
 from nara.settings_store import KINDS, Change
 from nara.sheet_memory import FIELD_LABELS, PROJECT_FIELDS, canonical, energy_value
@@ -194,23 +195,23 @@ def check_prices(codes: list[str], prices: list[str], current: Mapping[str, int 
 
 CONTACT_LIMIT = 50
 _TEL = re.compile(r"[0-9-]+")
-CONTACT_FIELDS = ("head_name", "head_position", "head_tel")
+CONTACT_FIELDS = ("head_name", "head_position", "head_tel", *STAFF_FIELDS)
+_TEL_FIELDS = ("head_tel", "staff_tel")
 
 
 def check_contact(form: Mapping[str, str]) -> Checked:
-    """부서장 이름·직위·직통번호. 셋 다 비우면 지운다."""
+    """부서장·실무 담당자 이름·직위·직통번호. 여섯 칸 다 비우면 지운다."""
     values: dict[str, str | None] = {}
     errors: dict[str, str] = {}
-    for key in ("head_name", "head_position"):
+    for key in CONTACT_FIELDS:
         text = _text(form, key)
-        if len(text) > CONTACT_LIMIT:
+        if key in _TEL_FIELDS:
+            digits = re.sub(r"[^0-9]", "", text)
+            if text and (not _TEL.fullmatch(text) or not 9 <= len(digits) <= 11):
+                errors[key] = "숫자와 -로 9~11자리를 적으세요 (예: 051-000-0000)"
+        elif len(text) > CONTACT_LIMIT:
             errors[key] = f"{CONTACT_LIMIT}자까지 적을 수 있습니다"
         values[key] = text or None
-    tel = _text(form, "head_tel")
-    digits = re.sub(r"[^0-9]", "", tel)
-    if tel and (not _TEL.fullmatch(tel) or not 9 <= len(digits) <= 11):
-        errors["head_tel"] = "숫자와 -로 9~11자리를 적으세요 (예: 051-000-0000)"
-    values["head_tel"] = tel or None
     return Checked(values, errors)
 
 
@@ -222,25 +223,32 @@ def save_contact(
     now: str,
     user_id: int | None = None,
 ) -> bool:
-    """기관+부서의 연락처를 바꾼다. 바뀐 게 있으면 True."""
+    """기관+부서의 연락처를 바꾼다. 바뀐 게 있으면 True.
+
+    사람이 저장하면 공고문 표시(auto_fields)를 지운다 — 폼을 보고 저장한 값은 확인한 값이다.
+    """
+    cols = ", ".join(CONTACT_FIELDS)
     old = conn.execute(
-        "SELECT head_name, head_position, head_tel FROM dept_contact WHERE org_id = ? AND dept = ?",
+        f"SELECT {cols}, auto_fields FROM dept_contact WHERE org_id = ? AND dept = ?",
         (org_id, dept),
     ).fetchone()
     new = tuple(values[k] for k in CONTACT_FIELDS)
-    if (tuple(old) if old else (None, None, None)) == new:
+    if old is not None and tuple(old)[: len(CONTACT_FIELDS)] == new and old["auto_fields"] is None:
+        return False
+    if old is None and not any(new):
         return False
     with conn:
         if not any(new):
             conn.execute("DELETE FROM dept_contact WHERE org_id = ? AND dept = ?", (org_id, dept))
         else:
+            sets = ", ".join(f"{k} = excluded.{k}" for k in CONTACT_FIELDS)
+            marks = ", ".join("?" * (len(CONTACT_FIELDS) + 5))
             conn.execute(
-                "INSERT INTO dept_contact (org_id, dept, head_name, head_position, head_tel, "
-                "updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(org_id, dept) DO UPDATE SET head_name = excluded.head_name, "
-                "head_position = excluded.head_position, head_tel = excluded.head_tel, "
-                "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
-                (org_id, dept, *new, now, user_id),
+                f"INSERT INTO dept_contact (org_id, dept, {cols}, auto_fields, updated_at, "
+                f"updated_by) VALUES ({marks}) ON CONFLICT(org_id, dept) DO UPDATE SET {sets}, "
+                "auto_fields = NULL, updated_at = excluded.updated_at, "
+                "updated_by = excluded.updated_by",
+                (org_id, dept, *new, None, now, user_id),
             )
     return True
 

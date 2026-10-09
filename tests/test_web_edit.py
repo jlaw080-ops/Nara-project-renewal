@@ -14,6 +14,7 @@ from nara.store import ensure_project, upsert_org
 from nara.verdict import BEFORE, BUILDING
 from nara.web.data import DatabaseMissing, open_readwrite
 from nara.web.edit import (
+    CONTACT_FIELDS,
     LONG_TEXT_LIMIT,
     TEXT_LIMIT,
     check_contact,
@@ -417,28 +418,30 @@ def test_check_prices_lets_a_new_kind_stay_unpriced():
 
 def test_check_contact_reads_name_position_and_direct_line():
     checked = check_contact(
-        {"head_name": " 홍길동 ", "head_position": "과장", "head_tel": "051-000-0000"}
-    )
+        {"head_name": " 홍길동 ", "head_position": "과장", "head_tel": "051-000-0000",
+         "staff_name": "김철수", "staff_position": "주무관", "staff_tel": "051-000-0001"}
+    )  # fmt: skip
     assert checked.ok
     assert checked.values == {
         "head_name": "홍길동", "head_position": "과장", "head_tel": "051-000-0000",
+        "staff_name": "김철수", "staff_position": "주무관", "staff_tel": "051-000-0001",
     }  # fmt: skip
 
 
 def test_check_contact_allows_clearing_everything():
-    """셋 다 비우면 그 부서의 연락처를 지운다."""
-    checked = check_contact({"head_name": "", "head_position": "", "head_tel": ""})
+    """여섯 칸 다 비우면 그 부서의 연락처를 지운다."""
+    checked = check_contact({})
     assert checked.ok
-    assert checked.values == {"head_name": None, "head_position": None, "head_tel": None}
+    assert checked.values == dict.fromkeys(CONTACT_FIELDS)
 
 
 def test_check_contact_rejects_a_number_that_cannot_be_dialled_and_long_text():
     tel = "숫자와 -로 9~11자리를 적으세요 (예: 051-000-0000)"
     assert check_contact({"head_tel": "내선 1234"}).errors == {"head_tel": tel}
-    assert check_contact({"head_tel": "1234-5678"}).errors == {"head_tel": tel}
+    assert check_contact({"staff_tel": "1234-5678"}).errors == {"staff_tel": tel}
     assert check_contact({"head_tel": "051-000-00000-1"}).errors == {"head_tel": tel}
-    assert check_contact({"head_name": "가" * 51}).errors == {
-        "head_name": "50자까지 적을 수 있습니다"
+    assert check_contact({"staff_name": "가" * 51}).errors == {
+        "staff_name": "50자까지 적을 수 있습니다"
     }
 
 
@@ -446,7 +449,10 @@ def test_save_contact_is_one_row_per_org_and_department(db):
     path, pid = db
     with closing(open_readwrite(path)) as conn:
         org = conn.execute("SELECT org_id FROM project WHERE id = ?", (pid,)).fetchone()[0]
-        values = {"head_name": "홍길동", "head_position": "과장", "head_tel": "051-000-0000"}
+        values = {
+            **dict.fromkeys(CONTACT_FIELDS),
+            "head_name": "홍길동", "head_position": "과장", "head_tel": "051-000-0000",
+        }  # fmt: skip
         assert save_contact(conn, org, "체육진흥과", values, NOW) is True
         assert save_contact(conn, org, "체육진흥과", values, NOW) is False
         changed = {**values, "head_name": "김철수"}
@@ -455,6 +461,22 @@ def test_save_contact_is_one_row_per_org_and_department(db):
             "SELECT dept, head_name, updated_at FROM dept_contact WHERE org_id = ?", (org,)
         ).fetchall()
         assert [tuple(r) for r in rows] == [("체육진흥과", "김철수", "2026-10-08T09:00:00")]
-        empty = {"head_name": None, "head_position": None, "head_tel": None}
+        empty = dict.fromkeys(CONTACT_FIELDS)
         assert save_contact(conn, org, "체육진흥과", empty, NOW) is True
         assert conn.execute("SELECT COUNT(*) FROM dept_contact").fetchone()[0] == 0
+
+
+def test_a_person_saving_clears_the_notice_marks(db):
+    path, pid = db
+    with closing(open_readwrite(path)) as conn:
+        org = conn.execute("SELECT org_id FROM project WHERE id = ?", (pid,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO dept_contact (org_id, dept, staff_tel, auto_fields, updated_at) "
+            "VALUES (?, '체육진흥과', '051-000-0001', 'staff_tel', ?)",
+            (org, NOW),
+        )
+        conn.commit()
+        values = {**dict.fromkeys(CONTACT_FIELDS), "staff_tel": "051-000-0001", "head_name": "홍"}
+        assert save_contact(conn, org, "체육진흥과", values, NOW) is True
+        row = conn.execute("SELECT auto_fields, head_name FROM dept_contact").fetchone()
+        assert tuple(row) == (None, "홍")

@@ -64,7 +64,6 @@ from nara.web.query import (
 
 EDIT_SECTIONS = ("info", "verdict", "dept", "energy")
 # 상세 화면에서 열 수 있는 폼. 부서장 연락처는 사업이 아니라 기관+부서 단위라 따로 저장한다.
-FORM_SECTIONS = (*EDIT_SECTIONS, "contact")
 BUSY_MESSAGE = "수집이 DB를 쓰고 있습니다. 잠시 뒤 다시 저장하세요"
 CONFLICT_BY = "그사이 {}님이 고쳤습니다. 지금 값을 확인하고 다시 저장하세요"
 CONFLICT = "그사이 값이 바뀌었습니다. 지금 값을 확인하고 다시 저장하세요"
@@ -203,7 +202,8 @@ def _check(section: str, d: ProjectDetail) -> edit.Checked:
     if section == "verdict":
         return edit.check_verdict(form)
     if section == "dept":
-        return edit.check_dept(form, _candidates(d))
+        dept, contact = edit.check_dept(form, _candidates(d)), edit.check_contact(form)
+        return edit.Checked({**dept.values, **contact.values}, {**dept.errors, **contact.errors})
     return edit.check_energy(
         form.getlist("source"), form.getlist("kind"), form.getlist("capacity"), _kinds()
     )
@@ -217,7 +217,15 @@ def _save(section: str, conn: sqlite3.Connection, project_id: int, values: dict)
     if section == "verdict":
         return edit.save_verdict(conn, project_id, values["verdict"], values["reason"], now, uid)
     if section == "dept":
-        return edit.save_dept(conn, project_id, values["exec_dept"], values["snippet"], now, uid)
+        changed = edit.save_dept(conn, project_id, values["exec_dept"], values["snippet"], now, uid)
+        org_id = conn.execute("SELECT org_id FROM project WHERE id = ?", (project_id,)).fetchone()[
+            0
+        ]
+        contact = {k: values[k] for k in edit.CONTACT_FIELDS}
+        # 연락처는 저장한 실행부서 이름의 기관+부서에 붙는다
+        if edit.save_contact(conn, org_id, values["exec_dept"], contact, now, uid):
+            changed = [*changed, "연락처"]
+        return changed
     return edit.save_energy(conn, project_id, values["items"], now, uid)
 
 
@@ -516,7 +524,7 @@ def create_app(
         if d is None:
             abort(404)
         section = request.args.get("edit")
-        return _render_detail(d, section if section in FORM_SECTIONS else None, {})
+        return _render_detail(d, section if section in EDIT_SECTIONS else None, {})
 
     @app.get("/attachment/<int:attachment_id>")
     def attachment(attachment_id: int):
@@ -723,29 +731,6 @@ def create_app(
         count = _set_hidden([project_id], False)
         _flash_hidden(count, False)
         return redirect(url_for("detail", project_id=project_id))
-
-    @app.post("/project/<int:project_id>/contact")
-    def save_contact(project_id: int):
-        d = project_detail(get_conn(), project_id)
-        if d is None:
-            abort(404)
-        if not d.exec_dept:
-            return _render_detail(d, None, {"_form": "실행부서를 먼저 확정하세요"}, 409)
-        checked = edit.check_contact(request.form)
-        if not checked.ok:
-            return _render_detail(d, "contact", checked.errors, 422)
-        now = datetime.now().isoformat(timespec="seconds")
-        try:
-            with closing(_rw_conn()) as conn:
-                changed = edit.save_contact(
-                    conn, d.project["org_id"], d.exec_dept, checked.values, now, g.user.id
-                )
-        except sqlite3.OperationalError as exc:
-            if "locked" not in str(exc):
-                raise
-            return _render_detail(d, "contact", {"_form": BUSY_MESSAGE}, 503)
-        saved = "부서장 연락처" if changed else "-"
-        return redirect(url_for("detail", project_id=project_id, saved=saved))
 
     @app.post("/project/<int:project_id>/release")
     def release(project_id: int):

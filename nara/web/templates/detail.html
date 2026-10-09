@@ -129,23 +129,28 @@
     <input type="text" name="exec_dept" value="{{ form.get('exec_dept', '') }}">{{ err('exec_dept') }}
   </label>
   <label>근거 문장 <textarea name="snippet" rows="3">{{ form.get('snippet', '') }}</textarea>{{ err('snippet') }}</label>
+  {% set c = d.contact %}
+  <fieldset><legend>부서장</legend>
+    <label>이름 <input type="text" name="head_name" value="{{ val('head_name', c.head_name if c else none) }}">{{ err('head_name') }}</label>
+    <label>직위 <input type="text" name="head_position" value="{{ val('head_position', c.head_position if c else none) }}">{{ err('head_position') }}</label>
+    <label>직통번호 <input type="text" name="head_tel" inputmode="tel" value="{{ val('head_tel', c.head_tel if c else none) }}">{{ err('head_tel') }}</label>
+  </fieldset>
+  <fieldset><legend>실무 담당자{% if d.contact_auto %} <span class="muted">(공고문) 표시는 공고문에서 읽은 값입니다. 저장하면 확인한 값이 됩니다</span>{% endif %}</legend>
+    <label>이름{% if 'staff_name' in d.contact_auto %} <span class="muted">(공고문)</span>{% endif %} <input type="text" name="staff_name" value="{{ val('staff_name', c.staff_name if c else none) }}">{{ err('staff_name') }}</label>
+    <label>직위{% if 'staff_position' in d.contact_auto %} <span class="muted">(공고문)</span>{% endif %} <input type="text" name="staff_position" value="{{ val('staff_position', c.staff_position if c else none) }}">{{ err('staff_position') }}</label>
+    <label>직통번호{% if 'staff_tel' in d.contact_auto %} <span class="muted">(공고문)</span>{% endif %} <input type="text" name="staff_tel" inputmode="tel" value="{{ val('staff_tel', c.staff_tel if c else none) }}">{{ err('staff_tel') }}</label>
+  </fieldset>
+  <p class="muted">연락처는 {{ d.project.org_name }}의 그 부서 공통입니다. 같은 부서가 실행부서인 사업에 모두 보입니다.</p>
   {{ buttons() }}
 </form>
 {% endif %}
 {% if d.exec_dept %}
-<p>부서장 <strong>{{ (d.contact.head_name if d.contact else none)|dash }}</strong> · {{ (d.contact.head_position if d.contact else none)|dash }} · {{ (d.contact.head_tel if d.contact else none)|dash }}
-<span class="muted">— {{ d.project.org_name }} {{ d.exec_dept }} 공통{% if d.contact %} · {{ d.contact.updated_at[:10] }} {{ d.contact.updated_by_name or '' }}{% endif %}</span>{{ edit_link('contact') }}</p>
-{% if edit == 'contact' %}
-<form method="post" class="edit-form" action="{{ url_for('save_contact', project_id=d.project.id) }}">
-  <p class="muted">{{ d.project.org_name }} {{ d.exec_dept }}의 부서장입니다. 같은 부서가 실행부서인 사업에 모두 보입니다. 셋 다 비우면 지웁니다.</p>
-  <label>부서장 이름 <input type="text" name="head_name" value="{{ val('head_name', d.contact.head_name if d.contact else none) }}">{{ err('head_name') }}</label>
-  <label>직위 <input type="text" name="head_position" value="{{ val('head_position', d.contact.head_position if d.contact else none) }}">{{ err('head_position') }}</label>
-  <label>직통번호 <input type="text" name="head_tel" inputmode="tel" value="{{ val('head_tel', d.contact.head_tel if d.contact else none) }}">{{ err('head_tel') }}</label>
-  {{ buttons() }}
-</form>
-{% endif %}
+{% set c = d.contact %}
+<p>부서장 <strong>{{ (c.head_name if c else none)|dash }}</strong> · {{ (c.head_position if c else none)|dash }} · {{ (c.head_tel if c else none)|dash }}<br>
+실무 담당자 <strong>{{ (c.staff_name if c else none)|dash }}</strong>{% if 'staff_name' in d.contact_auto %} <span class="muted">(공고문)</span>{% endif %} · {{ (c.staff_position if c else none)|dash }}{% if 'staff_position' in d.contact_auto %} <span class="muted">(공고문)</span>{% endif %} · {{ (c.staff_tel if c else none)|dash }}{% if 'staff_tel' in d.contact_auto %} <span class="muted">(공고문)</span>{% endif %}<br>
+<span class="muted">— {{ d.project.org_name }} {{ d.exec_dept }} 공통{% if c %} · {{ c.updated_at[:10] }} {{ c.updated_by_name or '' }}{% endif %}</span></p>
 {% else %}
-<p class="muted">부서장 연락처: 실행부서를 먼저 확정하세요</p>
+<p class="muted">실행부서를 확정하면 연락처를 적을 수 있습니다</p>
 {% endif %}
 {% if d.depts %}
 <div class="table-wrap"><table>

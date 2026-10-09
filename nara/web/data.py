@@ -126,7 +126,8 @@ class ProjectDetail:
     attachments: list[sqlite3.Row] = ()
     nr_plans: list[sqlite3.Row] = ()
     exec_dept: str | None = None  # 확정된 최신 실행부서
-    contact: sqlite3.Row | None = None  # 그 부서의 부서장 연락처
+    contact: sqlite3.Row | None = None  # 그 부서의 부서장·실무 담당자 연락처
+    contact_auto: frozenset[str] = frozenset()  # 공고문에서 자동으로 채운 칸
 
 
 def safe_url(url: str | None) -> str:
@@ -307,7 +308,9 @@ def _print_row(conn: sqlite3.Connection, row: sqlite3.Row) -> PrintRow:
         head_name=contact["head_name"] if contact else None,
         head_position=contact["head_position"] if contact else None,
         # 직통번호가 먼저, 없으면 시트에서 가져온 번호
-        dept_tel=(contact and contact["head_tel"]) or (tel["head_tel"] if tel else None),
+        # 부서장 직통 → 실무 담당자 직통 → 공고 기재 번호
+        dept_tel=(contact and (contact["head_tel"] or contact["staff_tel"]))
+        or (tel["head_tel"] if tel else None),
         winner=row["winner"],
         plan=[
             f"{ENERGY_LABELS.get(e.source_type, e.source_type)}: {e.capacity_kw:.3f} kW"
@@ -380,6 +383,8 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
             (project_id,),
         )
     ]
+    exec_dept = current_dept(conn, project_id)
+    contact = dept_contact(conn, project["org_id"], exec_dept)
     return ProjectDetail(
         project=project,
         notices=notices,
@@ -391,8 +396,11 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
         locked=latest is not None and latest["decided_by"] == "human",
         edits=edits,
         attachments=attachments,
-        exec_dept=current_dept(conn, project_id),
-        contact=dept_contact(conn, project["org_id"], current_dept(conn, project_id)),
+        exec_dept=exec_dept,
+        contact=contact,
+        contact_auto=frozenset(
+            a for a in ((contact["auto_fields"] if contact else "") or "").split(",") if a
+        ),
         nr_plans=conn.execute(
             "SELECT * FROM nr_plan WHERE project_id = ? ORDER BY updated_at DESC, id DESC",
             (project_id,),
