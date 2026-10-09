@@ -71,3 +71,41 @@ def test_fingerprint_changes_when_any_value_changes(conn):
     conn.execute("DELETE FROM setting_item WHERE kind = 'title_excluded' AND value = '감리'")
     conn.commit()
     assert fingerprint(conn) != before
+
+
+def test_collect_reads_a_keyword_added_on_the_web(tmp_path):
+    """서버를 다시 띄우지 않아도 다음 수집부터 반영된다는 약속."""
+    from nara.cli import _load_settings
+
+    c = connect(tmp_path / "c.db")
+    migrate(c)
+    config = Path(__file__).resolve().parents[1] / "config.toml"
+    _load_settings(c, config)
+    c.execute(
+        "INSERT INTO setting_item (kind, value, added_at) VALUES ('title_excluded', '체육관', ?)",
+        (NOW,),
+    )
+    c.commit()
+    assert "체육관" in _load_settings(c, config).title_excluded
+
+
+def test_the_web_app_seeds_at_start_and_reads_settings_per_request(tmp_path):
+    """웹에서 바꾼 별칭이 서버를 다시 띄우지 않아도 다음 설치계획서 받기에 쓰인다."""
+    from nara.web.app import _settings, create_app, get_conn
+
+    path = tmp_path / "w.db"
+    c = connect(path)
+    migrate(c)
+    c.close()
+    app = create_app(path, secret_key="test-secret", settings=BASE)
+    c = connect(path)
+    assert is_seeded(c)
+    c.execute(
+        "INSERT INTO setting_item (kind, value, target, added_at) "
+        "VALUES ('nr_alias', '시험군청', '전북특별자치도 완주군', ?)",
+        (NOW,),
+    )
+    c.commit()
+    c.close()
+    with app.app_context():
+        assert ("시험군청", "전북특별자치도 완주군") in _settings(get_conn()).nr_org_aliases

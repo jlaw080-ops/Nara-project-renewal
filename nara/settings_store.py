@@ -36,8 +36,7 @@ def _pairs(settings: Settings) -> list[tuple[str, str, str | None]]:
 
 def is_seeded(conn: sqlite3.Connection) -> bool:
     return (
-        conn.execute("SELECT 1 FROM app_state WHERE key = ?", (SEEDED_KEY,)).fetchone()
-        is not None
+        conn.execute("SELECT 1 FROM app_state WHERE key = ?", (SEEDED_KEY,)).fetchone() is not None
     )
 
 

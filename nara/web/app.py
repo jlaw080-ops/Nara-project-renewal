@@ -33,6 +33,7 @@ from nara.nr_apply import ignore_plan, ingest, link_plan
 from nara.nr_match import candidates
 from nara.nr_plan import load_energy
 from nara.runlog import run_log
+from nara.settings_store import current_settings, seed_settings
 from nara.web import edit, xlsx
 from nara.web.data import (
     BUSY_TIMEOUT_SECONDS,
@@ -183,6 +184,12 @@ def _rw_conn() -> sqlite3.Connection:
     return open_readwrite(current_app.config["DB_PATH"], current_app.config["WRITE_TIMEOUT"])
 
 
+def _settings(conn: sqlite3.Connection) -> Settings | None:
+    """요청마다 DB에서 읽는다. 설정 화면에서 바꾸면 서버를 다시 띄우지 않아도 쓰인다."""
+    base = current_app.config.get("SETTINGS")
+    return current_settings(conn, base) if base is not None else None
+
+
 def _candidates(d: ProjectDetail) -> dict[int, tuple[str, str | None]]:
     return {row["id"]: (row["exec_dept"], row["snippet"]) for row in d.depts if row["exec_dept"]}
 
@@ -289,6 +296,11 @@ def create_app(
     # 확장 프로그램이 설치계획서를 보내는 주소용. 토큰이 없으면 그 주소를 끈다.
     app.config["IMPORT_TOKEN"] = import_token
     app.config["SETTINGS"] = settings
+    # 설정 목록은 DB가 정본이다. 처음 띄울 때 한 번 파일 목록을 옮긴다.
+    # 없는 DB 파일은 만들지 않는다(DatabaseMissing 안내가 먼저다).
+    if settings is not None and Path(db_path).exists():
+        with closing(open_readwrite(Path(db_path), BUSY_TIMEOUT_SECONDS)) as conn:
+            seed_settings(conn, settings, datetime.now().isoformat(timespec="seconds"))
     app.config["MAX_CONTENT_LENGTH"] = MAX_BODY
     app.config.update(
         SESSION_COOKIE_HTTPONLY=True,
@@ -525,13 +537,12 @@ def create_app(
             return {"ok": False, "error": "rows 배열이 없습니다"}, 400
         if len(rows) > NR_MAX_ROWS:
             return {"ok": False, "error": f"한 번에 {NR_MAX_ROWS}행까지 받습니다"}, 413
-        settings = current_app.config.get("SETTINGS")
-        if settings is None:
+        if current_app.config.get("SETTINGS") is None:
             return {"ok": False, "error": "설정 파일을 읽지 못해 받을 수 없습니다"}, 500
         now = datetime.now().isoformat(timespec="seconds")
         try:
             with closing(_rw_conn()) as conn, run_log(conn, "nr import", f"{len(rows)}행") as c:
-                results = ingest(conn, rows, settings, now, c)
+                results = ingest(conn, rows, _settings(conn), now, c)
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc):
                 raise
@@ -558,7 +569,7 @@ def create_app(
         plan = nr_plan_detail(conn, plan_id)
         if plan is None:
             abort(404)
-        settings = current_app.config.get("SETTINGS")
+        settings = _settings(conn)
         aliases = dict(settings.nr_org_aliases) if settings else {}
         found = candidates(
             conn, plan["org_name"], plan["building_name"], plan["address"] or "", aliases
@@ -569,13 +580,12 @@ def create_app(
 
     def _nr_write(plan_id: int, action):
         """설치계획서 쓰기 공통. 잠금이면 이유를 띄우고 그 설치계획서로 돌아간다."""
-        settings = current_app.config.get("SETTINGS")
-        if settings is None:
+        if current_app.config.get("SETTINGS") is None:
             abort(503)
         now = datetime.now().isoformat(timespec="seconds")
         try:
             with closing(_rw_conn()) as conn:
-                return action(conn, settings, now)
+                return action(conn, _settings(conn), now)
         except LookupError:
             abort(404)
         except sqlite3.OperationalError as exc:

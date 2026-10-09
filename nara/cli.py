@@ -25,6 +25,7 @@ from nara.llm import adjudicate, ask_dept
 from nara.migrate_sheets import import_tab
 from nara.nr_match import OVERLAP_MIN, overlaps
 from nara.runlog import run_log
+from nara.settings_store import current_settings, seed_settings
 from nara.slot import SLOTS
 from nara.slot import acquire as acquire_slot
 from nara.slot import plan as slot_plan
@@ -46,6 +47,13 @@ def _open_db(db: Path):
     return conn
 
 
+def _load_settings(conn, config: Path) -> Settings:
+    """파일은 처음 옮길 때와 기술 설정(service_div_name 등)에만 쓴다. 목록은 DB가 정본."""
+    base = load_settings(config)
+    seed_settings(conn, base, datetime.now().isoformat(timespec="seconds"))
+    return current_settings(conn, base)
+
+
 @app.callback()
 def callback() -> None:
     """나라장터 설계용역 수집·조사 도구."""
@@ -64,7 +72,6 @@ def collect(
     config: Path = typer.Option(DEFAULT_CONFIG),
 ) -> None:
     """최근 N일치 설계용역 공고를 수집한다."""
-    settings = load_settings(config)
     secrets = load_secrets(DEFAULT_ENV)
     if not secrets.g2b_api_key:
         typer.echo("G2B_API_KEY가 .env에 없습니다.", err=True)
@@ -73,6 +80,7 @@ def collect(
     end = datetime.now()
     begin = end - timedelta(days=days)
     conn = _open_db(db)
+    settings = _load_settings(conn, config)
     with run_log(conn, "collect", f"--days {days}") as counters:
         with httpx.Client() as client:
             added = collect_range(conn, client, secrets.g2b_api_key, settings, begin, end, counters)
@@ -90,13 +98,13 @@ def backfill(
     config: Path = typer.Option(DEFAULT_CONFIG),
 ) -> None:
     """과거 공고를 소급 수집한다. 중단해도 다음 실행에서 이어진다."""
-    settings = load_settings(config)
     secrets = load_secrets(DEFAULT_ENV)
     if not secrets.g2b_api_key:
         typer.echo("G2B_API_KEY가 .env에 없습니다.", err=True)
         raise typer.Exit(code=1)
 
     conn = _open_db(db)
+    settings = _load_settings(conn, config)
     args = f"--days {days}" + (f" --org {org}" if org else "")
     with run_log(conn, "backfill", args) as counters:
         with httpx.Client() as client:
@@ -586,8 +594,8 @@ def migrate_tsv(
     config: Path = typer.Option(DEFAULT_CONFIG),
 ) -> None:
     """시트 탭 TSV 한 개를 DB로 옮긴다. 원본은 그대로 보관한다."""
-    settings = load_settings(config)
     conn = _open_db(db)
+    settings = _load_settings(conn, config)
     now = datetime.now().isoformat(timespec="seconds")
 
     # 되돌릴 수 있도록 원본을 먼저 복사해 둔다.
