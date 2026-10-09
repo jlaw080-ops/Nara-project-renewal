@@ -228,3 +228,24 @@ CREATE TABLE IF NOT EXISTS dept_contact (
   updated_by    INTEGER REFERENCES app_user(id),
   PRIMARY KEY (org_id, dept)
 );
+
+-- 웹 설정 화면이 정본. 처음 한 번만 config.toml 목록을 옮겨 채운다(app_state.settings_seeded).
+CREATE TABLE IF NOT EXISTS setting_item (
+  kind      TEXT NOT NULL,   -- title_required | title_excluded | org_excluded
+                             -- | focus_org | focus_exact_org | nr_alias
+  value     TEXT NOT NULL,   -- 키워드·기관명. nr_alias면 설치계획서 쪽 기관명
+  target    TEXT,            -- nr_alias일 때만: 나라 앱 기관명
+  added_at  TEXT NOT NULL,
+  added_by  INTEGER REFERENCES app_user(id),
+  PRIMARY KEY (kind, value)
+);
+
+CREATE TABLE IF NOT EXISTS setting_log (
+  id        INTEGER PRIMARY KEY,
+  at        TEXT NOT NULL,
+  user_id   INTEGER REFERENCES app_user(id),
+  kind      TEXT NOT NULL,
+  action    TEXT NOT NULL,   -- add | remove | seed
+  value     TEXT NOT NULL,
+  target    TEXT
+);

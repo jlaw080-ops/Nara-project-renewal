@@ -13,6 +13,8 @@ EXPECTED_TABLES = {
     "energy_kind",
     "nr_plan",
     "dept_contact",
+    "setting_item",
+    "setting_log",
     "run_log",
     "app_state",
 }
