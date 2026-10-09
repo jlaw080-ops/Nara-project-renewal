@@ -60,6 +60,11 @@
   .runs { margin: 0 0 12px; }
   form.filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 12px 0; }
   form.filters label { display: flex; flex-direction: column; gap: 4px; }
+  form.filters fieldset.org-pick { border: 1px solid var(--field-line); padding: 6px 8px; margin: 0; min-width: 18rem; }
+  .org-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .org-list { max-height: 12rem; overflow-y: auto; display: flex; flex-direction: column; }
+  form.filters .org-list label { flex-direction: row; align-items: center; gap: 6px; min-height: 28px; }
+  .org-list label[hidden] { display: none; }
 </style>
 </head>
 <body>
