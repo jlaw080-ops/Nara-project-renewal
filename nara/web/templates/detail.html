@@ -125,10 +125,10 @@
     {% endfor %}
   </fieldset>
   {% endif %}
-  <label>실행부서 <span class="muted">직접 적으면 후보보다 먼저 씁니다</span>
-    <input type="text" name="exec_dept" value="{{ form.get('exec_dept', '') }}">{{ err('exec_dept') }}
+  <label>실행부서 <span class="muted">직접 적으면 후보보다 먼저 씁니다. 후보를 쓰려면 이 칸을 비우세요</span>
+    <input type="text" name="exec_dept" value="{{ form.get('exec_dept', d.exec_dept or '') }}">{{ err('exec_dept') }}
   </label>
-  <label>근거 문장 <textarea name="snippet" rows="3">{{ form.get('snippet', '') }}</textarea>{{ err('snippet') }}</label>
+  <label>근거 문장 <textarea name="snippet" rows="3">{{ form.get('snippet', d.exec_snippet or '') }}</textarea>{{ err('snippet') }}</label>
   {% set c = d.contact %}
   <fieldset><legend>부서장</legend>
     <label>이름 <input type="text" name="head_name" value="{{ val('head_name', c.head_name if c else none) }}">{{ err('head_name') }}</label>

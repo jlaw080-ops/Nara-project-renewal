@@ -345,3 +345,31 @@ def test_verify_staff_keeps_only_what_the_notice_really_says():
         "김철수", None, None
     )
     assert verify_staff(text, None) is None
+
+
+def test_find_staff_never_takes_a_contract_procurement_or_fax_number():
+    """영업 전화가 재무과·조달청·팩스로 가면 안 된다 — 검토에서 잡힌 실제 꼴."""
+    for text in (
+        "과업 관련 문의: 건축과, 계약 관련 문의: ☎051-605-4154(재무과)",
+        "사업부서: 건축과 / 계약담당 051-605-4154",
+        "건축과 재무팀 051-605-4154",
+        "문의: 건축과 전자입찰 문의: 조달청 042-724-1234",
+        "건축과 FAX 051-605-6239",
+        "담당: 건축과 ☎051-605-4154(도시과)",
+    ):
+        assert find_staff(text, "건축과") is None, text
+
+
+def test_find_staff_prefers_the_contact_block_over_an_earlier_mention():
+    text = (
+        "주관: 건축과 051-605-9999 … 13. 기타 용역에 관한 사항: 건축과 ☎051-605-6231 "
+        "입찰에 관한 사항: 재무과 ☎051-605-4154"
+    )
+    assert find_staff(text, "건축과").tel == "051-605-6231"
+
+
+def test_find_staff_does_not_read_a_title_or_a_fax_as_the_person():
+    assert find_staff("건축과 건축행정팀장 051-605-6231", "건축과") == StaffContact(
+        None, None, "051-605-6231"
+    )
+    assert find_staff("건축과 FAX 051-605-6239 TEL 051-605-6231", "건축과").tel == "051-605-6231"

@@ -128,6 +128,7 @@ class ProjectDetail:
     exec_dept: str | None = None  # 확정된 최신 실행부서
     contact: sqlite3.Row | None = None  # 그 부서의 부서장·실무 담당자 연락처
     contact_auto: frozenset[str] = frozenset()  # 공고문에서 자동으로 채운 칸
+    exec_snippet: str | None = None  # 확정된 실행부서의 근거 문장
 
 
 def safe_url(url: str | None) -> str:
@@ -261,13 +262,17 @@ class PrintRow:
     status: str
 
 
-def current_dept(conn: sqlite3.Connection, project_id: int) -> str | None:
-    """확정된 최신 실행부서. 목록·상세가 같은 규칙으로 고른다."""
-    row = conn.execute(
-        "SELECT exec_dept FROM dept_check WHERE project_id = ? AND confirmed = 1 "
+def current_dept_row(conn: sqlite3.Connection, project_id: int) -> sqlite3.Row | None:
+    """확정된 최신 실행부서 줄(exec_dept, snippet). 목록·상세가 같은 규칙으로 고른다."""
+    return conn.execute(
+        "SELECT exec_dept, snippet FROM dept_check WHERE project_id = ? AND confirmed = 1 "
         "AND COALESCE(exec_dept, '') != '' ORDER BY checked_at DESC, id DESC LIMIT 1",
         (project_id,),
     ).fetchone()
+
+
+def current_dept(conn: sqlite3.Connection, project_id: int) -> str | None:
+    row = current_dept_row(conn, project_id)
     return row["exec_dept"] if row else None
 
 
@@ -383,7 +388,8 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
             (project_id,),
         )
     ]
-    exec_dept = current_dept(conn, project_id)
+    dept_row = current_dept_row(conn, project_id)
+    exec_dept = dept_row["exec_dept"] if dept_row else None
     contact = dept_contact(conn, project["org_id"], exec_dept)
     return ProjectDetail(
         project=project,
@@ -397,6 +403,7 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
         edits=edits,
         attachments=attachments,
         exec_dept=exec_dept,
+        exec_snippet=dept_row["snippet"] if dept_row else None,
         contact=contact,
         contact_auto=frozenset(
             a for a in ((contact["auto_fields"] if contact else "") or "").split(",") if a

@@ -1776,17 +1776,64 @@ def test_the_form_opens_with_the_current_contacts_and_marks_notice_values(world)
     assert "(공고문)" not in _text(client.get(f"/project/{ids['gym']}"))
 
 
-def test_renaming_the_department_moves_the_contacts_to_the_new_name(world):
+def test_renaming_the_department_leaves_contacts_alone_and_says_so(world):
+    """폼에는 옛 부서의 연락처가 들어 있다. 그대로 새 부서에 쓰면 새 부서 담당자를 덮는다."""
     path, ids = world
     _two_projects_in_one_department(path, ids)
+    conn = connect(path)
+    org = conn.execute("SELECT org_id FROM project WHERE id = ?", (ids["gym"],)).fetchone()[0]
+    conn.execute(
+        "INSERT INTO dept_contact (org_id, dept, head_name, updated_at) "
+        "VALUES (?, '문화체육과', '이몽룡', ?)",
+        (org, NOW),
+    )
+    conn.commit()
+    conn.close()
     client = _client(path)
     form = _dept_form(client, ids["gym"], **CONTACT)
-    _post(client, f"/project/{ids['gym']}/edit/dept", {**form, "exec_dept": "문화체육과"})
+    resp = _post(client, f"/project/{ids['gym']}/edit/dept", {**form, "exec_dept": "문화체육과"})
+    assert resp.status_code == 302
+    assert "부서가 바뀌어 연락처는 저장하지 않았습니다" in _text(
+        client.get(resp.headers["Location"])
+    )
     conn = connect(path)
     rows = conn.execute("SELECT dept, head_name FROM dept_contact ORDER BY dept").fetchall()
     conn.close()
-    assert [tuple(r) for r in rows] == [("문화체육과", "홍길동")]
-    assert "홍길동" not in _text(client.get(f"/project/{ids['welfare']}"))  # 아직 체육진흥과
+    assert [tuple(r) for r in rows] == [("문화체육과", "이몽룡")]
+
+
+def test_the_department_form_opens_with_the_current_name_and_evidence(world):
+    """번호 하나 고치려고 부서를 다시 적게 하면 근거 문장이 사라진다."""
+    path, ids = world
+    _two_projects_in_one_department(path, ids)
+    conn = connect(path)
+    conn.execute(
+        "UPDATE dept_check SET snippet = '사업관련 문의: 체육진흥과' WHERE project_id = ?",
+        (ids["gym"],),
+    )
+    conn.commit()
+    conn.close()
+    form = _text(_client(path).get(f"/project/{ids['gym']}?edit=dept"))
+    assert 'name="exec_dept" value="체육진흥과"' in form
+    assert "사업관련 문의: 체육진흥과</textarea>" in form
+
+
+def test_a_locked_contact_save_leaves_no_half_saved_department(world, monkeypatch):
+    path, ids = world
+    _two_projects_in_one_department(path, ids)
+    client = _client(path)
+
+    def locked(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(edit, "save_contact", locked)
+    form = _dept_form(client, ids["gym"], **CONTACT)
+    resp = _post(client, f"/project/{ids['gym']}/edit/dept", {**form, "snippet": "새 근거"})
+    assert resp.status_code == 503
+    conn = connect(path)
+    saved = conn.execute("SELECT COUNT(*) FROM dept_check WHERE snippet = '새 근거'").fetchone()
+    conn.close()
+    assert saved[0] == 0  # 부서 저장이 먼저 커밋돼 반만 남으면 안 된다
 
 
 def test_the_print_sheet_fills_head_position_and_direct_line(world):

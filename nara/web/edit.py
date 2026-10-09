@@ -5,6 +5,7 @@ import math
 import re
 import sqlite3
 from collections.abc import Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import date
 from itertools import zip_longest
@@ -33,6 +34,11 @@ _LONG_FIELDS = ("note",)
 _TEXT_FIELDS = ("address", "zeb_grade", "re_ratio", "etc_cert", "guide_equip", "note")
 _ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _ID = re.compile(r"[0-9]{1,18}")
+
+
+def _tx(conn: sqlite3.Connection):
+    """이미 열린 트랜잭션(웹 저장의 BEGIN IMMEDIATE)이 있으면 그 안에서 쓴다 — 중간에 커밋하지 않는다."""
+    return nullcontext(conn) if conn.in_transaction else conn
 
 
 @dataclass(frozen=True)
@@ -237,7 +243,7 @@ def save_contact(
         return False
     if old is None and not any(new):
         return False
-    with conn:
+    with _tx(conn):
         if not any(new):
             conn.execute("DELETE FROM dept_contact WHERE org_id = ? AND dept = ?", (org_id, dept))
         else:
@@ -379,7 +385,7 @@ def save_dept(
         and latest["snippet"] == snippet
     ):
         return []
-    with conn:
+    with _tx(conn):
         conn.execute(
             "INSERT INTO dept_check (project_id, exec_dept, snippet, decided_by, checked_at) "
             "VALUES (?, ?, ?, 'human', ?)",
@@ -444,7 +450,8 @@ def version_of(conn: sqlite3.Connection, project_id: int, section: str) -> str:
                 "dept_check",
                 project_id,
                 "AND confirmed = 1 AND COALESCE(exec_dept, '') != ''",
-            )
+            ),
+            *_contact_parts(conn, project_id),
         ]
     else:
         rows = conn.execute(
@@ -452,6 +459,24 @@ def version_of(conn: sqlite3.Connection, project_id: int, section: str) -> str:
         ).fetchall()
         parts = [energy_value(EnergyItem(r["source_type"], r["capacity_kw"]) for r in rows)]
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _contact_parts(conn: sqlite3.Connection, project_id: int) -> list[str]:
+    """지금 실행부서의 연락처 값. 연락처만 고쳐도 묶음 버전이 바뀌어 동시 수정을 잡는다."""
+    row = conn.execute(
+        "SELECT p.org_id, (SELECT exec_dept FROM dept_check d WHERE d.project_id = p.id "
+        " AND d.confirmed = 1 AND COALESCE(d.exec_dept, '') != '' "
+        " ORDER BY d.checked_at DESC, d.id DESC LIMIT 1) AS dept FROM project p WHERE p.id = ?",
+        (project_id,),
+    ).fetchone()
+    if row is None or not row["dept"]:
+        return []
+    contact = conn.execute(
+        f"SELECT {', '.join(CONTACT_FIELDS)}, auto_fields FROM dept_contact "
+        "WHERE org_id = ? AND dept = ?",
+        (row["org_id"], row["dept"]),
+    ).fetchone()
+    return [canonical(v) for v in contact] if contact else []
 
 
 def _latest_row_id(conn: sqlite3.Connection, table: str, project_id: int, extra: str) -> str:

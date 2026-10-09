@@ -41,6 +41,7 @@ from nara.web.data import (
     NR_STATE_LABELS,
     DatabaseMissing,
     ProjectDetail,
+    current_dept,
     last_runs,
     list_projects,
     nr_counts,
@@ -217,13 +218,17 @@ def _save(section: str, conn: sqlite3.Connection, project_id: int, values: dict)
     if section == "verdict":
         return edit.save_verdict(conn, project_id, values["verdict"], values["reason"], now, uid)
     if section == "dept":
+        before = current_dept(conn, project_id)
         changed = edit.save_dept(conn, project_id, values["exec_dept"], values["snippet"], now, uid)
-        org_id = conn.execute("SELECT org_id FROM project WHERE id = ?", (project_id,)).fetchone()[
-            0
-        ]
+        if before and values["exec_dept"] != before:
+            # 폼에 든 연락처는 옛 부서 것이다. 새 부서 줄에 쓰면 그 부서 담당자를 덮는다.
+            flash(
+                "부서가 바뀌어 연락처는 저장하지 않았습니다. 새 부서의 연락처는 다시 고치기에서 적으세요"
+            )
+            return changed
+        row = conn.execute("SELECT org_id FROM project WHERE id = ?", (project_id,)).fetchone()
         contact = {k: values[k] for k in edit.CONTACT_FIELDS}
-        # 연락처는 저장한 실행부서 이름의 기관+부서에 붙는다
-        if edit.save_contact(conn, org_id, values["exec_dept"], contact, now, uid):
+        if edit.save_contact(conn, row[0], values["exec_dept"], contact, now, uid):
             changed = [*changed, "연락처"]
         return changed
     return edit.save_energy(conn, project_id, values["items"], now, uid)

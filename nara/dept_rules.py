@@ -79,10 +79,19 @@ STAFF_WINDOW = 120  # 부서 이름 뒤로 담당자·번호를 찾는 폭
 POSITION = r"주무관|사무관|서기관|주사보|주사|주임|계장|팀장"
 _TEL = re.compile(r"(?<!\d)(0\d{1,2})\s*[-.)]?\s*(\d{3,4})\s*[-.]\s*(\d{4})(?!\d)")
 _CALL_CENTRE = re.compile(r"^(1588|1577|1544|080)")
-_NAME_POS = re.compile(rf"(?<![가-힣])([가-힣]{{2,4}})\s*({POSITION})(?![가-힣])")
+# 이름과 직위 사이에 칸이 있어야 사람이다 — '건축행정팀장'은 직함이다
+_NAME_POS = re.compile(rf"(?<![가-힣])([가-힣]{{2,4}})\s+({POSITION})(?![가-힣])")
 _LABEL_NAME = re.compile(r"담당(?:자)?\s*[:：]\s*([가-힣]{2,4})(?![가-힣])")
-# '담당 주무관'·'건축과 주무관'의 앞 낱말은 이름이 아니다
-_NOT_NAME = re.compile(r"(담당|부서|소속|문의|과|팀|계|실|국)$")
+# '담당 주무관'·'건축과 주무관'·'건축행정 팀장'의 앞 낱말은 이름이 아니다
+_NOT_NAME = re.compile(
+    r"(담당|부서|소속|문의|행정|정책|관리|계획|시설|건축|도시|환경|총무|안전|과|팀|계|실|국)$"
+)
+# 여기부터는 계약·입찰·조달 쪽이다 — 그 뒤의 번호는 실행부서 번호가 아니다
+_STOP = re.compile(r"계약|입찰|개찰|조달|나라장터|콜센터|재무|회계|경리|세정")
+_FAX_BEFORE = re.compile(r"(?:FAX|Fax|fax|팩스)\s*[:：]?\s*$")
+_DEPT_AFTER = re.compile(r"^\s*\(?\s*(\d*[가-힣]{2,12}과)")
+# 문의처 신호어가 이 안에 있으면 그 자리의 부서가 문의처다
+CUE_BEFORE = 60
 
 
 @dataclass(frozen=True)
@@ -227,31 +236,60 @@ def verify_answer(text: str, answer: DeptAnswer) -> bool:
 
 
 def normalize_tel(raw: str) -> str | None:
-    """'☎ 051 - 605 - 6231' → '051-605-6231'. 콜센터 번호는 None."""
-    m = _TEL.search(raw or "")
-    if m is None or _CALL_CENTRE.match(m.group(1)):
-        return None
-    return "-".join(m.groups())
+    """'☎ 051 - 605 - 6231' → '051-605-6231'. 팩스·콜센터 번호는 건너뛴다."""
+    return next((tel for _, tel in _tels(raw or "")), None)
+
+
+def _tels(text: str) -> list[tuple[re.Match, str]]:
+    found = []
+    for m in _TEL.finditer(text):
+        if _CALL_CENTRE.match(m.group(1)) or _FAX_BEFORE.search(
+            text[max(0, m.start() - 8) : m.start()]
+        ):
+            continue
+        found.append((m, "-".join(m.groups())))
+    return found
 
 
 def _staff_window(txt: str, start: int, dept: str) -> str:
-    """부서 이름 뒤 120자. 다른 부서 이름이 나오면 거기서 끊는다."""
+    """부서 이름 뒤 120자. 다른 부서 이름이나 계약·입찰 낱말이 나오면 거기서 끊는다."""
     window = txt[start : start + STAFF_WINDOW]
+    cut = len(window)
     for m in DEPT.finditer(window):
         if m.group(1) != dept and is_division(m.group(1)):
-            return window[: m.start()]
-    return window
+            cut = min(cut, m.start())
+            break
+    if stop := _STOP.search(window):
+        cut = min(cut, stop.start())
+    return window[:cut]
+
+
+def _window_tel(window: str, raw: str, dept: str) -> str | None:
+    """창 안의 첫 번호. 바로 뒤에 다른 부서 이름이 붙은 번호('051-…(도시과)')는 뺀다.
+
+    창은 다른 부서 이름 앞에서 잘려 있으므로 뒤 글자는 자르기 전 글(raw)에서 본다.
+    """
+    for m, tel in _tels(window):
+        after = _DEPT_AFTER.match(raw[m.end() :])
+        if after and after.group(1) != dept:
+            continue
+        return tel
+    return None
 
 
 def find_staff(text: str, dept: str) -> StaffContact | None:
-    """실행부서 뒤에 적힌 직통번호·담당자. 번호가 있는 자리를 먼저, 없으면 이름이 있는 자리."""
+    """실행부서 뒤에 적힌 직통번호·담당자.
+
+    문의처 신호어 뒤의 자리를 먼저, 없으면 마지막 자리(문의처는 대개 공고문 끝)를 쓴다.
+    번호가 있는 자리가 이름만 있는 자리보다 먼저다.
+    """
     txt = _clean(text).replace("\n", " ")
     # 뒤에 조사가 붙어도('건축과에서') 찾는다. 앞은 낱말 경계여야 '도시건축과'를 피한다.
     pattern = r"(?<![가-힣])" + r"\s*".join(map(re.escape, dept))
-    found: list[StaffContact] = []
+    found: list[tuple[bool, StaffContact]] = []
     for m in re.finditer(pattern, txt):
         window = _staff_window(txt, m.end(), dept)
-        tel = normalize_tel(window)
+        tel = _window_tel(window, txt[m.end() : m.end() + STAFF_WINDOW], dept)
         name = position = None
         if (np := _NAME_POS.search(window)) and not _NOT_NAME.search(np.group(1)):
             name, position = np.group(1), np.group(2)
@@ -259,8 +297,13 @@ def find_staff(text: str, dept: str) -> StaffContact | None:
             name = ln.group(1)
         staff = StaffContact(name, position, tel)
         if not staff.empty:
-            found.append(staff)
-    return next((s for s in found if s.tel), found[0] if found else None)
+            cued = CONTACT_CUE.search(txt[max(0, m.start() - CUE_BEFORE) : m.start()]) is not None
+            found.append((cued, staff))
+    for want_tel in (True, False):
+        pool = [(c, s) for c, s in found if bool(s.tel) == want_tel]
+        if pool:
+            return next((s for c, s in pool if c), pool[-1][1])
+    return None
 
 
 def verify_staff(text: str, staff: StaffContact | None) -> StaffContact | None:

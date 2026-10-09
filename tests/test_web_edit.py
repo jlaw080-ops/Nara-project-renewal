@@ -32,6 +32,7 @@ from nara.web.edit import (
     save_prices,
     save_verdict,
     unhide_projects,
+    version_of,
 )
 
 CURRENT = {
@@ -480,3 +481,39 @@ def test_a_person_saving_clears_the_notice_marks(db):
         assert save_contact(conn, org, "체육진흥과", values, NOW) is True
         row = conn.execute("SELECT auto_fields, head_name FROM dept_contact").fetchone()
         assert tuple(row) == (None, "홍")
+
+
+def _confirm(conn, pid, dept):
+    conn.execute(
+        "INSERT INTO dept_check (project_id, exec_dept, decided_by, confirmed, checked_at) "
+        "VALUES (?, ?, 'human', 1, ?)",
+        (pid, dept, NOW),
+    )
+    conn.commit()
+
+
+def test_the_dept_version_changes_when_only_a_contact_changes(db):
+    """두 사람이 번호만 따로 고치면 한쪽이 조용히 사라지면 안 된다."""
+    path, pid = db
+    with closing(open_readwrite(path)) as conn:
+        org = conn.execute("SELECT org_id FROM project WHERE id = ?", (pid,)).fetchone()[0]
+        _confirm(conn, pid, "체육진흥과")
+        before = version_of(conn, pid, "dept")
+        values = {**dict.fromkeys(CONTACT_FIELDS), "staff_tel": "051-000-0001"}
+        save_contact(conn, org, "체육진흥과", values, NOW)
+        assert version_of(conn, pid, "dept") != before
+
+
+def test_dept_and_contact_saves_join_an_open_transaction(db):
+    """웹 저장이 연 트랜잭션 안에서 둘 다 쓰고, 되돌리면 둘 다 없어야 한다."""
+    path, pid = db
+    with closing(open_readwrite(path)) as conn:
+        org = conn.execute("SELECT org_id FROM project WHERE id = ?", (pid,)).fetchone()[0]
+        conn.execute("BEGIN IMMEDIATE")
+        save_dept(conn, pid, "체육진흥과", None, NOW)
+        values = {**dict.fromkeys(CONTACT_FIELDS), "head_name": "홍길동"}
+        save_contact(conn, org, "체육진흥과", values, NOW)
+        assert conn.in_transaction
+        conn.rollback()
+        assert conn.execute("SELECT COUNT(*) FROM dept_check").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM dept_contact").fetchone()[0] == 0
