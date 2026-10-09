@@ -37,7 +37,7 @@ _ID = re.compile(r"[0-9]{1,18}")
 
 
 def _tx(conn: sqlite3.Connection):
-    """이미 열린 트랜잭션(웹 저장의 BEGIN IMMEDIATE)이 있으면 그 안에서 쓴다 — 중간에 커밋하지 않는다."""
+    """이미 열린 트랜잭션(웹 저장의 BEGIN IMMEDIATE) 안이면 거기서 쓴다. 중간에 커밋하지 않는다."""
     return nullcontext(conn) if conn.in_transaction else conn
 
 

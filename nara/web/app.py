@@ -223,7 +223,8 @@ def _save(section: str, conn: sqlite3.Connection, project_id: int, values: dict)
         if before and values["exec_dept"] != before:
             # 폼에 든 연락처는 옛 부서 것이다. 새 부서 줄에 쓰면 그 부서 담당자를 덮는다.
             flash(
-                "부서가 바뀌어 연락처는 저장하지 않았습니다. 새 부서의 연락처는 다시 고치기에서 적으세요"
+                "부서가 바뀌어 연락처는 저장하지 않았습니다. "
+                "새 부서의 연락처는 다시 고치기에서 적으세요"
             )
             return changed
         row = conn.execute("SELECT org_id FROM project WHERE id = ?", (project_id,)).fetchone()
