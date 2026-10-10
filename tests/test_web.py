@@ -1935,3 +1935,14 @@ def test_settings_writes_refuse_another_site(world):
     for url in ("/settings/preview", "/settings/apply"):
         resp = _post(client, url, {"add_org_excluded": "시험청"}, origin="http://evil.example")
         assert resp.status_code == 403
+
+
+def test_back_to_list_keeps_the_last_query(world):
+    """상세를 보고 목록으로 돌아가면 걸어 둔 조회 조건이 그대로다 — 저장하고 돌아와도 같다."""
+    path, ids = world
+    client = _client(path)
+    client.get("/?focus=1&sort=name&desc=0")
+    page = _text(client.get(f"/project/{ids['gym']}"))
+    assert 'href="/?focus=1&amp;sort=name&amp;desc=0">← 목록으로' in page
+    client.get("/")  # 조건 지우기
+    assert 'href="/">← 목록으로' in _text(client.get(f"/project/{ids['gym']}"))

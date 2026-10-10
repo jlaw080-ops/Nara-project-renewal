@@ -66,6 +66,7 @@ from nara.web.query import (
 EDIT_SECTIONS = ("info", "verdict", "dept", "energy")
 # 상세 화면에서 열 수 있는 폼. 부서장 연락처는 사업이 아니라 기관+부서 단위라 따로 저장한다.
 BUSY_MESSAGE = "수집이 DB를 쓰고 있습니다. 잠시 뒤 다시 저장하세요"
+LIST_QUERY_LIMIT = 2000  # 세션에 기억하는 목록 조회 조건의 길이
 CONFLICT_BY = "그사이 {}님이 고쳤습니다. 지금 값을 확인하고 다시 저장하세요"
 CONFLICT = "그사이 값이 바뀌었습니다. 지금 값을 확인하고 다시 저장하세요"
 BLANK_ENERGY_ROWS = 3
@@ -405,8 +406,16 @@ def create_app(
         # 서버를 띄운 뒤 DB 파일이 사라진 경우다. 추적 화면 대신 이유를 말한다.
         return str(exc), 503, {"Content-Type": "text/plain; charset=utf-8"}
 
+    @app.context_processor
+    def _list_query():
+        # 상세의 '목록으로'가 마지막 조회 조건으로 돌아간다. 저장 뒤 돌아와도 같다.
+        return {"list_query": session.get("list_query", "")}
+
     @app.get("/")
     def index():
+        query = request.query_string.decode("utf-8", "replace")
+        # 세션 쿠키는 4KB가 한계다. 기관을 수십 곳 고른 긴 조건은 기억하지 않는다.
+        session["list_query"] = query if len(query) <= LIST_QUERY_LIMIT else ""
         f, notes = parse_filters({k: request.args.getlist(k) for k in request.args})
         conn = get_conn()
         orgs = org_options(conn)
