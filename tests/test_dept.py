@@ -384,6 +384,14 @@ def test_enrich_dept_command_reports_and_logs(tmp_path, monkeypatch):
         "group": 2,
         "budget": 1200,
     }
+    # 사업 하나만 볼 때는 기록에 어느 사업인지 남는다
+    CliRunner().invoke(cli.app, ["enrich", "dept", "--project", "7", "--db", str(db_path)])
+    conn = connect(db_path)
+    logged = conn.execute(
+        "SELECT args FROM run_log WHERE command = 'enrich dept' ORDER BY id DESC LIMIT 1"
+    ).fetchone()[0]
+    conn.close()
+    assert logged == "--tier all --project 7"
     conn = connect(db_path)
     assert (
         conn.execute("SELECT status FROM run_log WHERE command = 'enrich dept'").fetchone()[0]

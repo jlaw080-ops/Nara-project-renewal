@@ -219,6 +219,13 @@ def _serve_lan(db: Path, secrets: Secrets, settings: Settings, port: int) -> Non
 
 
 enrich_app = typer.Typer(help="수집한 공고에 정보를 덧붙인다")
+
+
+def _scope(tier: str, project: int | None) -> str:
+    """run_log에 남는 인자. 사업 하나만 봤으면 어느 사업인지 남긴다."""
+    return f"--tier {tier}" + (f" --project {project}" if project is not None else "")
+
+
 app.add_typer(enrich_app, name="enrich")
 
 
@@ -241,7 +248,7 @@ def enrich_award(
 
     conn = _open_db(db)
     selected = None if tier == "all" else tier
-    with run_log(conn, "enrich award", f"--tier {tier}") as counters:
+    with run_log(conn, "enrich award", _scope(tier, project)) as counters:
         with httpx.Client() as client:
             updated = update_awards(
                 conn,
@@ -290,7 +297,7 @@ def enrich_status(
         def search(secrets_, query):
             return search_news(client, secrets_, query)
 
-        with run_log(conn, "enrich status", f"--tier {tier}") as counters:
+        with run_log(conn, "enrich status", _scope(tier, project)) as counters:
             run = update_statuses(
                 conn,
                 secrets,
@@ -364,7 +371,7 @@ def enrich_dept(
     secrets = load_secrets(DEFAULT_ENV)
     conn = _open_db(db)
     selected = None if tier == "all" else tier
-    with run_log(conn, "enrich dept", f"--tier {tier}") as counters:
+    with run_log(conn, "enrich dept", _scope(tier, project)) as counters:
         with httpx.Client() as client:
             run = update_depts(
                 conn,
