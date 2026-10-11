@@ -501,16 +501,18 @@ def user_list(db: Path = typer.Option(DEFAULT_DB)) -> None:
 
 
 # 슬롯 단계 이름 → 지금 명령. 테스트가 가짜로 바꿔 끼운다.
+# 명령 함수를 Typer 없이 직접 부르므로 인자를 하나도 빠뜨리면 안 된다 — 빠진 인자는 Typer의
+# 기본값 객체(OptionInfo)가 그대로 들어와 SQL 바인딩에서 터진다(2026-10-11).
 _STEP_RUNNERS: dict[str, Callable[..., None]] = {
     "collect": lambda db, config, days: collect(days=days, db=db, config=config),
     "enrich award": lambda db, config, tier, group: enrich_award(
-        tier=tier, group=group, limit=300, db=db
+        tier=tier, group=group, limit=300, db=db, project=None
     ),
     "enrich status": lambda db, config, tier: enrich_status(
-        tier=tier, limit=300, budget=1200, db=db
+        tier=tier, limit=300, budget=1200, db=db, project=None
     ),
     "enrich dept": lambda db, config, tier, group: enrich_dept(
-        tier=tier, group=group, limit=300, budget=1200, db=db
+        tier=tier, group=group, limit=300, budget=1200, db=db, project=None
     ),
 }
 

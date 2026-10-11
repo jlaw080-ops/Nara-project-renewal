@@ -159,3 +159,51 @@ def test_run_project_refreshes_one_project_through_the_three_lookups(tmp_path, m
     assert c.execute("SELECT 1 FROM app_state WHERE key = ?", (LOCK_KEY,)).fetchone() is None
     c.close()
     assert (row["status"], row["args"]) == ("ok", "7")
+
+
+def test_step_runners_call_the_real_enrich_commands_without_typer_defaults(tmp_path, monkeypatch):
+    """명령 함수를 Typer 없이 직접 부르면 안 넘긴 인자는 Typer 기본값 객체가 된다.
+
+    2026-10-11 20:03 '지금 실행'이 `--project <OptionInfo>`로 터졌다. 가짜 runner가 아니라
+    실제 enrich 명령 함수를 거쳐 run_log에 남는 인자까지 본다.
+    """
+    from nara.config import Secrets
+    from nara.dept import DeptRun
+    from nara.status import StatusRun
+
+    seen = {}
+
+    def fake_awards(*args, **kw):
+        seen["award"] = kw.get("project_id", "missing")
+        return 0
+
+    def fake_statuses(*args, **kw):
+        seen["status"] = kw.get("project_id", "missing")
+        return StatusRun()
+
+    def fake_depts(*args, **kw):
+        seen["dept"] = kw.get("project_id", "missing")
+        return DeptRun()
+
+    monkeypatch.setattr(cli, "update_awards", fake_awards)
+    monkeypatch.setattr(cli, "update_statuses", fake_statuses)
+    monkeypatch.setattr(cli, "update_depts", fake_depts)
+    secrets = Secrets(
+        g2b_api_key="g", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+    )
+    monkeypatch.setattr(cli, "load_secrets", lambda path: secrets)
+    db = tmp_path / "r.db"
+    args = ["run", "steps", "--step", "award", "--step", "status", "--step", "dept"]
+    result = CliRunner().invoke(cli.app, [*args, "--db", str(db)])
+    assert result.exit_code == 0, result.output
+    assert seen == {"award": None, "status": None, "dept": None}
+    c = connect(db)
+    rows = c.execute(
+        "SELECT command, args, status FROM run_log WHERE command LIKE 'enrich %' ORDER BY id"
+    ).fetchall()
+    c.close()
+    assert [tuple(r) for r in rows] == [
+        ("enrich award", "--tier focus", "ok"),
+        ("enrich status", "--tier focus", "ok"),
+        ("enrich dept", "--tier focus", "ok"),
+    ]
