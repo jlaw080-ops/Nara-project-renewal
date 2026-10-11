@@ -8,6 +8,13 @@
   <span class="{{ '' if r.healthy else 'bad' }}">{{ r.label }} {{ r.started_at|dash }} {{ r.status_label }}</span>{% if not loop.last %} · {% endif %}
 {% endfor %}
 </p>
+<form method="post" class="inline" action="{{ url_for('run_step') }}">
+  <label>지금 조회
+    <select name="step">{% for k, v in manual_steps.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
+  </label>
+  <button type="submit">지금 실행</button>
+  <span class="muted">예약 실행과 같은 범위(관심기관)로 바로 돕니다. 끝나면 상태 줄에 보입니다.</span>
+</form>
 
 <form class="filters" method="get" action="{{ url_for('index') }}">
   <fieldset class="org-pick">

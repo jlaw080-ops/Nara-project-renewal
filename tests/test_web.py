@@ -4,7 +4,7 @@ import html
 import re
 import sqlite3
 from contextlib import closing
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -1946,3 +1946,90 @@ def test_back_to_list_keeps_the_last_query(world):
     assert 'href="/?focus=1&amp;sort=name&amp;desc=0">← 목록으로' in page
     client.get("/")  # 조건 지우기
     assert 'href="/">← 목록으로' in _text(client.get(f"/project/{ids['gym']}"))
+
+
+def _launches(monkeypatch):
+    from nara.web import launch
+
+    seen = []
+    monkeypatch.setattr(launch, "launch", lambda args, db_path: seen.append((args, db_path)))
+    return seen
+
+
+def _run_log(path, command, args="", started=None, finished=None):
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO run_log (command, args, started_at, finished_at, status) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (command, args, started or NOW, finished, "ok" if finished else None),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_the_list_page_starts_a_chosen_step_in_the_background(world, monkeypatch):
+    """예약을 기다리지 않고 지금 조회한다. 진행현황(Claude 비용)은 고를 수 없다."""
+    path, _ = world
+    seen = _launches(monkeypatch)
+    client = _client(path)
+    page = _text(client.get("/"))
+    assert 'name="step"' in page and "지금 실행" in page
+    assert 'value="dept"' in page and 'value="status"' not in page
+    resp = _post(client, "/run", {"step": "dept"})
+    assert resp.status_code == 302
+    assert seen == [(["run", "steps", "--step", "dept"], path)]
+    assert "실행을 시작했습니다" in _text(client.get(resp.headers["Location"]))
+
+
+def test_an_unknown_step_or_a_running_slot_starts_nothing(world, monkeypatch):
+    from nara.slot import acquire
+
+    path, _ = world
+    seen = _launches(monkeypatch)
+    client = _client(path)
+    assert _post(client, "/run", {"step": "status"}).status_code == 400
+    conn = connect(path)
+    acquire(conn, datetime.now())
+    conn.close()
+    resp = _post(client, "/run", {"step": "collect"})
+    assert resp.status_code == 302
+    assert "예약 실행이 돌고 있어" in _text(client.get(resp.headers["Location"]))
+    assert seen == []
+
+
+def test_the_detail_page_refreshes_one_project(world, monkeypatch):
+    path, ids = world
+    seen = _launches(monkeypatch)
+    client = _client(path)
+    page = _text(client.get(f"/project/{ids['gym']}"))
+    assert "이 사업 다시 조회" in page
+    resp = _post(client, f"/project/{ids['gym']}/refresh", {})
+    assert resp.status_code == 302
+    assert seen == [(["run", "project", str(ids["gym"])], path)]
+    _run_log(
+        path, "run project", str(ids["gym"]), started=datetime.now().isoformat(timespec="seconds")
+    )
+    page = _text(client.get(f"/project/{ids['gym']}"))
+    assert "다시 조회" in page and "실행 중" in page
+
+
+def test_an_unfinished_recent_run_shows_as_running(world):
+    path, _ = world
+    now = datetime.now()
+    _run_log(path, "collect", started=now.isoformat(timespec="seconds"))
+    _run_log(path, "enrich award", started=(now - timedelta(hours=3)).isoformat(timespec="seconds"))
+    page = _text(_client(path).get("/"))
+    assert "수집 " in page and "실행 중" in page
+    assert "끝나지 않음" in page  # 3시간 전에 시작해 아직 안 끝난 낙찰 조회는 죽은 실행이다
+
+
+def test_manual_runs_refuse_another_site(world, monkeypatch):
+    path, ids = world
+    seen = _launches(monkeypatch)
+    client = _client(path)
+    assert (
+        _post(client, "/run", {"step": "collect"}, origin="http://evil.example").status_code == 403
+    )
+    url = f"/project/{ids['gym']}/refresh"
+    assert _post(client, url, {}, origin="http://evil.example").status_code == 403
+    assert seen == []

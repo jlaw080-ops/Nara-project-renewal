@@ -103,3 +103,59 @@ def test_run_slot_skips_when_another_slot_is_running(tmp_path, monkeypatch):
     c.close()
     assert row["status"] == "partial"
     assert "앞 슬롯" in row["message"]
+
+
+def test_is_locked_follows_the_lock_age(tmp_path):
+    from nara.slot import is_locked
+
+    conn = connect(tmp_path / "l.db")
+    migrate(conn)
+    assert is_locked(conn, T0) is False
+    acquire(conn, T0)
+    assert is_locked(conn, T0 + timedelta(minutes=30)) is True
+    assert is_locked(conn, T0 + timedelta(hours=2, minutes=1)) is False
+
+
+def test_run_steps_runs_only_the_chosen_steps_in_pipeline_order(tmp_path, monkeypatch):
+    calls = []
+    _fake_runners(monkeypatch, calls)
+    db = tmp_path / "r.db"
+    args = ["run", "steps", "--step", "dept", "--step", "collect", "--db", str(db)]
+    result = CliRunner().invoke(cli.app, args)
+    assert result.exit_code == 0, result.output
+    assert calls == ["collect", "enrich dept"]
+    c = connect(db)
+    assert c.execute("SELECT 1 FROM app_state WHERE key = ?", (LOCK_KEY,)).fetchone() is None
+    row = c.execute("SELECT status, args FROM run_log WHERE command = 'run steps'").fetchone()
+    c.close()
+    assert (row["status"], row["args"]) == ("ok", "collect dept")
+
+
+def test_run_steps_refuses_an_unknown_step_and_a_running_slot(tmp_path, monkeypatch):
+    calls = []
+    _fake_runners(monkeypatch, calls)
+    db = tmp_path / "r.db"
+    result = CliRunner().invoke(cli.app, ["run", "steps", "--step", "backup", "--db", str(db)])
+    assert result.exit_code == 1 and calls == []
+    c = connect(db)
+    migrate(c)
+    acquire(c, datetime.now())
+    c.close()
+    result = CliRunner().invoke(cli.app, ["run", "steps", "--step", "collect", "--db", str(db)])
+    assert result.exit_code == 1 and calls == []
+    assert "돌고 있" in result.output
+
+
+def test_run_project_refreshes_one_project_through_the_three_lookups(tmp_path, monkeypatch):
+    seen = []
+    for name in ("enrich_award", "enrich_status", "enrich_dept"):
+        monkeypatch.setattr(cli, name, lambda name=name, **kw: seen.append((name, kw["project"])))
+    db = tmp_path / "r.db"
+    result = CliRunner().invoke(cli.app, ["run", "project", "7", "--db", str(db)])
+    assert result.exit_code == 0, result.output
+    assert seen == [("enrich_award", 7), ("enrich_status", 7), ("enrich_dept", 7)]
+    c = connect(db)
+    row = c.execute("SELECT status, args FROM run_log WHERE command = 'run project'").fetchone()
+    assert c.execute("SELECT 1 FROM app_state WHERE key = ?", (LOCK_KEY,)).fetchone() is None
+    c.close()
+    assert (row["status"], row["args"]) == ("ok", "7")

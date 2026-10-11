@@ -303,3 +303,11 @@ def test_enrich_award_command_rejects_invalid_tier(tmp_path):
     result = CliRunner().invoke(app, ["enrich", "award", "--db", str(db), "--tier", "focu"])
 
     assert result.exit_code != 0
+
+
+def test_pending_awards_can_be_limited_to_one_project(conn):
+    """상세의 '이 사업 다시 조회'는 그 사업 공고만 본다 — 관심기관이 아니어도."""
+    _add_notice(conn, "A1", "경기도 성남시", "2026-09-01")
+    _add_notice(conn, "A2", "경상북도 경주시", "2026-09-01")
+    pid = conn.execute("SELECT project_id FROM notice WHERE bid_no = 'A2'").fetchone()[0]
+    assert pending_award_bid_nos(conn, TODAY, "focus", None, 10, project_id=pid) == ["A2"]

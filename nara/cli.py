@@ -26,7 +26,7 @@ from nara.migrate_sheets import import_tab
 from nara.nr_match import OVERLAP_MIN, overlaps
 from nara.runlog import run_log
 from nara.settings_store import current_settings, seed_settings
-from nara.slot import SLOTS
+from nara.slot import SLOTS, Step
 from nara.slot import acquire as acquire_slot
 from nara.slot import plan as slot_plan
 from nara.slot import release as release_slot
@@ -228,6 +228,7 @@ def enrich_award(
     group: int | None = typer.Option(None, help="비관심 기관 요일 그룹 1~5"),
     limit: int = typer.Option(300, min=1, help="한 번에 조회할 최대 건수"),
     db: Path = typer.Option(DEFAULT_DB),
+    project: int | None = typer.Option(None, help="이 사업 공고만 (상세의 '다시 조회')"),
 ) -> None:
     """낙찰업체를 조회해 채운다."""
     if tier not in {"focus", "rest", "all"}:
@@ -251,6 +252,7 @@ def enrich_award(
                 group,
                 limit,
                 counters,
+                project_id=project,
             )
     typer.echo(
         f"낙찰 조회 — 조회 {counters.processed}건 / 기록 {updated}건 / 실패 {counters.failed}건"
@@ -266,6 +268,7 @@ def enrich_status(
     limit: int = typer.Option(300, min=1, help="한 번에 볼 최대 사업 수"),
     budget: int = typer.Option(1200, min=1, help="시간 예산(초). 넘기면 저장하고 멈춘다"),
     db: Path = typer.Option(DEFAULT_DB),
+    project: int | None = typer.Option(None, help="이 사업만 (상세의 '다시 조회')"),
 ) -> None:
     """진행현황을 판정해 쌓는다."""
     if tier not in {"focus", "rest", "all"}:
@@ -298,6 +301,7 @@ def enrich_status(
                 search=search,
                 adjudicator=adjudicate,
                 budget_seconds=budget,
+                project_id=project,
             )
 
     typer.echo(
@@ -351,6 +355,7 @@ def enrich_dept(
     limit: int = typer.Option(300, min=1, help="한 번에 볼 최대 사업 수"),
     budget: int = typer.Option(1200, min=1, help="시간 예산(초). 넘기면 저장하고 멈춘다"),
     db: Path = typer.Option(DEFAULT_DB),
+    project: int | None = typer.Option(None, help="이 사업만 (상세의 '다시 조회')"),
 ) -> None:
     """공고 첨부에서 실행부서를 찾는다."""
     if tier not in {"focus", "rest", "all"}:
@@ -372,6 +377,7 @@ def enrich_dept(
                 counters,
                 asker=ask_dept,
                 budget_seconds=budget,
+                project_id=project,
             )
     typer.echo(
         f"실행부서 — 조회 {run.checked}건 / 확정 규칙 {run.confirmed_rule}·"
@@ -505,6 +511,52 @@ run_app = typer.Typer(help="예약 실행")
 app.add_typer(run_app, name="run")
 
 
+# 목록의 '지금 실행'이 고르는 단계. 예약 슬롯과 같은 범위(관심기관)로 돈다.
+MANUAL_STEPS = {
+    "collect": Step("collect", {"days": 3}),
+    "award": Step("enrich award", {"tier": "focus", "group": None}),
+    "status": Step("enrich status", {"tier": "focus"}),
+    "dept": Step("enrich dept", {"tier": "focus", "group": None}),
+}
+
+
+def _skip_locked(conn, command: str, args: str, now: datetime) -> None:
+    stamp = now.isoformat(timespec="seconds")
+    conn.execute(
+        "INSERT INTO run_log (command, args, started_at, finished_at, status, message) "
+        "VALUES (?, ?, ?, ?, 'partial', '앞 슬롯이 돌고 있어 건너뜀')",
+        (command, args, stamp, stamp),
+    )
+    conn.commit()
+    typer.echo("앞 실행이 아직 돌고 있다 — 이번 회차는 건너뛴다", err=True)
+    raise typer.Exit(code=1)
+
+
+def _run_locked(conn, runners: list[tuple[str, Callable[[], None]]]) -> list[str]:
+    """잠금을 쥔 채 차례로 돈다. 한 단계가 실패해도 다음 단계를 돌고, 끝에 잠금을 푼다."""
+    failed: list[str] = []
+    try:
+        for name, run in runners:
+            try:
+                run()
+            except typer.Exit as exc:
+                if exc.exit_code:
+                    failed.append(name)
+            except Exception as exc:  # 한 단계가 죽어도 다음 단계를 돈다
+                failed.append(name)
+                typer.echo(f"{name} 실패: {exc}", err=True)
+    finally:
+        release_slot(conn)
+    return failed
+
+
+def _step_runners(steps: list[Step], db: Path, config: Path) -> list[tuple[str, Callable]]:
+    return [
+        (s.name, lambda s=s: _STEP_RUNNERS[s.name](db=db, config=config, **s.options))
+        for s in steps
+    ]
+
+
 @run_app.command("slot")
 def run_slot(
     slot: str = typer.Argument(..., help="09 | 12 | 15"),
@@ -518,32 +570,64 @@ def run_slot(
     conn = _open_db(db)
     now = datetime.now()
     if not acquire_slot(conn, now):
-        stamp = now.isoformat(timespec="seconds")
-        conn.execute(
-            "INSERT INTO run_log (command, args, started_at, finished_at, status, message) "
-            "VALUES ('run slot', ?, ?, ?, 'partial', '앞 슬롯이 돌고 있어 건너뜀')",
-            (slot, stamp, stamp),
-        )
-        conn.commit()
-        typer.echo("앞 슬롯이 아직 돌고 있다 — 이번 회차는 건너뛴다", err=True)
-        raise typer.Exit(code=1)
-    failed: list[str] = []
-    try:
-        for step in slot_plan(slot, date.today().isoweekday()):
-            try:
-                _STEP_RUNNERS[step.name](db=db, config=config, **step.options)
-            except typer.Exit as exc:
-                if exc.exit_code:
-                    failed.append(step.name)
-            except Exception as exc:  # 한 단계가 죽어도 다음 단계를 돈다
-                failed.append(step.name)
-                typer.echo(f"{step.name} 실패: {exc}", err=True)
-    finally:
-        release_slot(conn)
+        _skip_locked(conn, "run slot", slot, now)
+    steps = slot_plan(slot, date.today().isoweekday())
+    failed = _run_locked(conn, _step_runners(steps, db, config))
     if failed:
         typer.echo(f"실패한 단계: {', '.join(failed)}", err=True)
         raise typer.Exit(code=1)
     typer.echo(f"슬롯 {slot} 완료")
+
+
+@run_app.command("steps")
+def run_steps(
+    step: list[str] = typer.Option(..., "--step", help="collect | award | status | dept"),
+    db: Path = typer.Option(DEFAULT_DB),
+    config: Path = typer.Option(DEFAULT_CONFIG),
+) -> None:
+    """고른 단계만 예약 실행과 같은 순서·범위로 지금 돈다. 목록의 '지금 실행'이 부른다."""
+    unknown = [s for s in step if s not in MANUAL_STEPS]
+    if unknown:
+        typer.echo(f"모르는 단계: {', '.join(unknown)} — {' | '.join(MANUAL_STEPS)}", err=True)
+        raise typer.Exit(code=1)
+    chosen = [s for s in MANUAL_STEPS if s in step]
+    conn = _open_db(db)
+    now = datetime.now()
+    if not acquire_slot(conn, now):
+        _skip_locked(conn, "run steps", " ".join(chosen), now)
+    with run_log(conn, "run steps", " ".join(chosen)) as counters:
+        runners = _step_runners([MANUAL_STEPS[s] for s in chosen], db, config)
+        failed = _run_locked(conn, runners)
+        counters.failed = len(failed)
+    if failed:
+        typer.echo(f"실패한 단계: {', '.join(failed)}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"완료: {', '.join(chosen)}")
+
+
+@run_app.command("project")
+def run_project(
+    project_id: int = typer.Argument(..., help="사업 번호"),
+    db: Path = typer.Option(DEFAULT_DB),
+    config: Path = typer.Option(DEFAULT_CONFIG),
+) -> None:
+    """사업 하나만 낙찰 → 진행현황 → 실행부서를 바로 다시 본다. 상세의 '다시 조회'가 부른다."""
+    conn = _open_db(db)
+    now = datetime.now()
+    if not acquire_slot(conn, now):
+        _skip_locked(conn, "run project", str(project_id), now)
+    runners = [
+        ("enrich award", lambda: enrich_award(project=project_id, db=db)),
+        ("enrich status", lambda: enrich_status(project=project_id, db=db)),
+        ("enrich dept", lambda: enrich_dept(project=project_id, db=db)),
+    ]
+    with run_log(conn, "run project", str(project_id)) as counters:
+        failed = _run_locked(conn, runners)
+        counters.failed = len(failed)
+    if failed:
+        typer.echo(f"실패한 단계: {', '.join(failed)}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"사업 #{project_id} 다시 조회 완료")
 
 
 @app.command("nr-dupes")

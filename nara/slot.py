@@ -34,6 +34,12 @@ def plan(slot: str, weekday: int) -> list[Step]:
     return steps
 
 
+def is_locked(conn: sqlite3.Connection, now: datetime) -> bool:
+    """예약·수동 실행이 돌고 있는가. 죽은 실행의 표시는 LOCK_MAX_AGE 뒤 무시한다."""
+    row = conn.execute("SELECT value FROM app_state WHERE key = ?", (LOCK_KEY,)).fetchone()
+    return row is not None and now - datetime.fromisoformat(row[0]) < LOCK_MAX_AGE
+
+
 def acquire(conn: sqlite3.Connection, now: datetime) -> bool:
     """겹침 표시를 건다. 다른 슬롯이 돌고 있으면 False.
 

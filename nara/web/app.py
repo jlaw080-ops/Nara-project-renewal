@@ -35,7 +35,8 @@ from nara.nr_match import candidates
 from nara.nr_plan import load_energy
 from nara.runlog import run_log
 from nara.settings_store import current_settings, seed_settings
-from nara.web import edit, xlsx
+from nara.slot import is_locked
+from nara.web import edit, launch, xlsx
 from nara.web.data import (
     BUSY_TIMEOUT_SECONDS,
     NR_STATE_LABELS,
@@ -67,6 +68,9 @@ EDIT_SECTIONS = ("info", "verdict", "dept", "energy")
 # 상세 화면에서 열 수 있는 폼. 부서장 연락처는 사업이 아니라 기관+부서 단위라 따로 저장한다.
 BUSY_MESSAGE = "수집이 DB를 쓰고 있습니다. 잠시 뒤 다시 저장하세요"
 LIST_QUERY_LIMIT = 2000  # 세션에 기억하는 목록 조회 조건의 길이
+# 목록의 '지금 실행'이 고르는 단계. 진행현황은 Claude 비용이 들어 예약 실행에만 맡긴다.
+MANUAL_STEPS = {"collect": "수집", "award": "낙찰 조회", "dept": "실행부서"}
+LOCKED_MESSAGE = "예약 실행이 돌고 있어 시작하지 않았습니다. 끝난 뒤 다시 누르세요"
 CONFLICT_BY = "그사이 {}님이 고쳤습니다. 지금 값을 확인하고 다시 저장하세요"
 CONFLICT = "그사이 값이 바뀌었습니다. 지금 값을 확인하고 다시 저장하세요"
 BLANK_ENERGY_ROWS = 3
@@ -426,12 +430,40 @@ def create_app(
             result=list_projects(conn, f),
             nr_pending=nr_counts(conn).get("pending", 0),
             runs=last_runs(conn),
+            manual_steps=MANUAL_STEPS,
             orgs=orgs,
             conditions=_conditions(f, {o["id"]: o["name"] for o in orgs}),
             sort_links=_sort_links(f),
             verdict_choices=VERDICT_CHOICES,
             no_verdict=NO_VERDICT,
         )
+
+    @app.post("/run")
+    def run_step():
+        step = request.form.get("step", "")
+        if step not in MANUAL_STEPS:
+            abort(400)
+        if is_locked(get_conn(), datetime.now()):
+            flash(LOCKED_MESSAGE)
+        else:
+            launch.launch(["run", "steps", "--step", step], current_app.config["DB_PATH"])
+            flash(
+                f"{MANUAL_STEPS[step]} 실행을 시작했습니다. 잠시 뒤 새로고침하면 상태 줄이 바뀝니다"
+            )
+        query = session.get("list_query", "")
+        return redirect(url_for("index") + (f"?{query}" if query else ""))
+
+    @app.post("/project/<int:project_id>/refresh")
+    def refresh(project_id: int):
+        conn = get_conn()
+        if conn.execute("SELECT 1 FROM project WHERE id = ?", (project_id,)).fetchone() is None:
+            abort(404)
+        if is_locked(conn, datetime.now()):
+            flash(LOCKED_MESSAGE)
+        else:
+            launch.launch(["run", "project", str(project_id)], current_app.config["DB_PATH"])
+            flash("이 사업 다시 조회를 시작했습니다. 잠시 뒤 새로고침하면 결과가 보입니다")
+        return redirect(url_for("detail", project_id=project_id))
 
     @app.get("/print")
     def print_list():

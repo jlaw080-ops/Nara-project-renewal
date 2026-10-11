@@ -108,8 +108,13 @@ def pending_dept_projects(
     group: int | None,
     limit: int,
     can_ask: bool = False,
+    project_id: int | None = None,
 ) -> list[sqlite3.Row]:
-    """확정 부서가 없고 다시 볼 이유가 있는 사업. 한 번도 안 본 사업부터."""
+    """확정 부서가 없고 다시 볼 이유가 있는 사업. 한 번도 안 본 사업부터.
+
+    project_id를 주면(상세의 '다시 조회') 그 사업만, 기관·볼 때 조건 없이 본다.
+    사람이 확정한 부서만 그대로 둔다.
+    """
     sql = [
         "SELECT p.id, p.name,",
         f"  (SELECT MAX(d.checked_at) FROM dept_check d WHERE d.project_id = p.id AND {_AUTO})",
@@ -118,17 +123,24 @@ def pending_dept_projects(
         "WHERE p.hidden_at IS NULL",
         "  AND EXISTS (SELECT 1 FROM notice n WHERE n.project_id = p.id)",
         "  AND NOT EXISTS (SELECT 1 FROM dept_check d WHERE d.project_id = p.id",
-        "                  AND d.confirmed = 1 AND COALESCE(d.exec_dept, '') != '')",
+        "                  AND d.confirmed = 1 AND COALESCE(d.exec_dept, '') != ''"
+        + ("                  AND d.decided_by = 'human')" if project_id is not None else ")"),
     ]
     params: list[object] = []
-    if tier:
-        sql.append("  AND o.tier = ?")
-        params.append(tier)
-    if group is not None:
-        sql.append("  AND o.weekday_group = ?")
-        params.append(group)
+    if project_id is not None:
+        sql.append("  AND p.id = ?")
+        params.append(project_id)
+    else:
+        if tier:
+            sql.append("  AND o.tier = ?")
+            params.append(tier)
+        if group is not None:
+            sql.append("  AND o.weekday_group = ?")
+            params.append(group)
     sql.append("ORDER BY last_auto IS NOT NULL, last_auto, p.id")
     rows = conn.execute("\n".join(sql), params).fetchall()
+    if project_id is not None:
+        return list(rows)[:limit]
     return [row for row in rows if _due(conn, row["id"], can_ask)][:limit]
 
 
@@ -416,12 +428,13 @@ def update_depts(
     budget_seconds: int = BUDGET_SECONDS,
     now_fn: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
+    project_id: int | None = None,
 ) -> DeptRun:
     """대상을 돌며 부서를 찾는다. 사업마다 커밋해 중간에 멈춰도 거기까지는 남는다."""
     run = DeptRun()
     started = now_fn()
     can_ask = bool(secrets.anthropic_api_key)
-    for row in pending_dept_projects(conn, tier, group, limit, can_ask):
+    for row in pending_dept_projects(conn, tier, group, limit, can_ask, project_id):
         if now_fn() - started > budget_seconds:
             run.stopped_early = True
             break

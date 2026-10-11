@@ -995,3 +995,17 @@ def test_pending_skips_hidden_projects(conn):
     rows = pending_status_projects(conn, tier=None, limit=10)
 
     assert [r["id"] for r in rows] == [kept]
+
+
+def test_pending_status_can_target_one_project_even_outside_the_tier(conn):
+    """상세의 '이 사업 다시 조회'. 사람 판정이 잠근 사업은 그래도 건너뛴다."""
+    _project(conn, "경기도 성남시", "A")
+    b = _project(conn, "경상북도 경주시", "B")
+    assert [r["id"] for r in pending_status_projects(conn, "focus", 10, project_id=b)] == [b]
+    conn.execute(
+        "INSERT INTO status_check (project_id, verdict, decided_by, checked_at) "
+        "VALUES (?, '착공 전', 'human', ?)",
+        (b, NOW),
+    )
+    conn.commit()
+    assert pending_status_projects(conn, "focus", 10, project_id=b) == []

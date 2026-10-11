@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 from nara.energy import EnergyItem, EnergyKind, estimate_cost, load_kinds
 from nara.sheet_memory import FIELD_LABELS
+from nara.slot import LOCK_MAX_AGE
 from nara.store import last_run
 from nara.web.query import (
     LIST_LIMIT,
@@ -129,6 +130,7 @@ class ProjectDetail:
     contact: sqlite3.Row | None = None  # 그 부서의 부서장·실무 담당자 연락처
     contact_auto: frozenset[str] = frozenset()  # 공고문에서 자동으로 채운 칸
     exec_snippet: str | None = None  # 확정된 실행부서의 근거 문장
+    refresh: StageRun | None = None  # 상세의 '다시 조회' 마지막 실행
 
 
 def safe_url(url: str | None) -> str:
@@ -404,6 +406,7 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
         attachments=attachments,
         exec_dept=exec_dept,
         exec_snippet=dept_row["snippet"] if dept_row else None,
+        refresh=last_refresh(conn, project_id),
         contact=contact,
         contact_auto=frozenset(
             a for a in ((contact["auto_fields"] if contact else "") or "").split(",") if a
@@ -439,11 +442,39 @@ class StageRun:
     healthy: bool
 
 
-def _status_label(status: str | None) -> str:
-    # run_log는 시작할 때 status 없이 넣고 끝날 때 채운다. 비어 있으면 끝나지 않은 실행이다.
+def _running(started_at: str, now: datetime) -> bool:
+    try:
+        return now - datetime.fromisoformat(started_at) < LOCK_MAX_AGE
+    except ValueError:
+        return False
+
+
+def _status_label(status: str | None, started_at: str = "", now: datetime | None = None) -> str:
+    # run_log는 시작할 때 status 없이 넣고 끝날 때 채운다. 비어 있으면 끝나지 않은 실행이다 —
+    # 가장 긴 슬롯보다 오래됐으면 죽은 것이고, 아니면 아직 도는 중이다.
     if status is None:
-        return "끝나지 않음"
+        return "실행 중" if _running(started_at, now or datetime.now()) else "끝나지 않음"
     return _STATUS_LABELS.get(status, status)
+
+
+def _stage_run(label: str, row: sqlite3.Row, now: datetime) -> StageRun:
+    status = row["status"]
+    label_text = _status_label(status, row["started_at"], now)
+    stale = _is_stale(row["started_at"], now)
+    if stale:
+        label_text += " · 3일 넘게 실행 없음"
+    healthy = (status == "ok" or label_text == "실행 중") and not stale
+    return StageRun(label, row["started_at"], label_text, healthy)
+
+
+def last_refresh(conn: sqlite3.Connection, project_id: int) -> StageRun | None:
+    """상세의 '이 사업 다시 조회' 마지막 실행."""
+    row = conn.execute(
+        "SELECT started_at, status FROM run_log WHERE command = 'run project' AND args = ? "
+        "ORDER BY id DESC LIMIT 1",
+        (str(project_id),),
+    ).fetchone()
+    return _stage_run("다시 조회", row, datetime.now()) if row else None
 
 
 def _is_stale(started_at: str, now: datetime) -> bool:
@@ -467,13 +498,7 @@ def last_runs(conn: sqlite3.Connection, now: datetime | None = None) -> list[Sta
         if row is None:
             runs.append(StageRun(label, None, "실행 기록 없음", False))
         else:
-            status = row["status"]
-            label_text = _status_label(status)
-            stale = _is_stale(row["started_at"], now)
-            if stale:
-                label_text += " · 3일 넘게 실행 없음"
-            healthy = status == "ok" and not stale
-            runs.append(StageRun(label, row["started_at"], label_text, healthy))
+            runs.append(_stage_run(label, row, now))
     return runs
 
 

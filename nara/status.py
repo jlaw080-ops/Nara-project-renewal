@@ -28,7 +28,7 @@ BUDGET_SECONDS = 1200  # 스펙의 기본 시간 예산 20분
 
 
 def pending_status_projects(
-    conn: sqlite3.Connection, tier: str | None, limit: int
+    conn: sqlite3.Connection, tier: str | None, limit: int, project_id: int | None = None
 ) -> list[sqlite3.Row]:
     """오래 안 본 사업부터 돌려준다.
 
@@ -52,7 +52,11 @@ def pending_status_projects(
         "COALESCE((SELECT l.decided_by FROM status_check l WHERE l.project_id = p.id "
         "ORDER BY l.checked_at DESC, l.id DESC LIMIT 1), '') != 'human'",
     ]
-    if tier:
+    # 사업 하나를 콕 집으면(상세의 '다시 조회') 관심기관 여부는 보지 않는다
+    if project_id is not None:
+        conditions.append("p.id = ?")
+        params.append(project_id)
+    elif tier:
         conditions.append("o.tier = ?")
         params.append(tier)
     sql.append("WHERE " + " AND ".join(conditions))
@@ -330,6 +334,7 @@ def update_statuses(
     adjudicator: Callable[..., tuple[str, str] | None],
     budget_seconds: int = BUDGET_SECONDS,
     now_fn: Callable[[], float] = time.monotonic,
+    project_id: int | None = None,
 ) -> StatusRun:
     """대상을 돌며 판정하고 달라진 것만 쌓는다.
 
@@ -339,7 +344,7 @@ def update_statuses(
     안 남으므로 '오래 안 본 사업부터' 정렬 덕에 다음 회차 맨 앞에서
     다시 시도된다.
     """
-    rows = pending_status_projects(conn, tier, limit)
+    rows = pending_status_projects(conn, tier, limit, project_id)
     run = StatusRun()
     started = now_fn()
 

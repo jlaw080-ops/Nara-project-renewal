@@ -363,7 +363,9 @@ def test_enrich_dept_command_reports_and_logs(tmp_path, monkeypatch):
     conn.close()
     seen = {}
 
-    def fake(conn, client, secrets, root, tier, group, limit, counters, asker, budget_seconds):
+    def fake(
+        conn, client, secrets, root, tier, group, limit, counters, asker, budget_seconds, **kw
+    ):
         seen.update(root=root, tier=tier, group=group, budget=budget_seconds)
         counters.processed = 3
         return DeptRun(checked=3, confirmed_rule=1, confirmed_llm=1, review=1)
@@ -396,7 +398,9 @@ def test_enrich_dept_reports_claude_calls_and_warns_when_none_answer(tmp_path, m
     migrate(conn)
     conn.close()
 
-    def fake(conn, client, secrets, root, tier, group, limit, counters, asker, budget_seconds):
+    def fake(
+        conn, client, secrets, root, tier, group, limit, counters, asker, budget_seconds, **kw
+    ):
         counters.processed = 2
         return DeptRun(checked=2, review=2, asked_llm=2, llm_unanswered=2)
 
@@ -524,3 +528,13 @@ def test_enrich_contacts_command_previews_then_fills(tmp_path, monkeypatch):
     assert "연락처 1건을 채웠습니다" in result.output
     attach = tmp_path / "data" / "attachments"
     assert seen == [(attach, True), (attach, False)]
+
+
+def test_pending_dept_can_target_one_project_unless_a_person_confirmed_it(db):
+    """상세의 '이 사업 다시 조회'. 규칙이 확정한 부서는 다시 보고, 사람이 확정한 것은 둔다."""
+    _project(db, 1, bid_no="B1")
+    _project(db, 2, org_id=2, bid_no="B2")
+    _confirm_dept(db, 2, "건축과", decided_by="rule")
+    assert [r["id"] for r in pending_dept_projects(db, "focus", None, 10, project_id=2)] == [2]
+    _confirm_dept(db, 2, "건축과", decided_by="human")
+    assert pending_dept_projects(db, "focus", None, 10, project_id=2) == []

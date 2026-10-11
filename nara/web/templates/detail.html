@@ -8,6 +8,11 @@
 <p><a href="{{ url_for('index') }}{% if list_query %}?{{ list_query }}{% endif %}">← 목록으로</a></p>
 <h1>{{ d.project.name }}</h1>
 <p class="muted">{{ d.project.org_name }} · 출처 {{ d.project.source }}</p>
+<form method="post" class="inline" action="{{ url_for('refresh', project_id=d.project.id) }}">
+  <button type="submit">이 사업 다시 조회</button>
+  <span class="muted">낙찰 · 진행현황 · 실행부서를 이 사업만 바로 다시 봅니다. 사람이 확정한 값은 그대로 둡니다.</span>
+  {% if d.refresh %}<span class="{{ '' if d.refresh.healthy else 'bad' }}">다시 조회 {{ d.refresh.started_at|dash }} {{ d.refresh.status_label }}</span>{% endif %}
+</form>
 {% if saved == '-' %}<p class="saved">바뀐 값이 없습니다</p>
 {% elif saved %}<p class="saved">바꾼 칸: {{ saved }}</p>{% endif %}
 {% if released %}<p class="saved">자동 판정에 다시 맡겼습니다</p>{% endif %}

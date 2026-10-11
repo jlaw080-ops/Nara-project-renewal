@@ -17,8 +17,9 @@ def pending_award_bid_nos(
     tier: str | None,
     weekday_group: int | None,
     limit: int,
+    project_id: int | None = None,
 ) -> list[str]:
-    """개찰이 지났고 낙찰업체가 아직 없는 공고번호."""
+    """개찰이 지났고 낙찰업체가 아직 없는 공고번호. project_id를 주면 그 사업 공고만(기관 무관)."""
     sql = [
         "SELECT n.bid_no FROM notice n",
         "JOIN org o ON o.id = n.org_id",
@@ -27,12 +28,16 @@ def pending_award_bid_nos(
         "  AND n.open_date != '' AND n.open_date <= ?",
     ]
     params: list = [today]
-    if tier:
-        sql.append("  AND o.tier = ?")
-        params.append(tier)
-    if weekday_group is not None:
-        sql.append("  AND o.weekday_group = ?")
-        params.append(weekday_group)
+    if project_id is not None:
+        sql.append("  AND n.project_id = ?")
+        params.append(project_id)
+    else:
+        if tier:
+            sql.append("  AND o.tier = ?")
+            params.append(tier)
+        if weekday_group is not None:
+            sql.append("  AND o.weekday_group = ?")
+            params.append(weekday_group)
     sql.append("ORDER BY n.open_date LIMIT ?")
     params.append(limit)
     return [r["bid_no"] for r in conn.execute("\n".join(sql), params)]
@@ -47,11 +52,12 @@ def update_awards(
     weekday_group: int | None,
     limit: int,
     counters: RunCounters,
+    project_id: int | None = None,
 ) -> int:
     """낙찰업체가 비어 있는 공고를 조회해 채운다. 기록한 건수를 돌려준다."""
     now = datetime.now().isoformat(timespec="seconds")
     updated = 0
-    for bid_no in pending_award_bid_nos(conn, today, tier, weekday_group, limit):
+    for bid_no in pending_award_bid_nos(conn, today, tier, weekday_group, limit, project_id):
         counters.processed += 1
         try:
             award = fetch_award(client, api_key, bid_no)
