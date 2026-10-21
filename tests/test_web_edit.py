@@ -161,8 +161,8 @@ def test_head_from_candidate_reads_the_imported_evidence_line():
     assert head_from_candidate("부서장 윤병준 소장", None) == {
         "head_name": "윤병준", "head_position": "소장", "head_tel": None,
     }  # fmt: skip
-    assert head_from_candidate("부서장 과장", "063-1") == {
-        "head_name": None, "head_position": "과장", "head_tel": "063-1",
+    assert head_from_candidate("부서장 과장", "063-560-2560") == {
+        "head_name": None, "head_position": "과장", "head_tel": "063-560-2560",
     }  # fmt: skip
 
 
