@@ -159,19 +159,27 @@ _HEAD_LINE = re.compile(r"^부서장(?:\s+(?P<name>[가-힣]{2,4}))?(?:\s+(?P<po
 _POSITIONS = ("과장", "소장", "단장", "담당관", "팀장", "국장", "실장", "본부장", "원장")
 
 
-def head_from_candidate(snippet: str | None, head_tel: str | None) -> dict[str, str | None]:
-    """후보 줄에서 부서장 이름·직위·직통번호. 이관 형식이 아니면 이름·직위는 None.
+def head_from_candidate(
+    snippet: str | None, head_tel: str | None, decided_by: str = "imported"
+) -> dict[str, str | None]:
+    """후보 줄에서 부서장 이름·직위·직통번호. 시트 이관 후보가 아니면 전부 None.
 
-    공고문 인용이나 Claude 근거 문장을 사람 이름으로 읽지 않는다. '부서장 과장'처럼
-    이름이 비고 직위만 있으면 직위만 돌려준다.
+    공고문 인용이나 Claude 근거 문장을 사람 이름으로 읽지 않는다. '부서장 과장'·
+    '부서장 시설과장'처럼 이름 칸이 비어 직위만 남은 줄은 직위만 돌려준다. 번호는 폼과
+    같은 규칙을 통과해야 한다 — 어긋난 번호를 채우면 다음 편집이 그 칸 때문에 막힌다.
     """
+    empty: dict[str, str | None] = {"head_name": None, "head_position": None, "head_tel": None}
+    if decided_by != "imported":
+        return empty
     name = position = None
     m = _HEAD_LINE.match((snippet or "").strip())
     if m:
         name, position = m.group("name"), m.group("position")
-        if position is None and name in _POSITIONS:
+        if position is None and name and (name in _POSITIONS or name.endswith(("장", "관"))):
             name, position = None, name
-    return {"head_name": name, "head_position": position, "head_tel": head_tel or None}
+    tel = (head_tel or "").strip()
+    return {**empty, "head_name": name, "head_position": position,
+            "head_tel": tel if _valid_tel(tel) else None}  # fmt: skip
 
 
 def check_energy(
@@ -233,6 +241,11 @@ CONTACT_FIELDS = ("head_name", "head_position", "head_tel", *STAFF_FIELDS)
 _TEL_FIELDS = ("head_tel", "staff_tel")
 
 
+def _valid_tel(text: str) -> bool:
+    digits = re.sub(r"[^0-9]", "", text)
+    return bool(_TEL.fullmatch(text)) and 9 <= len(digits) <= 11
+
+
 def check_contact(form: Mapping[str, str]) -> Checked:
     """부서장·실무 담당자 이름·직위·직통번호. 여섯 칸 다 비우면 지운다."""
     values: dict[str, str | None] = {}
@@ -240,8 +253,7 @@ def check_contact(form: Mapping[str, str]) -> Checked:
     for key in CONTACT_FIELDS:
         text = _text(form, key)
         if key in _TEL_FIELDS:
-            digits = re.sub(r"[^0-9]", "", text)
-            if text and (not _TEL.fullmatch(text) or not 9 <= len(digits) <= 11):
+            if text and not _valid_tel(text):
                 errors[key] = "숫자와 -로 9~11자리를 적으세요 (예: 051-000-0000)"
         elif len(text) > CONTACT_LIMIT:
             errors[key] = f"{CONTACT_LIMIT}자까지 적을 수 있습니다"
