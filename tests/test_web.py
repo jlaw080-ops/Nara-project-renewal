@@ -2097,3 +2097,13 @@ def test_picking_an_imported_candidate_fills_the_empty_head_fields(world):
     ).fetchone()
     conn.close()
     assert tuple(row) == ("이몽룡", "과장", "063-000-0002")  # 적은 이름이 이기고 빈 칸만 채운다
+
+
+def test_every_page_links_to_the_renewable_energy_centre_site(world):
+    """설치계획서를 내고 확인하는 신재생에너지센터 로그인 화면으로 바로 간다. 새 탭으로 연다."""
+    path, _ = world
+    page = _text(_client(path).get("/"))
+    link = re.search(r'<a href="https://nr\.energy\.or\.kr/C0/CST_C0/login\.do"[^>]*>', page)
+    assert link is not None
+    assert 'target="_blank"' in link.group(0) and 'rel="noopener noreferrer"' in link.group(0)
+    assert "신재생에너지센터" in page
