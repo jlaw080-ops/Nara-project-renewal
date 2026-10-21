@@ -208,7 +208,9 @@ def _check(section: str, d: ProjectDetail) -> edit.Checked:
     if section == "verdict":
         return edit.check_verdict(form)
     if section == "dept":
-        dept, contact = edit.check_dept(form, _candidates(d)), edit.check_contact(form)
+        current = (d.exec_dept, d.exec_snippet)
+        dept = edit.check_dept(form, _candidates(d), current)
+        contact = edit.check_contact(form)
         values = {**dept.values, **contact.values}
         if dept.values["picked"] is not None:
             # 고른 후보(시트 이관)의 부서장으로 빈 칸만 채운다. 직접 적은 값이 먼저다.

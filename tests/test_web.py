@@ -2097,3 +2097,33 @@ def test_picking_an_imported_candidate_fills_the_empty_head_fields(world):
     ).fetchone()
     conn.close()
     assert tuple(row) == ("이몽룡", "과장", "063-000-0002")  # 적은 이름이 이기고 빈 칸만 채운다
+
+
+def test_picking_the_current_imported_department_fills_the_heads_without_clearing_the_field(world):
+    """폼은 실행부서 칸을 지금 부서로 미리 채운다. 그 칸을 비우지 않고 후보를 골라 저장해도
+    후보의 부서장이 채워져야 한다 — 실제 사용에서 칸을 비우는 사람은 없다(2026-10-22 보고)."""
+    path, ids = world
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO dept_check (project_id, exec_dept, head_tel, snippet, decided_by, "
+        "confirmed, checked_at) VALUES (?, '도시디자인과', '063-000-0002', '부서장 김성범 과장', "
+        "'imported', 1, ?)",
+        (ids["gym"], NOW),
+    )
+    conn.commit()
+    conn.close()
+    client = _client(path)
+    page = _text(client.get(f"/project/{ids['gym']}?edit=dept"))
+    assert 'name="exec_dept" value="도시디자인과"' in page  # 미리 채워진 그대로 보낸다
+    pick = re.search(r'name="pick" value="(\d+)"', page).group(1)
+    form = _dept_form(
+        client, ids["gym"], exec_dept="도시디자인과", snippet="부서장 김성범 과장", pick=pick
+    )
+    resp = _post(client, f"/project/{ids['gym']}/edit/dept", form)
+    assert resp.status_code == 302
+    conn = connect(path)
+    row = conn.execute(
+        "SELECT head_name, head_position, head_tel FROM dept_contact WHERE dept = '도시디자인과'"
+    ).fetchone()
+    conn.close()
+    assert row is not None and tuple(row) == ("김성범", "과장", "063-000-0002")

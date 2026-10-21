@@ -134,16 +134,23 @@ def check_verdict(form: Mapping[str, str]) -> Checked:
 
 
 def check_dept(
-    form: Mapping[str, str], candidates: Mapping[int, tuple[str, str | None]]
+    form: Mapping[str, str],
+    candidates: Mapping[int, tuple[str, str | None]],
+    current: tuple[str | None, str | None] = (None, None),
 ) -> Checked:
-    """직접 적은 부서가 먼저다. 비어 있으면 고른 후보의 부서와 근거 문장을 쓴다."""
+    """직접 적은 부서가 먼저다. 칸이 비어 있거나 미리 채워진 지금 값(current) 그대로면
+    고른 후보의 부서와 근거 문장을 쓴다 — 폼은 실행부서 칸을 지금 부서로 채워 두므로,
+    비어 있을 때만 후보를 인정하면 후보를 골라도 늘 무시된다."""
     exec_dept, snippet = _text(form, "exec_dept"), _text(form, "snippet")
     pick = _text(form, "pick")
     picked = None
-    if not exec_dept and _ID.fullmatch(pick) and int(pick) in candidates:
-        picked = int(pick)
-        exec_dept, picked_snippet = candidates[picked]
-        snippet = snippet or (picked_snippet or "")
+    if _ID.fullmatch(pick) and int(pick) in candidates:
+        cand_dept, cand_snippet = candidates[int(pick)]
+        if exec_dept in ("", current[0] or "", cand_dept):
+            picked = int(pick)
+            exec_dept = cand_dept
+            if snippet in ("", current[1] or ""):
+                snippet = cand_snippet or ""
     errors: dict[str, str] = {}
     if not exec_dept:
         errors["exec_dept"] = "실행부서를 적거나 후보를 고르세요"

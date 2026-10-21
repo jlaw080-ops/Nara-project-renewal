@@ -153,6 +153,20 @@ def test_check_dept_prefers_what_was_typed_over_a_candidate():
     assert checked.values == {"exec_dept": "시설과", "snippet": None, "picked": None}
 
 
+def test_check_dept_takes_the_candidate_when_the_field_still_holds_the_prefilled_value():
+    """폼은 실행부서·근거 칸을 지금 값으로 채워 둔다. 그대로 두고 후보를 골랐으면 후보다."""
+    candidates = {7: ("도시디자인과", "부서장 김성범 과장"), 8: ("건축과", None)}
+    form = {"pick": "7", "exec_dept": "도시디자인과", "snippet": "부서장 김성범 과장"}
+    checked = check_dept(form, candidates, ("도시디자인과", "부서장 김성범 과장"))
+    assert checked.values["picked"] == 7
+    form = {"pick": "8", "exec_dept": "도시디자인과", "snippet": "부서장 김성범 과장"}
+    checked = check_dept(form, candidates, ("도시디자인과", "부서장 김성범 과장"))
+    assert checked.values == {"exec_dept": "건축과", "snippet": None, "picked": 8}
+    # 칸을 고쳐 적었으면 그것이 먼저다
+    form = {"pick": "8", "exec_dept": "시설과", "snippet": ""}
+    assert check_dept(form, candidates, ("도시디자인과", None)).values["picked"] is None
+
+
 def test_head_from_candidate_reads_the_imported_evidence_line():
     """시트에서 이관한 후보의 근거 문장은 '부서장 <이름> <직위>' 꼴이다."""
     assert head_from_candidate("부서장 김성범 과장", "063-000-0002") == {
