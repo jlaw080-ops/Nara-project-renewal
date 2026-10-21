@@ -155,21 +155,21 @@ def test_check_dept_prefers_what_was_typed_over_a_candidate():
 
 def test_head_from_candidate_reads_the_imported_evidence_line():
     """시트에서 이관한 후보의 근거 문장은 '부서장 <이름> <직위>' 꼴이다."""
-    assert head_from_candidate("부서장 김성범 과장", "063-560-2560") == {
-        "head_name": "김성범", "head_position": "과장", "head_tel": "063-560-2560",
+    assert head_from_candidate("부서장 김성범 과장", "063-000-0002") == {
+        "head_name": "김성범", "head_position": "과장", "head_tel": "063-000-0002",
     }  # fmt: skip
     assert head_from_candidate("부서장 윤병준 소장", None) == {
         "head_name": "윤병준", "head_position": "소장", "head_tel": None,
     }  # fmt: skip
-    assert head_from_candidate("부서장 과장", "063-560-2560") == {
-        "head_name": None, "head_position": "과장", "head_tel": "063-560-2560",
+    assert head_from_candidate("부서장 과장", "063-000-0002") == {
+        "head_name": None, "head_position": "과장", "head_tel": "063-000-0002",
     }  # fmt: skip
 
 
 def test_head_from_candidate_does_not_mistake_a_position_for_a_name():
     """시트의 이름 칸이 비면 근거 문장이 '부서장 시설과장'이 된다. 직위는 사람이 아니다."""
-    assert head_from_candidate("부서장 시설과장", "063-560-2560") == {
-        "head_name": None, "head_position": "시설과장", "head_tel": "063-560-2560",
+    assert head_from_candidate("부서장 시설과장", "063-000-0002") == {
+        "head_name": None, "head_position": "시설과장", "head_tel": "063-000-0002",
     }  # fmt: skip
     assert head_from_candidate("부서장 안전총괄담당관", None)["head_name"] is None
 
@@ -177,17 +177,17 @@ def test_head_from_candidate_does_not_mistake_a_position_for_a_name():
 def test_head_from_candidate_only_trusts_imported_candidates_and_valid_numbers():
     """Claude 근거가 '부서장 결재'로 시작해도 사람 이름이 아니다. 시트 번호가 폼 규칙에 어긋나면
     채우지 않는다 — 채우면 다음 편집이 그 칸 때문에 막힌다."""
-    assert head_from_candidate("부서장 결재", "063-560-2560", decided_by="llm") == {
+    assert head_from_candidate("부서장 결재", "063-000-0002", decided_by="llm") == {
         "head_name": None, "head_position": None, "head_tel": None,
     }  # fmt: skip
     assert head_from_candidate("부서장 김성범 과장", "560-2560")["head_tel"] is None
-    assert head_from_candidate("부서장 김성범 과장", "063-560-2560~1")["head_tel"] is None
+    assert head_from_candidate("부서장 김성범 과장", "063-000-0002~1")["head_tel"] is None
 
 
 def test_head_from_candidate_leaves_a_notice_quote_alone():
     """공고문 인용·Claude 근거는 사람 이름이 아니다. 전화만 후보 줄의 것을 쓴다."""
-    assert head_from_candidate("사업관련 문의: 체육진흥과 ☎ 063-290-2450", "063-290-2450") == {
-        "head_name": None, "head_position": None, "head_tel": "063-290-2450",
+    assert head_from_candidate("사업관련 문의: 체육진흥과 ☎ 063-000-0003", "063-000-0003") == {
+        "head_name": None, "head_position": None, "head_tel": "063-000-0003",
     }  # fmt: skip
     assert head_from_candidate(None, None) == {
         "head_name": None, "head_position": None, "head_tel": None,

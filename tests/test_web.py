@@ -2078,7 +2078,7 @@ def test_picking_an_imported_candidate_fills_the_empty_head_fields(world):
     conn = connect(path)
     conn.execute(
         "INSERT INTO dept_check (project_id, exec_dept, head_tel, snippet, decided_by, "
-        "confirmed, checked_at) VALUES (?, '도시디자인과', '063-560-2560', '부서장 김성범 과장', "
+        "confirmed, checked_at) VALUES (?, '도시디자인과', '063-000-0002', '부서장 김성범 과장', "
         "'imported', 0, ?)",
         (ids["gym"], NOW),
     )
@@ -2086,7 +2086,7 @@ def test_picking_an_imported_candidate_fills_the_empty_head_fields(world):
     conn.close()
     client = _client(path)
     page = _text(client.get(f"/project/{ids['gym']}?edit=dept"))
-    assert "도시디자인과" in page and "부서장 김성범 과장" in page and "063-560-2560" in page
+    assert "도시디자인과" in page and "부서장 김성범 과장" in page and "063-000-0002" in page
     pick = re.search(r'name="pick" value="(\d+)"', page).group(1)
     form = _dept_form(client, ids["gym"], exec_dept="", pick=pick, head_name="이몽룡")
     resp = _post(client, f"/project/{ids['gym']}/edit/dept", form)
@@ -2096,4 +2096,4 @@ def test_picking_an_imported_candidate_fills_the_empty_head_fields(world):
         "SELECT head_name, head_position, head_tel FROM dept_contact WHERE dept = '도시디자인과'"
     ).fetchone()
     conn.close()
-    assert tuple(row) == ("이몽룡", "과장", "063-560-2560")  # 적은 이름이 이기고 빈 칸만 채운다
+    assert tuple(row) == ("이몽룡", "과장", "063-000-0002")  # 적은 이름이 이기고 빈 칸만 채운다
