@@ -292,7 +292,8 @@ def build_list_query(f: Filters) -> tuple[str, list]:
     sql = (
         _LATEST
         + "SELECT p.id, o.name AS org_name, p.name, ln.title AS notice_title, "
-        + "ln.notice_date, ln.open_date, ls.verdict, ls.decided_by AS verdict_by, a.winner, "
+        + "ln.notice_date, ln.open_date, ls.verdict, ls.decided_by AS verdict_by, "
+        + "COALESCE(p.winner, a.winner) AS winner, "
         + "ld.exec_dept, (lr.project_id IS NOT NULL AND ld.exec_dept IS NULL) AS dept_review, "
         + f"{_ENERGY} AS energy, "
         + f"{matched_sql} AS matched_title"

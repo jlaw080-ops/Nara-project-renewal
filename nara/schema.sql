@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS project (
   etc_cert    TEXT,
   guide_equip TEXT,
   note        TEXT,
+  winner      TEXT,                             -- 사람이 적은 낙찰업체. 조회 값보다 먼저 보인다
+  award_date  TEXT,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL,
   hidden_at     TEXT,                           -- 사람이 목록에서 숨긴 때. NULL이면 보임

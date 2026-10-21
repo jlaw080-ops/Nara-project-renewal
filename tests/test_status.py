@@ -1009,3 +1009,15 @@ def test_pending_status_can_target_one_project_even_outside_the_tier(conn):
     )
     conn.commit()
     assert pending_status_projects(conn, "focus", 10, project_id=b) == []
+
+
+def test_judge_counts_a_winner_a_person_typed_as_the_design_stage(conn):
+    """공고 없는 이관 사업에 사람이 낙찰업체를 적으면 규칙이 그것을 본다."""
+    project_id = _project(conn, "전북특별자치도 완주군", "사업")
+    conn.execute("UPDATE project SET winner = '가건축' WHERE id = ?", (project_id,))
+    conn.commit()
+    got = judge_project(
+        conn, _row(conn, project_id), SECRETS, "2026-09-18", search=_no_search, adjudicator=_no_llm
+    )
+    assert got.verdict == BEFORE
+    assert got.reason.startswith("낙찰업체가 기록됨 — 설계 단계")

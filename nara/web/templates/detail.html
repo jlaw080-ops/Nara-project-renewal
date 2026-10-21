@@ -124,9 +124,9 @@
 <form method="post" class="edit-form" action="{{ url_for('save', project_id=d.project.id, section='dept') }}">
   <input type="hidden" name="version" value="{{ versions['dept'] }}">
   {% if dept_candidates %}
-  <fieldset><legend>후보에서 고르기</legend>
+  <fieldset><legend>후보에서 고르기 <span class="muted">후보에 부서장이 적혀 있으면 아래 빈 부서장 칸을 채웁니다</span></legend>
     {% for c in dept_candidates %}
-    <label class="choice"><input type="radio" name="pick" value="{{ c.id }}"{% if form.get('pick') == c.id|string %} checked{% endif %}> {{ c.exec_dept }}{% if c.snippet %} <span class="muted">— {{ c.snippet }}</span>{% endif %}</label>
+    <label class="choice"><input type="radio" name="pick" value="{{ c.id }}"{% if form.get('pick') == c.id|string %} checked{% endif %}> {{ c.exec_dept }}{% if c.snippet %} <span class="muted">— {{ c.snippet }}</span>{% endif %}{% if c.head_tel %} <span class="muted">· {{ c.head_tel }}</span>{% endif %}</label>
     {% endfor %}
   </fieldset>
   {% endif %}

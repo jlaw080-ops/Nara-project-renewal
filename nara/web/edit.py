@@ -23,6 +23,8 @@ INFO_FORM = (
     ("address", "주소", "text"),
     ("start_date", "착공일", "date"),
     ("end_date", "준공일", "date"),
+    ("winner", "낙찰업체", "text"),
+    ("award_date", "낙찰일", "date"),
     ("floor_area", "연면적(㎡)", "text"),
     ("zeb_grade", "ZEB 등급", "text"),
     ("re_ratio", "신재생 비율", "text"),
@@ -30,6 +32,10 @@ INFO_FORM = (
     ("guide_equip", "관급 장비", "text"),
     ("note", "비고", "long"),
 )
+# 사람이 적는 낙찰. 시트 기억(PROJECT_FIELDS)과 묶이지 않게 따로 둔다.
+AWARD_FIELDS = ("winner", "award_date")
+INFO_FIELDS = (*PROJECT_FIELDS, *AWARD_FIELDS)
+_DATE_FIELDS = ("start_date", "end_date", "award_date")
 _LONG_FIELDS = ("note",)
 _TEXT_FIELDS = ("address", "zeb_grade", "re_ratio", "etc_cert", "guide_equip", "note")
 _ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
@@ -90,15 +96,15 @@ def _limit(key: str, raw: str, errors: dict[str, str]) -> None:
 
 
 def check_info(form: Mapping[str, str], current: Mapping, latest_verdict: str | None) -> Checked:
-    """사업 정보 9칸. 폼에 없는 칸은 지금 값을 그대로 둔다 — 빠진 칸을 지우지 않는다."""
+    """사업 정보 칸. 폼에 없는 칸은 지금 값을 그대로 둔다 — 빠진 칸을 지우지 않는다."""
     errors: dict[str, str] = {}
     values: dict = {}
-    for key in PROJECT_FIELDS:
+    for key in INFO_FIELDS:
         if key not in form:
             values[key] = current[key]
             continue
         raw = _text(form, key)
-        if key in ("start_date", "end_date"):
+        if key in _DATE_FIELDS:
             values[key] = _date(raw, errors, key)
         elif key == "floor_area":
             values[key] = _positive(raw, errors, key)
@@ -133,8 +139,10 @@ def check_dept(
     """직접 적은 부서가 먼저다. 비어 있으면 고른 후보의 부서와 근거 문장을 쓴다."""
     exec_dept, snippet = _text(form, "exec_dept"), _text(form, "snippet")
     pick = _text(form, "pick")
+    picked = None
     if not exec_dept and _ID.fullmatch(pick) and int(pick) in candidates:
-        exec_dept, picked_snippet = candidates[int(pick)]
+        picked = int(pick)
+        exec_dept, picked_snippet = candidates[picked]
         snippet = snippet or (picked_snippet or "")
     errors: dict[str, str] = {}
     if not exec_dept:
@@ -143,7 +151,27 @@ def check_dept(
         errors["exec_dept"] = f"{TEXT_LIMIT:,}자까지 적을 수 있습니다"
     if len(snippet) > LONG_TEXT_LIMIT:
         errors["snippet"] = f"{LONG_TEXT_LIMIT:,}자까지 적을 수 있습니다"
-    return Checked({"exec_dept": exec_dept, "snippet": snippet or None}, errors)
+    return Checked({"exec_dept": exec_dept, "snippet": snippet or None, "picked": picked}, errors)
+
+
+# 시트에서 이관한 후보의 근거 문장 — migrate_sheets._dept_snippet이 만든 '부서장 <이름> <직위>'.
+_HEAD_LINE = re.compile(r"^부서장(?:\s+(?P<name>[가-힣]{2,4}))?(?:\s+(?P<position>\S+))?$")
+_POSITIONS = ("과장", "소장", "단장", "담당관", "팀장", "국장", "실장", "본부장", "원장")
+
+
+def head_from_candidate(snippet: str | None, head_tel: str | None) -> dict[str, str | None]:
+    """후보 줄에서 부서장 이름·직위·직통번호. 이관 형식이 아니면 이름·직위는 None.
+
+    공고문 인용이나 Claude 근거 문장을 사람 이름으로 읽지 않는다. '부서장 과장'처럼
+    이름이 비고 직위만 있으면 직위만 돌려준다.
+    """
+    name = position = None
+    m = _HEAD_LINE.match((snippet or "").strip())
+    if m:
+        name, position = m.group("name"), m.group("position")
+        if position is None and name in _POSITIONS:
+            name, position = None, name
+    return {"head_name": name, "head_position": position, "head_tel": head_tel or None}
 
 
 def check_energy(
@@ -286,11 +314,11 @@ def save_info(
     current = conn.execute("SELECT * FROM project WHERE id = ?", (project_id,)).fetchone()
     changed: list[str] = []
     with conn:
-        for field in PROJECT_FIELDS:
+        for field in INFO_FIELDS:
             new = values[field]
             if canonical(new) == canonical(current[field]):
                 continue
-            # field는 PROJECT_FIELDS에서만 온다 — 폼 값이 칸 이름이 되지 않는다.
+            # field는 INFO_FIELDS에서만 온다 — 폼 값이 칸 이름이 되지 않는다.
             conn.execute(
                 f"UPDATE project SET {field} = ?, updated_at = ? WHERE id = ?",
                 (new, now, project_id),
@@ -426,7 +454,7 @@ def save_energy(
 
 
 SECTION_FIELDS = {
-    "info": PROJECT_FIELDS,
+    "info": INFO_FIELDS,
     "verdict": ("verdict", "verdict_release"),
     "dept": ("exec_dept",),
     "energy": ("energy",),
@@ -437,9 +465,9 @@ def version_of(conn: sqlite3.Connection, project_id: int, section: str) -> str:
     """그 묶음의 지금 값으로 만든 짧은 표시. 폼을 연 뒤 값이 바뀌면 달라진다."""
     if section == "info":
         row = conn.execute(
-            f"SELECT {', '.join(PROJECT_FIELDS)} FROM project WHERE id = ?", (project_id,)
+            f"SELECT {', '.join(INFO_FIELDS)} FROM project WHERE id = ?", (project_id,)
         ).fetchone()
-        parts = [canonical(row[f]) for f in PROJECT_FIELDS] if row else []
+        parts = [canonical(row[f]) for f in INFO_FIELDS] if row else []
     elif section == "verdict":
         latest = _latest_row_id(conn, "status_check", project_id, "")
         parts = [latest]

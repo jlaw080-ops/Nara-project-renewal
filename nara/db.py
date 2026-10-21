@@ -48,6 +48,8 @@ def migrate(conn: sqlite3.Connection) -> int:
     _add_column(conn, "dept_contact", "staff_position", "TEXT")
     _add_column(conn, "dept_contact", "staff_tel", "TEXT")
     _add_column(conn, "dept_contact", "auto_fields", "TEXT")
+    _add_column(conn, "project", "winner", "TEXT")
+    _add_column(conn, "project", "award_date", "TEXT")
     conn.execute(
         "INSERT INTO app_state (key, value) VALUES ('schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",

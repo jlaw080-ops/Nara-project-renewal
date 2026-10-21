@@ -31,6 +31,8 @@ FIELD_LABELS = {
     "etc_cert": "기타 인증",
     "guide_equip": "관급 장비",
     "note": "비고",
+    "winner": "낙찰업체",
+    "award_date": "낙찰일",
     "verdict": "진행현황",
     "exec_dept": "실행부서",
     "energy": "신재생",

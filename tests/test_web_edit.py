@@ -23,6 +23,7 @@ from nara.web.edit import (
     check_info,
     check_prices,
     check_verdict,
+    head_from_candidate,
     hide_projects,
     release_verdict,
     save_contact,
@@ -45,6 +46,8 @@ CURRENT = {
     "etc_cert": None,
     "guide_equip": None,
     "note": "예정공사비: 10억",
+    "winner": None,
+    "award_date": None,
 }
 
 KNOWN = {k.code: k for k in ENERGY_KINDS}
@@ -77,6 +80,14 @@ def test_check_info_keeps_a_field_that_the_form_did_not_send():
 
 def test_check_info_turns_a_blank_into_none():
     assert check_info(_form(address="   "), CURRENT, None).values["address"] is None
+
+
+def test_check_info_takes_the_winner_and_award_date_a_person_typed():
+    """시트에서 이관한 사업은 공고가 없어 낙찰업체를 넣을 길이 없었다."""
+    checked = check_info(_form(winner="가건축", award_date="2026-03-01"), CURRENT, None)
+    assert checked.errors == {}
+    assert (checked.values["winner"], checked.values["award_date"]) == ("가건축", "2026-03-01")
+    assert "award_date" in check_info(_form(award_date="3월 1일"), CURRENT, None).errors
 
 
 def test_check_info_rejects_a_date_that_is_not_yyyy_mm_dd():
@@ -130,13 +141,39 @@ def test_check_verdict_requires_a_known_stage_and_a_reason():
 def test_check_dept_takes_a_candidate_when_nothing_is_typed():
     candidates = {7: ("체육진흥과", "부서장 홍길동 과장")}
     checked = check_dept({"pick": "7", "exec_dept": "", "snippet": ""}, candidates)
-    assert checked.values == {"exec_dept": "체육진흥과", "snippet": "부서장 홍길동 과장"}
+    assert checked.values == {
+        "exec_dept": "체육진흥과", "snippet": "부서장 홍길동 과장", "picked": 7,
+    }  # fmt: skip
 
 
 def test_check_dept_prefers_what_was_typed_over_a_candidate():
+    """직접 적었으면 후보는 쓰지 않은 것이다 — 그 후보의 부서장도 채우지 않는다."""
     candidates = {7: ("체육진흥과", None)}
     checked = check_dept({"pick": "7", "exec_dept": "시설과", "snippet": ""}, candidates)
-    assert checked.values == {"exec_dept": "시설과", "snippet": None}
+    assert checked.values == {"exec_dept": "시설과", "snippet": None, "picked": None}
+
+
+def test_head_from_candidate_reads_the_imported_evidence_line():
+    """시트에서 이관한 후보의 근거 문장은 '부서장 <이름> <직위>' 꼴이다."""
+    assert head_from_candidate("부서장 김성범 과장", "063-560-2560") == {
+        "head_name": "김성범", "head_position": "과장", "head_tel": "063-560-2560",
+    }  # fmt: skip
+    assert head_from_candidate("부서장 윤병준 소장", None) == {
+        "head_name": "윤병준", "head_position": "소장", "head_tel": None,
+    }  # fmt: skip
+    assert head_from_candidate("부서장 과장", "063-1") == {
+        "head_name": None, "head_position": "과장", "head_tel": "063-1",
+    }  # fmt: skip
+
+
+def test_head_from_candidate_leaves_a_notice_quote_alone():
+    """공고문 인용·Claude 근거는 사람 이름이 아니다. 전화만 후보 줄의 것을 쓴다."""
+    assert head_from_candidate("사업관련 문의: 체육진흥과 ☎ 063-290-2450", "063-290-2450") == {
+        "head_name": None, "head_position": None, "head_tel": "063-290-2450",
+    }  # fmt: skip
+    assert head_from_candidate(None, None) == {
+        "head_name": None, "head_position": None, "head_tel": None,
+    }  # fmt: skip
 
 
 def test_check_dept_rejects_an_empty_department_and_an_unknown_candidate():
@@ -230,6 +267,16 @@ def test_save_info_changes_and_logs_only_what_changed(db):
         changed = save_info(conn, pid, _values(path, pid, floor_area=1200.0), NOW)
     assert changed == ["연면적"]
     assert _log(path) == [("floor_area", "1000.0", "1200.0")]
+
+
+def test_save_info_logs_a_manual_winner_under_its_own_label(db):
+    path, pid = db
+    with closing(open_readwrite(path)) as conn:
+        before = version_of(conn, pid, "info")
+        changed = save_info(conn, pid, _values(path, pid, winner="가건축"), NOW)
+        assert version_of(conn, pid, "info") != before  # 낙찰업체만 바뀌어도 충돌 검사에 잡힌다
+    assert changed == ["낙찰업체"]
+    assert _log(path) == [("winner", None, "가건축")]
 
 
 def test_save_info_with_nothing_changed_logs_nothing(db):

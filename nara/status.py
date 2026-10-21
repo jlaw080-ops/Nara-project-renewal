@@ -157,10 +157,12 @@ def judge_project(
     어느 단계도 못 가르면 미확인이다. 이 함수는 project 표를 읽기만 하고
     쓰지 않는다 — 사람이 넣은 착공일·준공일을 고치는 경로가 없어야 한다.
     """
+    # 사람이 사업에 적은 낙찰업체도 낙찰이다 — 공고 없는 이관 사업은 그 길밖에 없다.
     has_winner = bool(
         conn.execute(
+            "SELECT 1 FROM project p WHERE p.id = ? AND (COALESCE(p.winner, '') != '' OR EXISTS ("
             "SELECT 1 FROM notice n JOIN award a ON a.bid_no = n.bid_no "
-            "WHERE n.project_id = ? AND COALESCE(a.winner, '') != '' LIMIT 1",
+            "WHERE n.project_id = p.id AND COALESCE(a.winner, '') != ''))",
             (row["id"],),
         ).fetchone()
     )

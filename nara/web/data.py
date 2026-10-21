@@ -364,7 +364,7 @@ def project_detail(conn: sqlite3.Connection, project_id: int) -> ProjectDetail |
         {**dict(row), "by_label": DECIDED_BY_LABELS.get(row["decided_by"], row["decided_by"])}
         for row in conn.execute(
             "SELECT id, exec_dept, contract_dept, snippet, source_file, decided_by, confirmed, "
-            "note, checked_at FROM dept_check "
+            "head_tel, note, checked_at FROM dept_check "
             "WHERE project_id = ? ORDER BY checked_at DESC, id DESC",
             (project_id,),
         )

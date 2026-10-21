@@ -209,7 +209,13 @@ def _check(section: str, d: ProjectDetail) -> edit.Checked:
         return edit.check_verdict(form)
     if section == "dept":
         dept, contact = edit.check_dept(form, _candidates(d)), edit.check_contact(form)
-        return edit.Checked({**dept.values, **contact.values}, {**dept.errors, **contact.errors})
+        values = {**dept.values, **contact.values}
+        if dept.values["picked"] is not None:
+            # 고른 후보(시트 이관)의 부서장으로 빈 칸만 채운다. 직접 적은 값이 먼저다.
+            row = next(r for r in d.depts if r["id"] == dept.values["picked"])
+            head = edit.head_from_candidate(row["snippet"], row["head_tel"])
+            values.update({k: v for k, v in head.items() if v and not values.get(k)})
+        return edit.Checked(values, {**dept.errors, **contact.errors})
     return edit.check_energy(
         form.getlist("source"), form.getlist("kind"), form.getlist("capacity"), _kinds()
     )

@@ -745,6 +745,8 @@ def _info(**changes):
             "etc_cert",
             "guide_equip",
             "note",
+            "winner",
+            "award_date",
         )
     }
     return {**base, **changes}
@@ -2033,3 +2035,65 @@ def test_manual_runs_refuse_another_site(world, monkeypatch):
     url = f"/project/{ids['gym']}/refresh"
     assert _post(client, url, {}, origin="http://evil.example").status_code == 403
     assert seen == []
+
+
+def _set_winner(path, pid, winner, award_date=None):
+    conn = connect(path)
+    conn.execute(
+        "UPDATE project SET winner = ?, award_date = ? WHERE id = ?", (winner, award_date, pid)
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_a_winner_a_person_typed_beats_the_g2b_award_in_the_list_and_print(world):
+    """나라장터가 다른 업체를 돌려줘도 사람이 적은 값이 보인다. 공고 없는 이관 사업도 채워진다."""
+    path, ids = world
+    _set_winner(path, ids["welfare"], "수동건축")
+    _set_winner(path, ids["sheet_unknown"], "이관건축", "2026-05-01")
+    rows = {r["id"]: r["winner"] for r in _list(path).rows}
+    assert rows[ids["welfare"]] == "수동건축"
+    assert rows[ids["sheet_unknown"]] == "이관건축"
+    page = _text(_client(path).get("/print"))
+    assert "수동건축" in page and "이관건축" in page and "가건축" not in page
+
+
+def test_the_project_form_saves_the_winner_and_shows_it_in_the_project_table(world):
+    path, ids = world
+    client = _client(path)
+    page = _text(client.get(f"/project/{ids['sheet_unknown']}?edit=info"))
+    assert 'name="winner"' in page and 'name="award_date"' in page
+    version = re.search(r'name="version" value="([^"]*)"', page).group(1)
+    form = _info(winner="이관건축", award_date="2026-05-01", version=version)
+    resp = _post(client, f"/project/{ids['sheet_unknown']}/edit/info", form)
+    assert resp.status_code == 302
+    page = _text(client.get(resp.headers["Location"]))
+    assert "바꾼 칸: 낙찰업체·낙찰일" in page
+    assert "<th>낙찰업체</th><td>이관건축</td>" in page
+
+
+def test_picking_an_imported_candidate_fills_the_empty_head_fields(world):
+    """이관 후보에는 부서장 이름·직위(근거 문장)와 직통번호가 있다. 고르면 빈 칸을 채운다."""
+    path, ids = world
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO dept_check (project_id, exec_dept, head_tel, snippet, decided_by, "
+        "confirmed, checked_at) VALUES (?, '도시디자인과', '063-560-2560', '부서장 김성범 과장', "
+        "'imported', 0, ?)",
+        (ids["gym"], NOW),
+    )
+    conn.commit()
+    conn.close()
+    client = _client(path)
+    page = _text(client.get(f"/project/{ids['gym']}?edit=dept"))
+    assert "도시디자인과" in page and "부서장 김성범 과장" in page and "063-560-2560" in page
+    pick = re.search(r'name="pick" value="(\d+)"', page).group(1)
+    form = _dept_form(client, ids["gym"], exec_dept="", pick=pick, head_name="이몽룡")
+    resp = _post(client, f"/project/{ids['gym']}/edit/dept", form)
+    assert resp.status_code == 302
+    conn = connect(path)
+    row = conn.execute(
+        "SELECT head_name, head_position, head_tel FROM dept_contact WHERE dept = '도시디자인과'"
+    ).fetchone()
+    conn.close()
+    assert tuple(row) == ("이몽룡", "과장", "063-560-2560")  # 적은 이름이 이기고 빈 칸만 채운다
