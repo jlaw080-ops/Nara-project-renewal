@@ -207,3 +207,47 @@ def test_step_runners_call_the_real_enrich_commands_without_typer_defaults(tmp_p
         ("enrich status", "--tier focus", "ok"),
         ("enrich dept", "--tier focus", "ok"),
     ]
+
+
+def test_run_project_calls_the_real_enrich_commands_without_typer_defaults(tmp_path, monkeypatch):
+    """상세의 '이 사업 다시 조회'. 2026-10-22 08:39 세 단계가 모두 '--tier는 focus | rest | all 중
+    하나여야 한다'로 실패했다 — run_project가 tier 등을 안 넘겨 Typer 기본값 객체가 들어갔다."""
+    from nara.config import Secrets
+    from nara.dept import DeptRun
+    from nara.status import StatusRun
+
+    seen = {}
+
+    def fake_awards(*args, **kw):
+        seen["award"] = kw
+        return 0
+
+    def fake_statuses(*args, **kw):
+        seen["status"] = kw
+        return StatusRun()
+
+    def fake_depts(*args, **kw):
+        seen["dept"] = kw
+        return DeptRun()
+
+    monkeypatch.setattr(cli, "update_awards", fake_awards)
+    monkeypatch.setattr(cli, "update_statuses", fake_statuses)
+    monkeypatch.setattr(cli, "update_depts", fake_depts)
+    secrets = Secrets(
+        g2b_api_key="g", naver_client_id=None, naver_client_secret=None, anthropic_api_key=None
+    )
+    monkeypatch.setattr(cli, "load_secrets", lambda path: secrets)
+    db = tmp_path / "r.db"
+    result = CliRunner().invoke(cli.app, ["run", "project", "82", "--db", str(db)])
+    assert result.exit_code == 0, result.output
+    assert {k: v["project_id"] for k, v in seen.items()} == {"award": 82, "status": 82, "dept": 82}
+    c = connect(db)
+    rows = c.execute(
+        "SELECT command, args, status FROM run_log WHERE command LIKE 'enrich %' ORDER BY id"
+    ).fetchall()
+    c.close()
+    assert [tuple(r) for r in rows] == [
+        ("enrich award", "--tier all --project 82", "ok"),
+        ("enrich status", "--tier all --project 82", "ok"),
+        ("enrich dept", "--tier all --project 82", "ok"),
+    ]

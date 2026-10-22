@@ -625,10 +625,23 @@ def run_project(
     now = datetime.now()
     if not acquire_slot(conn, now):
         _skip_locked(conn, "run project", str(project_id), now)
+    # 명령 함수를 Typer 없이 직접 부르므로 옵션을 다 넘긴다 — 빼면 Typer 기본값 객체가 들어간다.
+    # 사업 하나만 보므로 tier·group은 뜻이 없고(project가 범위를 정한다) "all"·None으로 둔다.
     runners = [
-        ("enrich award", lambda: enrich_award(project=project_id, db=db)),
-        ("enrich status", lambda: enrich_status(project=project_id, db=db)),
-        ("enrich dept", lambda: enrich_dept(project=project_id, db=db)),
+        (
+            "enrich award",
+            lambda: enrich_award(tier="all", group=None, limit=300, db=db, project=project_id),
+        ),
+        (
+            "enrich status",
+            lambda: enrich_status(tier="all", limit=300, budget=1200, db=db, project=project_id),
+        ),
+        (
+            "enrich dept",
+            lambda: enrich_dept(
+                tier="all", group=None, limit=300, budget=1200, db=db, project=project_id
+            ),
+        ),
     ]
     with run_log(conn, "run project", str(project_id)) as counters:
         failed = _run_locked(conn, runners)
