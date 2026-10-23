@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DetailScreen · Nara 시안</title>
+<link rel="stylesheet" href="../tokens.css"><link rel="stylesheet" href="../nara.css"></head>
+<body>
+<header class="appbar">
+  <a class="appbar__name" href="#">NARA</a>
+  <nav class="appbar__nav" aria-label="주 메뉴">
+    <a href="#" aria-current="page">사업 조회</a><a href="#">설치계획</a><a href="#">단가 관리</a><a href="#">설정</a>
+  </nav>
+  <div class="appbar__end">
+    <a href="#" title="신재생에너지센터 (새 탭)">신재생에너지센터 ↗</a>
+    <span>김엔지</span>
+    <a href="#">로그아웃</a>
+  </div>
+</header>
+
+<main class="page">
+<a class="crumb" href="#">← 사업 조회 목록</a>
+<section class="panel detail-head" aria-label="사업 요약">
+  <div class="detail-head__top">
+    <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+      <h1>○○초등학교 그린스마트 미래학교 설계용역</h1>
+      <div class="detail-head__meta"><span>전북특별자치도교육청 ★</span><span aria-hidden="true">·</span><span>출처 나라장터</span><span aria-hidden="true">·</span><span class="badge badge--before">착공 전(설계 단계)</span><span class="by-human">수동</span></div>
+    </div>
+    <div class="detail-head__actions">
+      <button class="btn btn--secondary">이 사업 다시 조회</button>
+      <button class="btn btn--quiet">목록에서 숨기기</button>
+    </div>
+  </div>
+  <div class="runs"><span class="run">다시 조회 10-23 10:42 완료</span><span class="muted">낙찰 · 진행현황 · 실행부서를 이 사업만 다시 봅니다. 사람이 확정한 값은 그대로 둡니다.</span></div>
+  <dl class="facts">
+    <div><dt>공고일</dt><dd>2026-10-14</dd></div>
+    <div><dt>개찰일</dt><dd>2026-10-28</dd></div>
+    <div><dt>예산</dt><dd>482,300,000원</dd></div>
+    <div><dt>낙찰업체</dt><dd>—</dd></div>
+    <div><dt>실행부서</dt><dd>시설과</dd></div>
+    <div><dt>신재생 설치비</dt><dd>186,400,000원</dd></div>
+  </dl>
+</section>
+<nav class="tabs" aria-label="이 사업 안에서 이동">
+  <a href="#info" aria-current="true">사업</a><a href="#notices">공고<span class="count">2</span></a><a href="#verdict">진행현황<span class="count">3</span></a><a href="#dept">실행부서</a><a href="#energy">신재생 계획<span class="count">2</span></a><a href="#nr">설치계획서<span class="count">1</span></a><a href="#edits">수정 이력<span class="count">4</span></a>
+</nav>
+<div class="split">
+  <div class="stack">
+<section class="panel panel--flush" id="info">
+  <div class="section-head"><h2>사업</h2><div class="section-head__end"><button class="btn btn--sm btn--quiet">고치기</button></div></div>
+  <div class="section-body"><dl class="dl">
+    <div><dt>주소</dt><dd>전북 전주시 덕진구 ○○로 120</dd></div>
+    <div><dt>연면적(㎡)</dt><dd>12,480.5</dd></div>
+    <div><dt>착공일</dt><dd>—</dd></div>
+    <div><dt>준공일</dt><dd>—</dd></div>
+    <div><dt>ZEB 등급</dt><dd>4등급</dd></div>
+    <div><dt>신재생 비율</dt><dd>34%</dd></div>
+    <div><dt>기타 인증</dt><dd>녹색건축 우수, BF</dd></div>
+    <div><dt>관급 장비</dt><dd>—</dd></div>
+    <div class="wide"><dt>비고</dt><dd>2027년 상반기 착공 예정. 지열 우선 검토 요청(시설과 통화 10-20).</dd></div>
+  </dl></div>
+</section><section class="panel panel--flush" id="notices">
+  <div class="section-head"><h2>공고</h2><span class="count">2건</span></div>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>공고명</th><th>공고일</th><th>개찰일</th><th>마감일</th><th class="col-num">예산</th><th>담당자</th><th>낙찰업체</th></tr></thead>
+    <tbody>
+      <tr><td><a href="#">○○초 그린스마트 설계 공모 ↗</a></td><td class="col-date">2026-10-14</td><td class="col-date">2026-10-28</td><td class="col-date">2026-10-27</td><td class="col-num">482,300,000</td><td style="white-space:nowrap">박○○ <span class="muted">063-000-0000</span></td><td>—</td></tr>
+      <tr><td><a href="#">○○초 그린스마트 설계 공모(정정) ↗</a></td><td class="col-date">2026-10-16</td><td class="col-date">2026-10-28</td><td class="col-date">2026-10-27</td><td class="col-num">482,300,000</td><td style="white-space:nowrap">박○○ <span class="muted">063-000-0000</span></td><td>—</td></tr>
+    </tbody></table></div>
+  <div class="files"><span class="muted">받아 둔 첨부 3건</span>
+    <a class="file" href="#"><span class="file__ext">HWP</span>공고문.hwp</a><a class="file" href="#"><span class="file__ext">PDF</span>과업지시서.pdf</a><a class="file" href="#"><span class="file__ext">XLSX</span>내역서.xlsx</a></div>
+</section><section class="panel panel--flush" id="verdict">
+  <div class="section-head"><h2>진행현황 이력</h2><span class="count">3건</span><div class="section-head__end"><button class="btn btn--sm btn--quiet">고치기</button></div></div>
+  <div style="padding:12px 16px 0"><div class="notice"><span class="notice__title">사람 판정</span><span>자동 판정이 이 사업을 건너뜁니다.</span><button class="btn btn--sm btn--secondary" style="margin-left:auto">자동 판정에 다시 맡기기</button></div></div>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>시각</th><th>판정</th><th>판정 주체</th><th>사유</th><th>근거</th></tr></thead>
+    <tbody>
+      <tr><td class="col-date">2026-10-20 14:05</td><td><span class="badge badge--before">착공 전(설계 단계)</span></td><td>김엔지</td><td>시설과 통화 — 설계 공모 진행 중</td><td>—</td></tr>
+      <tr><td class="col-date">2026-10-15 09:08</td><td><span class="badge badge--unknown">미확인</span></td><td>자동</td><td>관련 기사 없음</td><td>—</td></tr>
+      <tr><td class="col-date">2026-10-14 15:02</td><td><span class="badge badge--none">판정 전</span></td><td>자동</td><td>—</td><td>—</td></tr>
+    </tbody></table></div>
+</section><section class="panel panel--flush" id="energy">
+  <div class="section-head"><h2>신재생 계획</h2><span class="count">2건</span><div class="section-head__end"><button class="btn btn--sm btn--quiet">고치기</button></div></div>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>에너지원</th><th>형식</th><th class="col-num">용량</th><th class="col-num">설치비</th></tr></thead>
+    <tbody>
+      <tr><td>지열</td><td>수직밀폐형</td><td class="col-num">350 kW</td><td class="col-num">143,500,000원</td></tr>
+      <tr><td>태양광</td><td>고정식</td><td class="col-num">55 kW</td><td class="col-num">42,900,000원</td></tr>
+    </tbody></table></div>
+  <div class="sum"><span>합계</span><span class="sum__value">186,400,000원</span></div>
+</section>
+  </div>
+<aside class="split__side">
+  <section class="panel panel--flush" id="dept">
+    <div class="section-head"><h2>실행부서</h2><div class="section-head__end"><button class="btn btn--sm btn--quiet">고치기</button></div></div>
+    <div class="section-body" style="padding-top:8px;padding-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0"><strong style="font-size:15px">시설과</strong><span class="badge badge--done">확정</span></div>
+      <div class="person"><span class="person__role">부서장 · 시설과장</span><span class="person__name">이○○</span><a class="person__tel" href="#">063-000-1111</a></div>
+      <div class="person"><span class="person__role">실무 담당자 · 주무관 <span class="auto">공고문</span></span><span class="person__name">박○○</span><a class="person__tel" href="#">063-000-0000</a></div>
+      <p class="muted" style="margin:8px 0 0">전북특별자치도교육청 시설과 공통 · 10-20 김엔지</p>
+    </div>
+    <details style="border-top:1px solid var(--line);padding:8px 16px"><summary class="muted" style="cursor:pointer">조회 기록 2건</summary></details>
+  </section>
+  <section class="panel panel--flush" id="nr">
+    <div class="section-head"><h2>설치계획서</h2><span class="count">1건</span></div>
+    <div class="section-body"><a class="title" href="#" style="font-weight:600">2026-NR-001234</a>
+      <div class="muted">○○초등학교 · 시설과 · 10-18 받음</div>
+      <div style="margin-top:6px;font-size:13px">지열 수직밀폐형 350 kW<br>태양광 고정식 55 kW</div>
+      <div style="margin-top:8px"><span class="badge badge--done">사업과 연결됨</span></div></div>
+  </section>
+  <section class="panel panel--flush" id="edits">
+    <div class="section-head"><h2>수정 이력</h2><span class="count">4건</span></div>
+    <div class="section-body" style="padding-top:4px;padding-bottom:4px"><ul class="log">
+      <li><time>10-20 14:05</time><span>김엔지 · 진행현황<br><del>미확인</del> → <ins>착공 전(설계 단계)</ins></span></li>
+      <li><time>10-20 14:03</time><span>김엔지 · 비고<br><del>—</del> → <ins>2027년 상반기 착공 예정…</ins></span></li>
+      <li><time>10-19 11:20</time><span>최○○ · 연면적<br><del>12,000</del> → <ins>12,480.5</ins></span></li>
+    </ul><button class="btn btn--sm btn--quiet" style="margin:4px 0 8px -12px">모두 보기</button></div>
+  </section>
+</aside>
+</div>
+</main>
+</body></html>

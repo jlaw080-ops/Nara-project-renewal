@@ -2137,3 +2137,14 @@ def test_every_page_links_to_the_renewable_energy_centre_site(world):
     assert link is not None
     assert 'target="_blank"' in link.group(0) and 'rel="noopener noreferrer"' in link.group(0)
     assert "신재생에너지센터" in page
+
+
+def test_stylesheets_and_fonts_open_without_login(world):
+    """로그인 화면도 디자인 토큰·글꼴을 입어야 한다 — static은 PUBLIC_ENDPOINTS에 있다."""
+    path, _ = world
+    client = _app(path).test_client()
+    for name in ("css/tokens.css", "css/nara.css", "fonts/Pretendard-Regular.woff2"):
+        resp = client.get(f"/static/{name}")
+        assert resp.status_code == 200, name
+    tokens = _text(client.get("/static/css/tokens.css"))
+    assert 'url("../fonts/Pretendard-Regular.woff2")' in tokens

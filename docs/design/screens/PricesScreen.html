@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>PricesScreen · Nara 시안</title>
+<link rel="stylesheet" href="../tokens.css"><link rel="stylesheet" href="../nara.css"></head>
+<body>
+<header class="appbar"><a class="appbar__name" href="#">NARA</a><nav class="appbar__nav" aria-label="주 메뉴"><a href="#">사업 조회</a><a href="#">설치계획</a><a href="#" aria-current="page">단가 관리</a><a href="#">설정</a></nav>
+<div class="appbar__end"><a href="#" title="신재생에너지센터 (새 탭)">신재생에너지센터 ↗</a><span>김엔지</span><a href="#">로그아웃</a></div></header>
+<main class="page" style="max-width:960px">
+  <div class="page__head"><div style="display:flex;flex-direction:column;gap:6px"><h1>단가 관리</h1>
+    <p class="muted" style="margin:0">설치비 = 용량(kW) × 단가(원/kW). 단가를 바꾸면 모든 사업의 설치비가 새 단가로 다시 계산됩니다.</p></div></div>
+  <div class="notice notice--warning"><span class="notice__title">단가 없음 1건</span><span>태양광 집광채광은 단가가 없어 사업 설치비 합계에서 빠집니다.</span></div>
+  <section class="panel panel--flush">
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th style="width:8rem">에너지원</th><th>형식</th><th>단가(원/kW)</th><th>적용일</th><th>고친 사람</th></tr></thead>
+      <tbody><tr class="group-row"><td colspan="5">태양광</td></tr><tr><td></td><td>BIPV</td><td><input class="input input--num input--cell" value="2,850,000" aria-label="단가"></td><td class="col-date">2026-03-01</td><td>김엔지</td></tr><tr class="is-changed"><td></td><td>PV</td><td><span class="was">780,000</span><input class="input input--num input--cell" value="720,000" aria-label="단가"></td><td class="col-date">2026-03-01</td><td>김엔지</td></tr><tr><td></td><td>집광채광</td><td><input class="input input--num input--cell" placeholder="단가 없음" aria-label="단가"> <span class="badge badge--fail">단가 없음 — 합계에서 빠짐</span></td><td class="col-date">—</td><td>—</td></tr><tr class="group-row"><td colspan="5">지열</td></tr><tr><td></td><td>수직밀폐형</td><td><input class="input input--num input--cell" value="410,000" aria-label="단가"></td><td class="col-date">2026-03-01</td><td>최○○</td></tr><tr class="group-row"><td colspan="5">연료전지</td></tr><tr><td></td><td>PEMFC</td><td><input class="input input--num input--cell" value="5,600,000" aria-label="단가"></td><td class="col-date">2026-05-12</td><td>김엔지</td></tr><tr class="is-changed"><td></td><td>SOFC</td><td><span class="was">6,900,000</span><input class="input input--num input--cell" value="7,200,000" aria-label="단가"></td><td class="col-date">2026-05-12</td><td>김엔지</td></tr></tbody></table></div>
+  </section>
+  <div class="savebar" role="region" aria-label="저장"><span class="savebar__msg">단가 2개를 고쳤습니다</span><span class="muted">저장하면 사업 128건의 설치비가 다시 계산됩니다.</span>
+    <span class="savebar__end"><button class="btn btn--quiet">되돌리기</button><button class="btn">저장</button></span></div>
+</main>
+</body></html>
