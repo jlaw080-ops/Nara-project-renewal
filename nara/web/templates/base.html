@@ -4,79 +4,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}사업 조회{% endblock %} · 나라</title>
-<style>
-  :root {
-    --fg: #1a1a1a; --muted: #666; --line: #ddd; --bad: #b00020;
-    --bg: #fff; --head: #f5f5f5; --link: #0b57d0; --link-strong: #0842a0;
-    --field-line: #8a8a8a;
-  }
-  body {
-    font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
-    color: var(--fg); background: var(--bg); margin: 16px; font-size: 14px;
-  }
-  html, body { overflow-x: clip; }
-  h1, h2 { overflow-wrap: anywhere; min-width: 0; }
-  a { color: var(--link); }
-  a:hover { color: var(--link-strong); }
-  a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible,
-  textarea:focus-visible {
-    outline: 2px solid var(--link); outline-offset: 2px;
-  }
-  input[type=search], input[type=date], input[type=text], input[type=password], button {
-    font: inherit; min-height: 44px; box-sizing: border-box; border: 1px solid var(--field-line);
-    padding: 0 12px; background: var(--bg); color: var(--fg);
-  }
-  select { font: inherit; border: 1px solid var(--field-line); }
-  select:not([multiple]) { min-height: 44px; }
-  button { background: var(--link); border-color: var(--link); color: var(--bg); cursor: pointer; }
-  button:hover { background: var(--link-strong); border-color: var(--link-strong); }
-  button:active { transform: translateY(1px); }
-  button:disabled { opacity: 0.55; cursor: not-allowed; }
-  @media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
-  /* 표가 좁은 화면을 넘으면 페이지 전체가 아니라 표 상자만 옆으로 민다. */
-  .table-wrap { overflow-x: auto; }
-  .edit-link { font-size: 12px; font-weight: normal; margin-left: 8px; }
-  .edit-form { display: flex; flex-direction: column; gap: 12px; max-width: 40rem; }
-  .edit-form label { display: flex; flex-direction: column; gap: 4px; }
-  .edit-form textarea { font: inherit; border: 1px solid var(--field-line); padding: 8px; }
-  .edit-form fieldset { border: 1px solid var(--line); padding: 8px 12px; }
-  .edit-form .choice { flex-direction: row; align-items: baseline; gap: 8px; }
-  .energy-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
-  .energy-cost-box { margin: 0; min-height: 44px; display: flex; align-items: center; gap: 4px; }
-  .price-input { text-align: right; width: 12rem; }
-  .hide-bar, .hide-one { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
-  .hide-bar label, .hide-one label { display: flex; flex-direction: column; gap: 4px; }
-  .field-error { color: var(--bad); font-size: 12px; }
-  .saved { border-left: 4px solid var(--link); padding: 8px 12px; background: var(--head); }
-  .account { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin: 0; }
-  form.inline { display: inline; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
-  th { background: var(--head); white-space: nowrap; }
-  td { font-variant-numeric: tabular-nums; }
-  .muted { color: var(--muted); font-size: 12px; }
-  .bad { color: var(--bad); font-weight: bold; }
-  .notes li { color: var(--bad); }
-  .runs { margin: 0 0 12px; }
-  form.filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 12px 0; }
-  form.filters label { display: flex; flex-direction: column; gap: 4px; }
-  fieldset.setting { border: 1px solid var(--field-line); padding: 8px; margin: 0 0 12px; }
-  .setting-values { display: flex; flex-wrap: wrap; gap: 4px 12px; max-height: 12rem; overflow-y: auto; margin-bottom: 8px; }
-  fieldset.setting textarea { width: 100%; box-sizing: border-box; }
-  .setting-values label[hidden] { display: none; }
-  form.filters fieldset.org-pick { border: 1px solid var(--field-line); padding: 6px 8px; margin: 0; min-width: 18rem; }
-  .org-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
-  .org-list { max-height: 12rem; overflow-y: auto; display: flex; flex-direction: column; }
-  form.filters .org-list label { flex-direction: row; align-items: center; gap: 6px; min-height: 28px; }
-  .org-list label[hidden] { display: none; }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/nara.css') }}">
 </head>
 <body>
-{% if g.user %}
-<div class="account muted"><a href="{{ url_for('index') }}">사업 조회</a> · <a href="{{ url_for('prices') }}">단가 관리</a> · <a href="{{ url_for('settings') }}">설정</a> · <a href="{{ url_for('nr_list') }}">설치계획</a> · <a href="https://nr.energy.or.kr/C0/CST_C0/login.do" target="_blank" rel="noopener noreferrer" title="설치의무화 계획제출 및 설치확인 — 신재생에너지센터 로그인 (새 탭)">신재생에너지센터 ↗</a> · {{ g.user.name }} · <a href="{{ url_for('change_password') }}">비밀번호 바꾸기</a>
-  <form method="post" class="inline" action="{{ url_for('logout') }}"><button type="submit">로그아웃</button></form></div>
-{% endif %}
-{% for m in get_flashed_messages() %}<p class="saved">{{ m }}</p>{% endfor %}
+{# 현재 화면 메뉴. 상세·출력·엑셀·숨기기·저장은 '사업 조회', 설치계획 상세·연결·무시는 '설치계획'. #}
+{% set ep = request.endpoint or '' %}
+{% set menu = 'nr' if ep.startswith('nr_') else ('prices' if ep == 'prices' else ('settings' if ep.startswith('settings') else ('' if ep in ('login', 'change_password') else 'index'))) %}
+<header class="appbar">
+  <a class="appbar__name" href="{{ url_for('index') }}">NARA</a>
+  {% if g.user %}
+  <nav class="appbar__nav" aria-label="주 메뉴">
+    <a href="{{ url_for('index') }}"{% if menu == 'index' %} aria-current="page"{% endif %}>사업 조회</a>
+    <a href="{{ url_for('nr_list') }}"{% if menu == 'nr' %} aria-current="page"{% endif %}>설치계획</a>
+    <a href="{{ url_for('prices') }}"{% if menu == 'prices' %} aria-current="page"{% endif %}>단가 관리</a>
+    <a href="{{ url_for('settings') }}"{% if menu == 'settings' %} aria-current="page"{% endif %}>설정</a>
+  </nav>
+  <div class="appbar__end">
+    <a href="https://nr.energy.or.kr/C0/CST_C0/login.do" target="_blank" rel="noopener noreferrer" title="설치의무화 계획제출 및 설치확인 — 신재생에너지센터 로그인 (새 탭)">신재생에너지센터 ↗</a>
+    <span>{{ g.user.name }}</span>
+    <a href="{{ url_for('change_password') }}">비밀번호 바꾸기</a>
+    <form method="post" class="inline" action="{{ url_for('logout') }}"><button type="submit" class="btn btn--sm btn--quiet">로그아웃</button></form>
+  </div>
+  {% endif %}
+</header>
+<main class="page">
+{% for m in get_flashed_messages() %}<div class="notice notice--success" role="status"><span class="notice__title">알림</span><span>{{ m }}</span></div>{% endfor %}
 {% block body %}{% endblock %}
+</main>
 </body>
 </html>

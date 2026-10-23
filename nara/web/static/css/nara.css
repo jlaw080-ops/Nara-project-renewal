@@ -287,3 +287,68 @@ textarea.input { height: auto; padding: var(--space-2) var(--space-3); }
 .impact__n { font-size: 22px; line-height: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .impact__item--warn { border-color: var(--warning); background: var(--warning-soft); }
 .impact__item--warn .impact__n { color: var(--warning); }
+
+/* ---------- 앱 바 위의 조용한 버튼 (로그아웃) — 남색 바탕에서 읽히게 흰 글자 ---------- */
+.appbar .btn--quiet { color: var(--on-navy-muted); }
+.appbar .btn--quiet:hover { color: var(--on-navy); background: rgba(255, 255, 255, 0.12); }
+form.inline { display: inline; }
+
+/* =====================================================================
+   임시 호환 구역 (UI v2 단계 1) — 아직 새 클래스로 바꾸지 않은 화면이 깨지지 않게
+   옛 클래스와 맨 요소를 새 디자인 토큰으로 정의한다. 화면을 하나씩 바꾸면서 지우고,
+   단계 7에서 남은 것을 모두 지운다.
+   ===================================================================== */
+.page h1 + * { margin-top: 0; }
+.page p { margin: 0; }
+.page > p, .page > ul, .page > div.table-wrap { margin: 0; }
+button:not(.btn) {
+  font: inherit; min-height: var(--control-md); padding: 0 var(--space-4);
+  border: var(--stroke-hairline) solid var(--primary); border-radius: var(--radius-md);
+  background: var(--primary); color: var(--surface); cursor: pointer; font-weight: 600;
+}
+button:not(.btn):hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+button:not(.btn):active { transform: translateY(1px); }
+button:not(.btn):disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+@media (prefers-reduced-motion: reduce) { button:not(.btn):active, .btn:active { transform: none; } }
+input[type=search]:not(.input), input[type=date]:not(.input), input[type=text]:not(.input),
+input[type=password]:not(.input), input[type=number]:not(.input), textarea:not(.input), select:not(.select) {
+  font: inherit; box-sizing: border-box; border: var(--stroke-hairline) solid var(--field-line);
+  border-radius: var(--radius-md); padding: 0 var(--space-3); background: var(--surface); color: var(--fg);
+}
+input:not(.input):not([type=checkbox]):not([type=radio]):not([type=hidden]) { min-height: var(--control-md); }
+textarea:not(.input) { padding: var(--space-2) var(--space-3); }
+select:not(.select):not([multiple]) { min-height: var(--control-md); }
+table:not(.table) { border-collapse: collapse; width: 100%; background: var(--surface); font-size: 13px; line-height: 20px; }
+table:not(.table) th, table:not(.table) td {
+  border-bottom: var(--stroke-hairline) solid var(--line); padding: var(--space-2) var(--space-3);
+  text-align: left; vertical-align: top;
+}
+table:not(.table) th { background: var(--surface-sunken); white-space: nowrap; color: var(--fg-secondary); font-size: 13px; }
+table:not(.table) td { font-variant-numeric: tabular-nums; }
+.table-wrap:not(.panel) { background: var(--surface); border: var(--stroke-hairline) solid var(--line); border-radius: var(--radius-lg); }
+.bad { color: var(--danger); font-weight: 700; }
+.notes li { color: var(--danger); }
+.field-error { color: var(--danger); font-size: 12px; font-weight: 600; }
+.saved { padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--success-soft); color: var(--fg); border-left: 4px solid var(--success); }
+.edit-link { font-size: 12px; font-weight: 400; margin-left: var(--space-2); }
+.edit-form { display: flex; flex-direction: column; gap: var(--space-3); max-width: var(--form-max-width); }
+.edit-form label { display: flex; flex-direction: column; gap: var(--space-1); font-size: 13px; font-weight: 600; color: var(--fg-secondary); }
+.edit-form fieldset { border: var(--stroke-hairline) solid var(--line); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); }
+.edit-form .choice { flex-direction: row; align-items: baseline; gap: var(--space-2); font-weight: 400; color: var(--fg); }
+.energy-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+.energy-cost-box { margin: 0; min-height: var(--control-md); display: flex; align-items: center; gap: var(--space-1); }
+.price-input { text-align: right; width: 12rem; }
+.hide-bar, .hide-one { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); align-items: flex-end; }
+.hide-bar label, .hide-one label { display: flex; flex-direction: column; gap: var(--space-1); }
+.page > .runs { display: block; }
+form.filters:not(.panel *) { background: var(--surface); border: var(--stroke-hairline) solid var(--line); border-radius: var(--radius-lg); padding: var(--space-4); }
+form.filters label { display: flex; flex-direction: column; gap: var(--space-1); font-size: 13px; font-weight: 600; color: var(--fg-secondary); }
+fieldset.setting { border: var(--stroke-hairline) solid var(--line); border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-3) var(--space-4); margin: 0; }
+.setting-values { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); max-height: 12rem; overflow-y: auto; margin-bottom: var(--space-2); }
+fieldset.setting textarea { width: 100%; box-sizing: border-box; }
+.setting-values label[hidden] { display: none; }
+form.filters fieldset.org-pick { border: var(--stroke-hairline) solid var(--field-line); border-radius: var(--radius-md); padding: var(--space-2); margin: 0; min-width: 18rem; }
+.org-tools { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-2); }
+.org-list { max-height: 12rem; overflow-y: auto; display: flex; flex-direction: column; }
+form.filters .org-list label { flex-direction: row; align-items: center; gap: var(--space-2); min-height: 28px; font-weight: 400; color: var(--fg); }
+.org-list label[hidden] { display: none; }
