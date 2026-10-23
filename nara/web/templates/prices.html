@@ -1,22 +1,78 @@
 {% extends "base.html" %}
 {% block title %}단가 관리{% endblock %}
 {% block body %}
-<h1>단가 관리</h1>
-<p class="muted">설치비 = 용량(kW) × 단가(원/kW). 단가를 바꾸면 모든 사업의 설치비가 새 단가로 다시 계산됩니다.</p>
-{% if saved == '-' %}<p class="saved">바뀐 단가가 없습니다</p>
-{% elif saved %}<p class="saved">단가를 고쳤습니다: {{ saved }}</p>{% endif %}
-{% if errors.get('_form') %}<p class="field-error">{{ errors['_form'] }}</p>{% endif %}
-<form method="post" action="{{ url_for('prices') }}">
-<div class="table-wrap"><table>
-<thead><tr><th>에너지원</th><th>형식</th><th>단가(원/kW)</th><th>적용일</th><th>고친 사람</th></tr></thead>
+<div class="narrow">
+<div class="page__head">
+  <div class="page__title">
+    <h1>단가 관리</h1>
+    <p class="muted">설치비 = 용량(kW) × 단가(원/kW). 단가를 바꾸면 모든 사업의 설치비가 새 단가로 다시 계산됩니다.</p>
+  </div>
+</div>
+{% if saved == '-' %}<div class="notice notice--success" role="status"><span class="notice__title">저장됨</span><span>바뀐 단가가 없습니다</span></div>
+{% elif saved %}<div class="notice notice--success" role="status"><span class="notice__title">저장됨</span><span>단가를 고쳤습니다: {{ saved }}</span></div>{% endif %}
+{% if errors.get('_form') %}<div class="notice notice--danger" role="alert"><span class="notice__title">오류</span><span>{{ errors['_form'] }}</span></div>{% endif %}
+{% set unpriced = rows|selectattr('price', 'none')|list %}
+{% if unpriced %}
+<div class="notice notice--warning"><span class="notice__title">단가 없음 {{ unpriced|length }}건</span><span>{% for r in unpriced %}{{ r.kind.source }} {{ r.kind.form }}{% if not loop.last %}, {% endif %}{% endfor %}은 단가가 없어 사업 설치비 합계에서 빠집니다.</span></div>
+{% endif %}
+<form method="post" id="price-form" action="{{ url_for('prices') }}">
+<section class="panel panel--flush" aria-label="단가 표">
+<div class="table-wrap"><table class="table price-table">
+<thead><tr><th class="col-source">에너지원</th><th>형식</th><th>단가(원/kW)</th><th>적용일</th><th>고친 사람</th></tr></thead>
 <tbody>
-{% for r in rows %}
+{% for src in rows|map(attribute='kind.source')|unique %}
+<tr class="group-row"><td colspan="5">{{ src }}</td></tr>
+{% for r in rows if r.kind.source == src %}
 <tr><td>{{ r.kind.source }}</td><td>{{ r.kind.form }}</td>
-<td><input type="hidden" name="code" value="{{ r.kind.code }}"><input type="text" class="price-input" name="price" inputmode="numeric" aria-label="{{ r.kind.source }} {{ r.kind.form }} 단가" value="{{ form.get(r.kind.code, '{:,}'.format(r.price) if r.price is not none else '') }}">{% if r.price is none %} <span class="muted">단가 없음</span>{% endif %}{% if errors.get('price-' ~ r.kind.code) %} <span class="field-error">{{ errors['price-' ~ r.kind.code] }}</span>{% endif %}</td>
-<td>{{ r.effective_from|dash }}</td><td>{{ r.updated_by|dash }}</td></tr>
+<td><input type="hidden" name="code" value="{{ r.kind.code }}"><input type="text" class="input input--num input--cell" name="price" inputmode="numeric" aria-label="{{ r.kind.source }} {{ r.kind.form }} 단가"{% if r.price is none %} placeholder="단가 없음"{% endif %}{% if errors.get('price-' ~ r.kind.code) %} aria-invalid="true"{% endif %} value="{{ form.get(r.kind.code, '{:,}'.format(r.price) if r.price is not none else '') }}">{% if r.price is none %} <span class="badge badge--fail">단가 없음</span>{% endif %}{% if errors.get('price-' ~ r.kind.code) %} <span class="field__error">{{ errors['price-' ~ r.kind.code] }}</span>{% endif %}</td>
+<td class="col-date">{{ r.effective_from|dash }}</td><td>{{ r.updated_by|dash }}</td></tr>
+{% endfor %}
 {% endfor %}
 </tbody>
 </table></div>
-<p><button type="submit">저장</button></p>
+</section>
+<div class="savebar" id="savebar" role="region" aria-label="저장">
+  <span class="savebar__msg" id="save-msg">고친 단가를 저장합니다</span>
+  <span class="muted">저장하면 모든 사업의 설치비가 다시 계산됩니다.</span>
+  <span class="savebar__end"><button type="reset" class="btn btn--quiet">되돌리기</button><button type="submit" class="btn">저장</button></span>
+</div>
 </form>
+</div>
+<script>
+(function () {
+  // 처음 값과 달라진 행에 표시를 하고, 하나라도 바뀌었을 때만 저장 줄을 보인다. JS가 없으면 저장 줄이 늘 보인다.
+  var form = document.getElementById("price-form");
+  var bar = document.getElementById("savebar");
+  var msg = document.getElementById("save-msg");
+  var inputs = Array.prototype.slice.call(form.querySelectorAll("input[name=price]"));
+  function norm(v) { return v.replace(/[\s,]/g, ""); }
+  inputs.forEach(function (box) { box.dataset.was = box.value; });
+  function refresh() {
+    var n = 0;
+    inputs.forEach(function (box) {
+      var row = box.closest("tr");
+      var changed = norm(box.value) !== norm(box.dataset.was);
+      var was = row.querySelector(".was");
+      if (changed) {
+        n++;
+        row.classList.add("is-changed");
+        if (!was) {
+          was = document.createElement("span");
+          was.className = "was";
+          was.textContent = box.dataset.was || "—";
+          box.parentNode.insertBefore(was, box);
+        }
+      } else {
+        row.classList.remove("is-changed");
+        if (was) { was.remove(); }
+      }
+    });
+    msg.textContent = n ? "단가 " + n + "개를 고쳤습니다" : "고친 단가를 저장합니다";
+    bar.hidden = n === 0;
+  }
+  inputs.forEach(function (box) { box.addEventListener("input", refresh); });
+  form.addEventListener("reset", function () { setTimeout(refresh, 0); });
+  refresh();
+})();
+</script>
 {% endblock %}

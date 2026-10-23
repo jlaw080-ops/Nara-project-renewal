@@ -375,6 +375,14 @@ a.btn { text-decoration: none; }
 .match__name a:hover { text-decoration: underline; }
 .dl--single { grid-template-columns: 1fr; }
 
+/* ---------- 단가 관리 화면 보강 (UI v2 단계 5) ---------- */
+.narrow { max-width: 960px; margin: 0 auto; }
+.price-table .col-source { width: 8rem; }
+.price-table tr:not(.group-row) td:first-child { color: var(--muted); font-size: 12px; }
+.price-table .field__error { display: inline; margin-left: var(--space-2); }
+.savebar { margin-top: var(--space-4); }
+.savebar[hidden] { display: none; }
+
 /* =====================================================================
    임시 호환 구역 (UI v2 단계 1) — 아직 새 클래스로 바꾸지 않은 화면이 깨지지 않게
    옛 클래스와 맨 요소를 새 디자인 토큰으로 정의한다. 화면을 하나씩 바꾸면서 지우고,
@@ -416,7 +424,6 @@ table:not(.table) td { font-variant-numeric: tabular-nums; }
 .edit-form label { display: flex; flex-direction: column; gap: var(--space-1); font-size: 13px; font-weight: 600; color: var(--fg-secondary); }
 .edit-form fieldset { border: var(--stroke-hairline) solid var(--line); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); }
 .edit-form .choice { flex-direction: row; align-items: baseline; gap: var(--space-2); font-weight: 400; color: var(--fg); }
-.price-input { text-align: right; width: 12rem; }
 .page > .runs { display: block; }
 form.filters:not(.panel *) { background: var(--surface); border: var(--stroke-hairline) solid var(--line); border-radius: var(--radius-lg); padding: var(--space-4); }
 form.filters label { display: flex; flex-direction: column; gap: var(--space-1); font-size: 13px; font-weight: 600; color: var(--fg-secondary); }
