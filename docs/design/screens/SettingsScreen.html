@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SettingsScreen · Nara 시안</title>
+<link rel="stylesheet" href="../tokens.css"><link rel="stylesheet" href="../nara.css"></head>
+<body>
+<header class="appbar"><a class="appbar__name" href="#">NARA</a><nav class="appbar__nav" aria-label="주 메뉴"><a href="#">사업 조회</a><a href="#">설치계획</a><a href="#">단가 관리</a><a href="#" aria-current="page">설정</a></nav>
+<div class="appbar__end"><a href="#" title="신재생에너지센터 (새 탭)">신재생에너지센터 ↗</a><span>김엔지</span><a href="#">로그아웃</a></div></header>
+<main class="page">
+  <div class="page__head"><div style="display:flex;flex-direction:column;gap:6px"><h1>설정</h1>
+    <p class="muted" style="margin:0">여기가 정본입니다. 저장하면 다음 수집부터 쓰입니다. 저장 전에 이미 모은 사업에 미칠 영향을 먼저 보여 줍니다.</p></div></div>
+  <div class="split split--nav">
+    <nav class="panel panel--flush sidenav" aria-label="설정 종류"><a href="#">제목 필수 키워드<span class="n">8</span></a><a href="#" aria-current="true">제목 제외 키워드<span class="n">23</span></a><a href="#">기관 제외 키워드<span class="n">6</span></a><a href="#">관심기관 (이름에 포함)<span class="n">14</span></a><a href="#">관심기관 (이름이 정확히 같음)<span class="n">4</span></a><a href="#">설치계획서 기관 별칭<span class="n">9</span></a></nav>
+    <div class="stack">
+      <section class="panel panel--flush">
+        <div class="section-head"><h2>제목 제외 키워드</h2><span class="count">23개</span>
+          <div class="section-head__end"><input class="input" type="search" placeholder="값 검색" aria-label="제목 제외 키워드 검색" style="height:32px;width:14rem"></div></div>
+        <div class="section-body" style="display:flex;flex-direction:column;gap:16px">
+          <p class="muted" style="margin:0">공고 제목에 이 말이 들어 있으면 수집하지 않습니다. × 를 누르면 뺄 값으로 표시되고, 저장해야 실제로 빠집니다.</p>
+          <div class="values"><span class="value">도로<button type="button" aria-label="도로 빼기">×</button></span><span class="value">하천<button type="button" aria-label="하천 빼기">×</button></span><span class="value">교량<button type="button" aria-label="교량 빼기">×</button></span><span class="value">측량<button type="button" aria-label="측량 빼기">×</button></span><span class="value">상수도<button type="button" aria-label="상수도 빼기">×</button></span><span class="value">하수관로<button type="button" aria-label="하수관로 빼기">×</button></span><span class="value">조경<button type="button" aria-label="조경 빼기">×</button></span><span class="value">토목<button type="button" aria-label="토목 빼기">×</button></span><span class="value">전기<button type="button" aria-label="전기 빼기">×</button></span><span class="value">통신<button type="button" aria-label="통신 빼기">×</button></span><span class="value">소방<button type="button" aria-label="소방 빼기">×</button></span><span class="value">지하차도<button type="button" aria-label="지하차도 빼기">×</button></span><span class="value">보도<button type="button" aria-label="보도 빼기">×</button></span><span class="value">배수<button type="button" aria-label="배수 빼기">×</button></span><span class="value">포장<button type="button" aria-label="포장 빼기">×</button></span><span class="value value--remove">정비<button type="button" aria-label="정비 빼기">×</button></span><span class="value">철거<button type="button" aria-label="철거 빼기">×</button></span><span class="value">구조안전진단<button type="button" aria-label="구조안전진단 빼기">×</button></span><span class="value">실시설계 변경<button type="button" aria-label="실시설계 변경 빼기">×</button></span><span class="value">감리<button type="button" aria-label="감리 빼기">×</button></span><span class="value">석면<button type="button" aria-label="석면 빼기">×</button></span><span class="value">방수<button type="button" aria-label="방수 빼기">×</button></span><span class="value value--add">리모델링 감리<button type="button" aria-label="더할 값 취소">×</button></span></div>
+          <label class="field"><span class="field__label">더할 값</span><textarea class="input" rows="3" placeholder="한 줄에 하나씩">리모델링 감리</textarea><span class="field__help">한 줄에 하나. 이미 있는 값은 건너뜁니다.</span></label>
+        </div>
+      </section>
+      <section class="panel panel--flush">
+        <div class="section-head"><h2>최근 변경</h2></div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>때</th><th>사람</th><th>종류</th><th>변경</th><th>값</th></tr></thead><tbody><tr><td class="col-date">10-21 16:02</td><td>김엔지</td><td>관심기관 (이름에 포함)</td><td><span class="badge badge--done">더함</span></td><td>완주군</td></tr><tr><td class="col-date">10-18 09:40</td><td>최○○</td><td>제목 제외 키워드</td><td><span class="badge badge--fail">뺌</span></td><td>설계</td></tr><tr><td class="col-date">10-15 13:11</td><td>김엔지</td><td>설치계획서 기관 별칭</td><td><span class="badge badge--done">더함</span></td><td>전라북도교육청 → 전북특별자치도교육청</td></tr></tbody></table></div>
+      </section>
+      <div class="savebar"><span class="savebar__msg">뺄 값 1개 · 더할 값 1개</span><span class="muted">저장하기 전에 이미 모은 사업에 미칠 영향을 보여 줍니다.</span>
+        <span class="savebar__end"><button class="btn btn--quiet">되돌리기</button><button class="btn">영향 확인 후 저장</button></span></div>
+    </div>
+  </div>
+</main>
+</body></html>

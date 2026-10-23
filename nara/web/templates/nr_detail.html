@@ -1,35 +1,77 @@
 {% extends "base.html" %}
+{% from "_macros.html" import nr_badge %}
 {% block title %}{{ plan.building_name }}{% endblock %}
 {% block body %}
-<p><a href="{{ url_for('nr_list', state=plan.match_state) }}">← 설치계획 목록</a></p>
-<h1>{{ plan.building_name }}</h1>
-<p class="muted">{{ plan.org_name }} · 신청번호 {{ plan.key }} · {{ labels[plan.match_state] }}{% if plan.project_id %} · 연결: <a href="{{ url_for('detail', project_id=plan.project_id) }}">{{ plan.project_name }}</a>{% endif %}</p>
-<div class="table-wrap"><table>
-<tr><th>주소</th><td>{{ plan.address|dash }}</td></tr>
-<tr><th>착공예정일</th><td>{{ plan.start_date|dash }}</td></tr>
-<tr><th>준공예정일</th><td>{{ plan.end_date|dash }}</td></tr>
-<tr><th>담당부서</th><td>{{ plan.dept|dash }}</td></tr>
-<tr><th>에너지원</th><td>{% for e in load_energy(plan.energy_json) %}{{ e.source }} {{ e.form }} {{ e.capacity_kw }} kW{% if not loop.last %}<br>{% endif %}{% else %}—{% endfor %}</td></tr>
-</table></div>
+<a class="crumb" href="{{ url_for('nr_list', state=plan.match_state) }}">← 설치계획 목록</a>
+<section class="panel detail-head" aria-label="설치계획서 요약">
+  <div class="detail-head__top">
+    <div class="detail-head__title">
+      <h1>{{ plan.building_name }}</h1>
+      <div class="detail-head__meta">
+        <span>{{ plan.org_name }}</span><span aria-hidden="true">·</span>
+        <span>신청번호 {{ plan.key }}</span><span aria-hidden="true">·</span>
+        {{ nr_badge(plan.match_state, labels[plan.match_state]) }}
+        {% if plan.project_id %}<span aria-hidden="true">·</span><span>연결: <a href="{{ url_for('detail', project_id=plan.project_id) }}">{{ plan.project_name }}</a></span>{% endif %}
+      </div>
+    </div>
+    <div class="detail-head__actions">
+      <form method="post" class="inline" action="{{ url_for('nr_ignore', plan_id=plan.id) }}"><button type="submit" class="btn btn--quiet">무시</button></form>
+    </div>
+  </div>
+  <dl class="facts">
+    <div><dt>착공예정일</dt><dd>{{ plan.start_date|dash }}</dd></div>
+    <div><dt>준공예정일</dt><dd>{{ plan.end_date|dash }}</dd></div>
+    <div><dt>담당부서</dt><dd>{{ plan.dept|dash }}</dd></div>
+    <div><dt>받은 때</dt><dd>{{ plan.updated_at[:10] }}</dd></div>
+  </dl>
+</section>
 
-<h2>연결할 사업</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>사업</th><th>기관</th><th>점수</th><th></th></tr></thead>
-<tbody>
-{% for c in candidates %}
-<tr><td><a href="{{ url_for('detail', project_id=c.project_id) }}">{{ c.name }}</a></td><td>{{ c.org_name }}</td><td>{{ '%.2f'|format(c.score) }}</td>
-<td><form method="post" class="inline" action="{{ url_for('nr_link', plan_id=plan.id) }}"><input type="hidden" name="project_id" value="{{ c.project_id }}"><button type="submit">이 사업과 연결</button></form></td></tr>
-{% else %}
-<tr><td colspan="4" class="muted">같은 기관의 사업이 없습니다</td></tr>
-{% endfor %}
-</tbody>
-</table></div>
-<form method="post" class="hide-one" action="{{ url_for('nr_link', plan_id=plan.id) }}">
-  <label>사업 번호로 연결 <input type="text" name="project_id" inputmode="numeric"></label>
-  <button type="submit">연결</button>
-</form>
-<p>
-<form method="post" class="inline" action="{{ url_for('nr_link', plan_id=plan.id) }}"><input type="hidden" name="new" value="1"><button type="submit">새 사업으로 추가</button></form>
-<form method="post" class="inline" action="{{ url_for('nr_ignore', plan_id=plan.id) }}"><button type="submit">무시</button></form>
-</p>
+<div class="split">
+<div class="stack">
+<section class="panel panel--flush" aria-label="연결할 사업">
+  <div class="section-head"><h2>연결할 사업 고르기</h2><span class="count">같은 기관 사업 {{ candidates|length }}건</span></div>
+  {% for c in candidates %}
+  <div class="match{% if loop.first %} match--best{% endif %}">
+    <span class="match__name"><a href="{{ url_for('detail', project_id=c.project_id) }}">{{ c.name }}</a></span>
+    <span class="match__meta"><span class="meter{% if c.score < 0.5 %} meter--low{% endif %}"><span class="meter__bar"><span class="meter__fill" style="width:{{ (c.score * 100)|round|int }}%"></span></span>{{ '%.2f'|format(c.score) }}</span><span>{{ c.org_name }}</span></span>
+    <span class="match__action"><form method="post" class="inline" action="{{ url_for('nr_link', plan_id=plan.id) }}"><input type="hidden" name="project_id" value="{{ c.project_id }}"><button type="submit" class="btn btn--sm{% if not loop.first %} btn--secondary{% endif %}">이 사업과 연결</button></form></span>
+  </div>
+  {% else %}
+  <p class="empty">같은 기관의 사업이 없습니다</p>
+  {% endfor %}
+  <div class="section-body link-other">
+    <div class="or">맞는 사업이 없으면</div>
+    <div class="link-other__row">
+      <form method="post" class="field" action="{{ url_for('nr_link', plan_id=plan.id) }}">
+        <label class="field__label" for="link-by-id">사업 번호로 연결</label>
+        <span class="link-other__id"><input class="input num" type="text" id="link-by-id" name="project_id" inputmode="numeric"><button type="submit" class="btn btn--secondary">연결</button></span>
+      </form>
+      <span class="muted link-other__or">또는</span>
+      <form method="post" class="inline" action="{{ url_for('nr_link', plan_id=plan.id) }}"><input type="hidden" name="new" value="1"><button type="submit" class="btn btn--secondary">새 사업으로 추가</button></form>
+    </div>
+  </div>
+</section>
+</div>
+<aside class="split__side">
+<section class="panel panel--flush" aria-label="설치계획서 내용">
+  <div class="section-head"><h2>설치계획서 내용</h2></div>
+  <div class="section-body"><dl class="dl dl--single">
+    <div><dt>주소</dt><dd>{{ plan.address|dash }}</dd></div>
+    <div><dt>담당부서</dt><dd>{{ plan.dept|dash }}</dd></div>
+    <div><dt>착공예정일</dt><dd>{{ plan.start_date|dash }}</dd></div>
+    <div><dt>준공예정일</dt><dd>{{ plan.end_date|dash }}</dd></div>
+  </dl></div>
+  <div class="table-wrap"><table class="table">
+  <thead><tr><th>에너지원</th><th>형식</th><th class="col-num">용량</th></tr></thead>
+  <tbody>
+  {% for e in load_energy(plan.energy_json) %}
+  <tr><td>{{ e.source }}</td><td>{{ e.form }}</td><td class="col-num">{{ e.capacity_kw }} kW</td></tr>
+  {% else %}
+  <tr><td colspan="3" class="empty">에너지원 표를 읽지 못했습니다</td></tr>
+  {% endfor %}
+  </tbody>
+  </table></div>
+</section>
+</aside>
+</div>
 {% endblock %}

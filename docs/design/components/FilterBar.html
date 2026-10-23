@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>FilterBar · Nara 시안</title>
+<link rel="stylesheet" href="../tokens.css"><link rel="stylesheet" href="../nara.css"></head>
+<body>
+<div style="padding:16px"><div class="panel"><form class="filters" onsubmit="return false">
+  <div class="field picker"><span class="field__label">수요기관</span>
+    <button type="button" class="btn btn--secondary picker__button" aria-expanded="false">2곳 선택 <span aria-hidden="true">▾</span></button></div>
+  <label class="field filters__grow"><span class="field__label">이름 검색</span><input class="input" type="search" placeholder="공고명 또는 사업명"></label>
+  <div class="field"><span class="field__label">공고일</span><div style="display:flex;gap:8px;align-items:center"><input class="input num" type="text" value="2026-09-01" size="10" aria-label="시작일"><span class="muted">~</span><input class="input num" type="text" value="2026-10-23" size="10" aria-label="끝일"></div></div>
+  <div class="filters__actions"><a class="btn btn--quiet" href="#">조건 지우기</a><button class="btn" type="submit">조회</button></div>
+  <div class="field" style="flex-basis:100%"><span class="field__label">진행현황</span>
+    <div class="chips"><button type="button" class="chip" aria-pressed="true">착공 전(설계 단계)</button><button type="button" class="chip" aria-pressed="false">시공 중</button><button type="button" class="chip" aria-pressed="false">준공 완료</button><button type="button" class="chip" aria-pressed="false">미확인</button><button type="button" class="chip" aria-pressed="false">판정 전</button>
+    <span style="width:1px;background:var(--line);margin:0 4px"></span><button type="button" class="chip" aria-pressed="true">★ 관심기관만</button><button type="button" class="chip" aria-pressed="false">실행부서 검토 필요</button><button type="button" class="chip" aria-pressed="false">숨긴 사업</button></div></div>
+</form></div></div>
+</body></html>

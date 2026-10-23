@@ -788,7 +788,8 @@ def test_a_human_verdict_is_marked_locked_and_release_unlocks_it(world):
     url = f"/project/{ids['gym']}"
     _post(client, f"{url}/edit/verdict", {"verdict": BUILDING, "reason": "현장 확인"})
     assert "자동 판정이 이 사업을 건너뜁니다" in _text(client.get(url))
-    assert "(사람)" in _text(client.get("/?q=다목적체육관"))
+    # 사람이 정한 값은 배지 옆 "수동" 표시(.by-human)다 — UI v2에서 "(사람)"을 대신한다
+    assert '<span class="by-human">수동</span>' in _text(client.get("/?q=다목적체육관"))
     assert _post(client, f"{url}/release", {}).status_code == 302
     text = _text(client.get(url))
     assert "자동 판정이 이 사업을 건너뜁니다" not in text
@@ -1771,11 +1772,11 @@ def test_the_form_opens_with_the_current_contacts_and_marks_notice_values(world)
     conn.close()
     client = _client(path)
     shown = _text(client.get(f"/project/{ids['gym']}"))
-    assert "063-000-0001" in shown and "(공고문)" in shown
+    assert "063-000-0001" in shown and '<span class="auto">공고문</span>' in shown
     form = _text(client.get(f"/project/{ids['gym']}?edit=dept"))
     assert 'name="staff_tel" inputmode="tel" value="063-000-0001"' in form
     _post(client, f"/project/{ids['gym']}/edit/dept", _dept_form(client, ids["gym"], **CONTACT))
-    assert "(공고문)" not in _text(client.get(f"/project/{ids['gym']}"))
+    assert '<span class="auto">공고문</span>' not in _text(client.get(f"/project/{ids['gym']}"))
 
 
 def test_renaming_the_department_leaves_contacts_alone_and_says_so(world):
@@ -2069,7 +2070,7 @@ def test_the_project_form_saves_the_winner_and_shows_it_in_the_project_table(wor
     assert resp.status_code == 302
     page = _text(client.get(resp.headers["Location"]))
     assert "바꾼 칸: 낙찰업체·낙찰일" in page
-    assert "<th>낙찰업체</th><td>이관건축</td>" in page
+    assert "<dt>낙찰업체</dt><dd>이관건축</dd>" in page
 
 
 def test_picking_an_imported_candidate_fills_the_empty_head_fields(world):
@@ -2137,3 +2138,14 @@ def test_every_page_links_to_the_renewable_energy_centre_site(world):
     assert link is not None
     assert 'target="_blank"' in link.group(0) and 'rel="noopener noreferrer"' in link.group(0)
     assert "신재생에너지센터" in page
+
+
+def test_stylesheets_and_fonts_open_without_login(world):
+    """로그인 화면도 디자인 토큰·글꼴을 입어야 한다 — static은 PUBLIC_ENDPOINTS에 있다."""
+    path, _ = world
+    client = _app(path).test_client()
+    for name in ("css/tokens.css", "css/nara.css", "fonts/Pretendard-Regular.woff2"):
+        resp = client.get(f"/static/{name}")
+        assert resp.status_code == 200, name
+    tokens = _text(client.get("/static/css/tokens.css"))
+    assert 'url("../fonts/Pretendard-Regular.woff2")' in tokens

@@ -1,20 +1,36 @@
 {% extends "base.html" %}
+{% from "_macros.html" import nr_badge %}
 {% block title %}설치계획{% endblock %}
 {% block body %}
-<h1>설치계획</h1>
-<p class="muted">크롬 확장 프로그램이 신재생에너지센터에서 보낸 설치계획서입니다. 확인 필요 건은 사업을 골라 연결하세요.</p>
-<p>{% for key, label in labels.items() %}<a href="{{ url_for('nr_list', state=key) }}"{% if key == state %} aria-current="page"{% endif %}>{{ label }} {{ counts.get(key, 0) }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
-<div class="table-wrap"><table>
-<thead><tr><th>기관명</th><th>건물명</th><th>준공예정일</th><th>연결된 사업</th><th>점수</th><th>받은 때</th></tr></thead>
-<tbody>
-{% for n in rows %}
-<tr><td>{{ n.org_name }}</td><td><a href="{{ url_for('nr_detail', plan_id=n.id) }}">{{ n.building_name }}</a></td>
-<td>{{ n.end_date|dash }}</td>
-<td>{% if n.project_id %}<a href="{{ url_for('detail', project_id=n.project_id) }}">{{ n.project_name }}</a>{% else %}—{% endif %}</td>
-<td>{{ '%.2f'|format(n.match_score) if n.match_score is not none else '—' }}</td><td>{{ n.updated_at[:10] }}</td></tr>
-{% else %}
-<tr><td colspan="6" class="muted">{{ labels[state] }} 설치계획서가 없습니다</td></tr>
-{% endfor %}
-</tbody>
-</table></div>
+<div class="page__head">
+  <div class="page__title">
+    <h1>설치계획</h1>
+    <p class="muted">크롬 확장 프로그램이 신재생에너지센터에서 보낸 설치계획서입니다. 확인 필요 건은 사업을 골라 연결하세요.</p>
+  </div>
+  <a class="btn btn--sm btn--quiet" href="https://nr.energy.or.kr/C0/CST_C0/login.do" target="_blank" rel="noopener noreferrer">신재생에너지센터 열기 ↗</a>
+</div>
+<nav class="segmented" aria-label="연결 상태">
+  {% for key, label in labels.items() %}<a href="{{ url_for('nr_list', state=key) }}"{% if key == state %} aria-current="page"{% endif %}>{{ label }} <span class="n{% if key == 'pending' and counts.get(key, 0) %} n--alert{% endif %}">{{ counts.get(key, 0) }}</span></a>{% endfor %}
+</nav>
+<section class="panel panel--flush" aria-label="설치계획서 목록">
+  <div class="resultbar"><span class="resultbar__count">{{ labels[state] }} {{ rows|length }}건</span><span class="muted">점수는 기관·건물명·준공예정일이 사업과 얼마나 맞는지입니다(1에 가까울수록 같음).</span></div>
+  <div class="table-wrap"><table class="table">
+  <thead><tr><th>기관명</th><th>건물명</th><th>준공예정일</th><th>연결된 사업</th><th>점수</th><th>받은 때</th><th class="col-num"></th></tr></thead>
+  <tbody>
+  {% for n in rows %}
+  <tr>
+    <td>{{ n.org_name }}</td>
+    <td><a class="title" href="{{ url_for('nr_detail', plan_id=n.id) }}">{{ n.building_name }}</a></td>
+    <td class="col-date">{{ n.end_date|dash }}</td>
+    <td>{% if n.project_id %}<a href="{{ url_for('detail', project_id=n.project_id) }}">{{ n.project_name }}</a>{% elif n.match_state == 'pending' %}{{ nr_badge('pending', '연결 전') }}{% else %}—{% endif %}</td>
+    <td>{% if n.match_score is not none %}<span class="meter{% if n.match_score < 0.5 %} meter--low{% endif %}"><span class="meter__bar"><span class="meter__fill" style="width:{{ (n.match_score * 100)|round|int }}%"></span></span>{{ '%.2f'|format(n.match_score) }}</span>{% else %}—{% endif %}</td>
+    <td class="col-date">{{ n.updated_at[:10] }}</td>
+    <td class="col-num">{% if not n.project_id and n.match_state != 'ignored' %}<a class="btn btn--sm btn--secondary" href="{{ url_for('nr_detail', plan_id=n.id) }}">연결하기</a>{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7" class="empty">{{ labels[state] }} 설치계획서가 없습니다</td></tr>
+  {% endfor %}
+  </tbody>
+  </table></div>
+</section>
 {% endblock %}
