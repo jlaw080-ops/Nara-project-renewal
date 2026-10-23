@@ -1,278 +1,360 @@
 {% extends "base.html" %}
-{% macro err(key) %}{% if errors.get(key) %}<span class="field-error">{{ errors[key] }}</span>{% endif %}{% endmacro %}
+{% from "_macros.html" import verdict_badge %}
+{% macro err(key) %}{% if errors.get(key) %}<span class="field__error">{{ errors[key] }}</span>{% endif %}{% endmacro %}
+{% macro invalid(key) %}{% if errors.get(key) %} aria-invalid="true"{% endif %}{% endmacro %}
 {% macro val(key, current) %}{{ form.get(key, current if current is not none else '') }}{% endmacro %}
-{% macro edit_link(section) %}{% if edit != section %}<a class="edit-link" href="{{ url_for('detail', project_id=d.project.id, edit=section) }}">고치기</a>{% endif %}{% endmacro %}
-{% macro buttons() %}<p><button type="submit">저장</button> <a href="{{ url_for('detail', project_id=d.project.id) }}">취소</a></p>{% endmacro %}
+{% macro edit_link(section) %}{% if edit != section %}<a class="btn btn--sm btn--quiet edit-link" href="{{ url_for('detail', project_id=d.project.id, edit=section) }}">고치기</a>{% endif %}{% endmacro %}
+{% macro form_actions() %}<div class="form-actions"><a class="btn btn--quiet" href="{{ url_for('detail', project_id=d.project.id) }}">취소</a><button type="submit" class="btn">저장</button></div>{% endmacro %}
+{% macro tel(number) %}{% if number %}<a class="person__tel" href="tel:{{ number|replace('-', '') }}">{{ number }}</a>{% else %}<span class="person__tel muted">—</span>{% endif %}{% endmacro %}
 {% block title %}{{ d.project.name }}{% endblock %}
 {% block body %}
-<p><a href="{{ url_for('index') }}{% if list_query %}?{{ list_query }}{% endif %}">← 목록으로</a></p>
-<h1>{{ d.project.name }}</h1>
-<p class="muted">{{ d.project.org_name }} · 출처 {{ d.project.source }}</p>
-<form method="post" class="inline" action="{{ url_for('refresh', project_id=d.project.id) }}">
-  <button type="submit">이 사업 다시 조회</button>
-  <span class="muted">낙찰 · 진행현황 · 실행부서를 이 사업만 바로 다시 봅니다. 사람이 확정한 값은 그대로 둡니다.</span>
-  {% if d.refresh %}<span class="{{ '' if d.refresh.healthy else 'bad' }}">다시 조회 {{ d.refresh.started_at|dash }} {{ d.refresh.status_label }}</span>{% endif %}
-</form>
-{% if saved == '-' %}<p class="saved">바뀐 값이 없습니다</p>
-{% elif saved %}<p class="saved">바꾼 칸: {{ saved }}</p>{% endif %}
-{% if released %}<p class="saved">자동 판정에 다시 맡겼습니다</p>{% endif %}
-{% if d.project.hidden_at %}
-<div class="saved">목록에서 숨긴 사업 — {{ d.project.hidden_at[:10] }} · {{ d.project.hidden_by_name or '—' }}{% if d.project.hidden_reason %} · {{ d.project.hidden_reason }}{% endif %}. 자동 판정·실행부서 찾기를 건너뜁니다.
-  <form method="post" class="inline" action="{{ url_for('unhide_one', project_id=d.project.id) }}"><button type="submit">숨김 풀기</button></form></div>
-{% else %}
-<form method="post" class="hide-one" action="{{ url_for('hide_one', project_id=d.project.id) }}">
-  <label>숨기는 이유(선택) <input type="text" name="hide_reason" maxlength="200"></label>
-  <button type="submit">목록에서 숨기기</button>
-</form>
-{% endif %}
-{% if errors.get('_form') %}<p class="bad">{{ errors['_form'] }}</p>{% endif %}
+<a class="crumb" href="{{ url_for('index') }}{% if list_query %}?{{ list_query }}{% endif %}">← 목록으로</a>
 
-<h2>사업{{ edit_link('info') }}</h2>
-{% if edit == 'info' %}
-<form method="post" class="edit-form" action="{{ url_for('save', project_id=d.project.id, section='info') }}">
-  <input type="hidden" name="version" value="{{ versions['info'] }}">
-  {% for key, label, kind in info_fields %}
-  <label>{{ label }}
-    {% if kind == 'long' %}<textarea name="{{ key }}" rows="4">{{ val(key, d.project[key]) }}</textarea>
-    {% else %}<input type="{{ 'date' if kind == 'date' else 'text' }}" name="{{ key }}" value="{{ val(key, d.project[key]) }}">{% endif %}
-    {{ err(key) }}
-  </label>
-  {% endfor %}
-  {{ buttons() }}
-</form>
-{% else %}
-<div class="table-wrap"><table>
-  {% for key, label, kind in info_fields %}
-  <tr><th>{{ label }}</th><td>{{ d.project[key]|dash }}</td></tr>
-  {% endfor %}
-</table></div>
-{% endif %}
+{% if saved == '-' %}<div class="notice notice--success" role="status"><span class="notice__title">저장됨</span><span>바뀐 값이 없습니다</span></div>
+{% elif saved %}<div class="notice notice--success" role="status"><span class="notice__title">저장됨</span><span>바꾼 칸: {{ saved }}</span></div>{% endif %}
+{% if released %}<div class="notice notice--success" role="status"><span class="notice__title">저장됨</span><span>자동 판정에 다시 맡겼습니다</span></div>{% endif %}
+{% if errors.get('_form') %}<div class="notice notice--danger" role="alert"><span class="notice__title">오류</span><span>{{ errors['_form'] }}</span></div>{% endif %}
 
-<h2>공고 {{ d.notices|length }}건</h2>
-{% if d.notices %}
-<div class="table-wrap"><table>
-<thead><tr><th>공고명</th><th>공고일</th><th>개찰일</th><th>마감일</th><th>예산</th><th>담당자</th><th>낙찰업체</th><th>낙찰일</th></tr></thead>
-<tbody>
-{% for n in d.notices %}
-<tr>
-  <td>{% if n.url %}<a href="{{ n.url }}" rel="noopener noreferrer" target="_blank">{{ n.title }}</a>{% else %}{{ n.title }}{% endif %}</td>
-  <td>{{ n.notice_date|dash }}</td>
-  <td>{{ n.open_date|dash }}</td>
-  <td>{{ n.close_date|dash }}</td>
-  <td>{{ n.budget_krw|won }}</td>
-  <td>{{ n.officer_name|dash }}{% if n.officer_tel %} <span class="muted">{{ n.officer_tel }}</span>{% endif %}</td>
-  <td>{{ n.winner|dash }}</td>
-  <td>{{ n.award_date|dash }}</td>
-</tr>
-{% endfor %}
-</tbody>
-</table></div>
-{% if d.attachments %}
-<p class="muted">받아 둔 첨부 {{ d.attachments|length }}건</p>
-<ul>
-{% for a in d.attachments %}
-  <li><a href="{{ url_for('attachment', attachment_id=a.id) }}">{{ a.filename }}</a> <span class="muted">{{ a.bid_no }} · {{ a.downloaded_at }}</span></li>
-{% endfor %}
-</ul>
-{% endif %}
-{% else %}
-<p class="muted">공고가 없습니다{% if d.project.source == 'manual' %} — 시트에서 이관한 사업입니다{% endif %}</p>
-{% endif %}
-
-<h2>진행현황 이력 {{ d.history|length }}건{{ edit_link('verdict') }}</h2>
-{% if d.locked %}
-<div class="saved">사람 판정 — 자동 판정이 이 사업을 건너뜁니다.
-  <form method="post" class="inline" action="{{ url_for('release', project_id=d.project.id) }}"><button type="submit">자동 판정에 다시 맡기기</button></form>
-</div>
-{% endif %}
-{% if edit == 'verdict' %}
-<form method="post" class="edit-form" action="{{ url_for('save', project_id=d.project.id, section='verdict') }}">
-  <input type="hidden" name="version" value="{{ versions['verdict'] }}">
-  <label>판정
-    <select name="verdict">
-      {% for v in verdict_choices %}
-      <option value="{{ v }}"{% if form.get('verdict', d.history[0].verdict if d.history else '') == v %} selected{% endif %}>{{ v }}</option>
-      {% endfor %}
-    </select>
-    {{ err('verdict') }}
-  </label>
-  <label>사유 <textarea name="reason" rows="3">{{ form.get('reason', '') }}</textarea>{{ err('reason') }}</label>
-  {{ buttons() }}
-</form>
-{% endif %}
-{% if d.history %}
-<div class="table-wrap"><table>
-<thead><tr><th>시각</th><th>판정</th><th>판정 주체</th><th>사유</th><th>근거</th></tr></thead>
-<tbody>
-{% for h in d.history %}
-<tr>
-  <td>{{ h.checked_at }}</td>
-  <td>{{ h.verdict }}</td>
-  <td>{{ h.decided_by }}</td>
-  <td>{{ h.reason|dash }}</td>
-  <td>{% if h.evidence_url %}<a href="{{ h.evidence_url }}" rel="noopener noreferrer" target="_blank">기사</a>{% else %}—{% endif %}</td>
-</tr>
-{% endfor %}
-</tbody>
-</table></div>
-{% else %}
-<p class="muted">판정 전입니다</p>
-{% endif %}
-
-<h2>실행부서{{ edit_link('dept') }}</h2>
-{% if edit == 'dept' %}
-<form method="post" class="edit-form" action="{{ url_for('save', project_id=d.project.id, section='dept') }}">
-  <input type="hidden" name="version" value="{{ versions['dept'] }}">
-  {% if dept_candidates %}
-  <fieldset><legend>후보에서 고르기 <span class="muted">후보에 부서장이 적혀 있으면 아래 빈 부서장 칸을 채웁니다</span></legend>
-    {% for c in dept_candidates %}
-    <label class="choice"><input type="radio" name="pick" value="{{ c.id }}"{% if form.get('pick') == c.id|string %} checked{% endif %}> {{ c.exec_dept }}{% if c.snippet %} <span class="muted">— {{ c.snippet }}</span>{% endif %}{% if c.head_tel %} <span class="muted">· {{ c.head_tel }}</span>{% endif %}</label>
-    {% endfor %}
-  </fieldset>
+{% set first = d.notices[0] if d.notices else none %}
+<section class="panel detail-head" aria-label="사업 요약">
+  <div class="detail-head__top">
+    <div class="detail-head__title">
+      <h1>{{ d.project.name }}</h1>
+      <div class="detail-head__meta">
+        <span>{{ d.project.org_name }}</span><span aria-hidden="true">·</span>
+        <span>출처 {{ d.project.source }}</span><span aria-hidden="true">·</span>
+        {{ verdict_badge(d.history[0].verdict if d.history else none, 'human' if d.locked else none) }}
+      </div>
+    </div>
+    <div class="detail-head__actions">
+      <form method="post" class="inline" action="{{ url_for('refresh', project_id=d.project.id) }}"><button type="submit" class="btn btn--secondary">이 사업 다시 조회</button></form>
+      {% if not d.project.hidden_at %}
+      <details class="hide-pop">
+        <summary class="btn btn--quiet">목록에서 숨기기</summary>
+        <form method="post" class="hide-pop__form" action="{{ url_for('hide_one', project_id=d.project.id) }}">
+          <label class="field"><span class="field__label">숨기는 이유(선택)</span><input class="input input--sm" type="text" name="hide_reason" maxlength="200"></label>
+          <button type="submit" class="btn btn--sm">목록에서 숨기기</button>
+        </form>
+      </details>
+      {% endif %}
+    </div>
+  </div>
+  {% if d.project.hidden_at %}
+  <div class="notice notice--warning"><span class="notice__title">숨김</span>
+    <span>목록에서 숨긴 사업 — {{ d.project.hidden_at[:10] }} · {{ d.project.hidden_by_name or '—' }}{% if d.project.hidden_reason %} · {{ d.project.hidden_reason }}{% endif %}. 자동 판정·실행부서 찾기를 건너뜁니다.</span>
+    <form method="post" class="inline" action="{{ url_for('unhide_one', project_id=d.project.id) }}"><button type="submit" class="btn btn--sm btn--secondary">숨김 풀기</button></form>
+  </div>
   {% endif %}
-  <label>실행부서 <span class="muted">후보를 고르면 이 칸이 그대로여도 후보를 씁니다. 다른 부서는 여기에 직접 적으세요</span>
-    <input type="text" name="exec_dept" value="{{ form.get('exec_dept', d.exec_dept or '') }}">{{ err('exec_dept') }}
-  </label>
-  <label>근거 문장 <textarea name="snippet" rows="3">{{ form.get('snippet', d.exec_snippet or '') }}</textarea>{{ err('snippet') }}</label>
-  {% set c = d.contact %}
-  <fieldset><legend>부서장</legend>
-    <label>이름 <input type="text" name="head_name" value="{{ val('head_name', c.head_name if c else none) }}">{{ err('head_name') }}</label>
-    <label>직위 <input type="text" name="head_position" value="{{ val('head_position', c.head_position if c else none) }}">{{ err('head_position') }}</label>
-    <label>직통번호 <input type="text" name="head_tel" inputmode="tel" value="{{ val('head_tel', c.head_tel if c else none) }}">{{ err('head_tel') }}</label>
-  </fieldset>
-  <fieldset><legend>실무 담당자{% if d.contact_auto %} <span class="muted">(공고문) 표시는 공고문에서 읽은 값입니다. 저장하면 확인한 값이 됩니다</span>{% endif %}</legend>
-    <label>이름{% if 'staff_name' in d.contact_auto %} <span class="muted">(공고문)</span>{% endif %} <input type="text" name="staff_name" value="{{ val('staff_name', c.staff_name if c else none) }}">{{ err('staff_name') }}</label>
-    <label>직위{% if 'staff_position' in d.contact_auto %} <span class="muted">(공고문)</span>{% endif %} <input type="text" name="staff_position" value="{{ val('staff_position', c.staff_position if c else none) }}">{{ err('staff_position') }}</label>
-    <label>직통번호{% if 'staff_tel' in d.contact_auto %} <span class="muted">(공고문)</span>{% endif %} <input type="text" name="staff_tel" inputmode="tel" value="{{ val('staff_tel', c.staff_tel if c else none) }}">{{ err('staff_tel') }}</label>
-  </fieldset>
-  <p class="muted">연락처는 {{ d.project.org_name }}의 그 부서 공통입니다. 같은 부서가 실행부서인 사업에 모두 보입니다.</p>
-  {{ buttons() }}
-</form>
-{% endif %}
-{% if d.exec_dept %}
-{% set c = d.contact %}
-<p>부서장 <strong>{{ (c.head_name if c else none)|dash }}</strong> · {{ (c.head_position if c else none)|dash }} · {{ (c.head_tel if c else none)|dash }}<br>
-실무 담당자 <strong>{{ (c.staff_name if c else none)|dash }}</strong>{% if 'staff_name' in d.contact_auto %} <span class="muted">(공고문)</span>{% endif %} · {{ (c.staff_position if c else none)|dash }}{% if 'staff_position' in d.contact_auto %} <span class="muted">(공고문)</span>{% endif %} · {{ (c.staff_tel if c else none)|dash }}{% if 'staff_tel' in d.contact_auto %} <span class="muted">(공고문)</span>{% endif %}<br>
-<span class="muted">— {{ d.project.org_name }} {{ d.exec_dept }} 공통{% if c %} · {{ c.updated_at[:10] }} {{ c.updated_by_name or '' }}{% endif %}</span></p>
-{% else %}
-<p class="muted">실행부서를 확정하면 연락처를 적을 수 있습니다</p>
-{% endif %}
-{% if d.depts %}
-<div class="table-wrap"><table>
-<thead><tr><th>실행부서</th><th>상태</th><th>판정</th><th>계약부서</th><th>근거 문장</th><th>출처</th><th>사유</th><th>조회 시각</th></tr></thead>
-<tbody>
-{% for p in d.depts %}
-<tr>
-  <td>{{ p.exec_dept|dash }}</td>
-  <td>{% if p.confirmed %}확정{% elif p.exec_dept %}후보{% else %}—{% endif %}</td>
-  <td>{{ p.by_label }}</td>
-  <td>{{ p.contract_dept|dash }}</td>
-  <td>{{ p.snippet|dash }}</td>
-  <td>{{ p.source_file|dash }}</td>
-  <td>{{ p.note|dash }}</td>
-  <td>{{ p.checked_at }}</td>
-</tr>
-{% endfor %}
-</tbody>
-</table></div>
-{% else %}
-<p class="muted">실행부서 조회 기록이 없습니다</p>
-{% endif %}
+  <div class="runs">
+    {% if d.refresh %}<span class="run{% if not d.refresh.healthy %} run--fail{% elif d.refresh.status_label == '실행 중' %} run--running{% endif %}">다시 조회 {{ d.refresh.started_at|dash }} {{ d.refresh.status_label }}</span>{% endif %}
+    <span class="muted">낙찰 · 진행현황 · 실행부서를 이 사업만 바로 다시 봅니다. 사람이 확정한 값은 그대로 둡니다.</span>
+  </div>
+  <dl class="facts">
+    <div><dt>공고일</dt><dd>{{ (first.notice_date if first else none)|dash }}</dd></div>
+    <div><dt>개찰일</dt><dd>{{ (first.open_date if first else none)|dash }}</dd></div>
+    <div><dt>예산</dt><dd>{{ (first.budget_krw if first else none)|won }}</dd></div>
+    <div><dt>낙찰업체</dt><dd>{{ (d.project.winner or (first.winner if first else none))|dash }}</dd></div>
+    <div><dt>실행부서</dt><dd>{{ d.exec_dept|dash }}</dd></div>
+    <div><dt>신재생 설치비</dt><dd>{% if d.energy %}{{ d.energy_total|won }}{% else %}—{% endif %}</dd></div>
+  </dl>
+</section>
 
-<h2>신재생 계획{{ edit_link('energy') }}</h2>
-{% if edit == 'energy' %}
-<form method="post" class="edit-form" action="{{ url_for('save', project_id=d.project.id, section='energy') }}">
-  <input type="hidden" name="version" value="{{ versions['energy'] }}">
-  <p class="muted">줄을 비우면 지워집니다. 빈 줄에 적으면 더해집니다. 설치비는 용량 × <a href="{{ url_for('prices') }}">단가</a>입니다.</p>
-  {% for source, kind, capacity in energy_rows %}
-  <div class="energy-row">
-    <label>에너지원 <select name="source" class="energy-source">
-      <option value="">고르세요</option>
-      {% for s in energy_sources %}<option value="{{ s }}"{% if s == source %} selected{% endif %}>{{ s }}</option>
+<nav class="tabs" aria-label="이 사업 안에서 이동">
+  <a href="#info">사업</a>
+  <a href="#notices">공고<span class="count">{{ d.notices|length }}</span></a>
+  <a href="#verdict">진행현황<span class="count">{{ d.history|length }}</span></a>
+  <a href="#dept">실행부서</a>
+  <a href="#energy">신재생 계획<span class="count">{{ d.energy|length }}</span></a>
+  <a href="#nr">설치계획서<span class="count">{{ d.nr_plans|length }}</span></a>
+  <a href="#edits">수정 이력<span class="count">{{ d.edits|length }}</span></a>
+</nav>
+
+<div class="split">
+<div class="stack">
+
+<section class="panel panel--flush{% if edit == 'info' %} panel--editing{% endif %}" id="info">
+  <div class="section-head"><h2>사업{% if edit == 'info' %} 고치기{% endif %}</h2><div class="section-head__end">{{ edit_link('info') }}</div></div>
+  {% if edit == 'info' %}
+  <form method="post" action="{{ url_for('save', project_id=d.project.id, section='info') }}">
+    <input type="hidden" name="version" value="{{ versions['info'] }}">
+    <div class="section-body"><div class="form-grid">
+      {% for key, label, kind in info_fields %}
+      <label class="field{% if kind == 'long' %} wide{% endif %}"><span class="field__label">{{ label }}</span>
+        {% if kind == 'long' %}<textarea class="input" name="{{ key }}" rows="4"{{ invalid(key) }}>{{ val(key, d.project[key]) }}</textarea>
+        {% else %}<input class="input" type="{{ 'date' if kind == 'date' else 'text' }}" name="{{ key }}" value="{{ val(key, d.project[key]) }}"{{ invalid(key) }}>{% endif %}
+        {{ err(key) }}
+      </label>
       {% endfor %}
-    </select>{{ err('source-' ~ loop.index0) }}</label>
-    <label>형식 <select name="kind" class="energy-kind">
-      <option value="">고르세요</option>
-      {% for k in energy_kinds %}<option value="{{ k.code }}" data-source="{{ k.source }}" data-price="{{ prices.get(k.code) or '' }}"{% if k.code == kind %} selected{% endif %}>{{ k.form }}</option>
+    </div></div>
+    {{ form_actions() }}
+  </form>
+  {% else %}
+  <div class="section-body"><dl class="dl">
+    {% for key, label, kind in info_fields %}
+    <div{% if kind == 'long' %} class="wide"{% endif %}><dt>{{ label }}</dt><dd>{{ d.project[key]|dash }}</dd></div>
+    {% endfor %}
+  </dl></div>
+  {% endif %}
+</section>
+
+<section class="panel panel--flush" id="notices">
+  <div class="section-head"><h2>공고 {{ d.notices|length }}건</h2></div>
+  {% if d.notices %}
+  <div class="table-wrap"><table class="table">
+  <thead><tr><th>공고명</th><th>공고일</th><th>개찰일</th><th>마감일</th><th class="col-num">예산</th><th>담당자</th><th>낙찰업체</th><th>낙찰일</th></tr></thead>
+  <tbody>
+  {% for n in d.notices %}
+  <tr>
+    <td>{% if n.url %}<a href="{{ n.url }}" rel="noopener noreferrer" target="_blank">{{ n.title }} ↗</a>{% else %}{{ n.title }}{% endif %}</td>
+    <td class="col-date">{{ n.notice_date|dash }}</td>
+    <td class="col-date">{{ n.open_date|dash }}</td>
+    <td class="col-date">{{ n.close_date|dash }}</td>
+    <td class="col-num">{{ n.budget_krw|won }}</td>
+    <td class="col-date">{{ n.officer_name|dash }}{% if n.officer_tel %} <span class="muted">{{ n.officer_tel }}</span>{% endif %}</td>
+    <td>{{ n.winner|dash }}</td>
+    <td class="col-date">{{ n.award_date|dash }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+  </table></div>
+  {% if d.attachments %}
+  <div class="files"><span class="muted">받아 둔 첨부 {{ d.attachments|length }}건</span>
+    {% for a in d.attachments %}
+    <a class="file" href="{{ url_for('attachment', attachment_id=a.id) }}" title="{{ a.bid_no }} · {{ a.downloaded_at }}">{% if '.' in a.filename %}<span class="file__ext">{{ a.filename.rsplit('.', 1)[-1]|upper }}</span>{% endif %}{{ a.filename }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% else %}
+  <p class="empty">공고가 없습니다{% if d.project.source == 'manual' %} — 시트에서 이관한 사업입니다{% endif %}</p>
+  {% endif %}
+</section>
+
+<section class="panel panel--flush{% if edit == 'verdict' %} panel--editing{% endif %}" id="verdict">
+  <div class="section-head"><h2>진행현황 이력 {{ d.history|length }}건{% if edit == 'verdict' %} 고치기{% endif %}</h2><div class="section-head__end">{{ edit_link('verdict') }}</div></div>
+  {% if d.locked %}
+  <div class="panel__inset"><div class="notice"><span class="notice__title">사람 판정</span><span>자동 판정이 이 사업을 건너뜁니다.</span>
+    <form method="post" class="inline notice__end" action="{{ url_for('release', project_id=d.project.id) }}"><button type="submit" class="btn btn--sm btn--secondary">자동 판정에 다시 맡기기</button></form></div></div>
+  {% endif %}
+  {% if edit == 'verdict' %}
+  <form method="post" action="{{ url_for('save', project_id=d.project.id, section='verdict') }}">
+    <input type="hidden" name="version" value="{{ versions['verdict'] }}">
+    <div class="section-body"><div class="form-grid">
+      <label class="field"><span class="field__label">판정</span>
+        <select class="select" name="verdict"{{ invalid('verdict') }}>
+          {% for v in verdict_choices %}
+          <option value="{{ v }}"{% if form.get('verdict', d.history[0].verdict if d.history else '') == v %} selected{% endif %}>{{ v }}</option>
+          {% endfor %}
+        </select>
+        {{ err('verdict') }}
+      </label>
+      <label class="field wide"><span class="field__label">사유</span><textarea class="input" name="reason" rows="3"{{ invalid('reason') }}>{{ form.get('reason', '') }}</textarea>{{ err('reason') }}</label>
+    </div></div>
+    {{ form_actions() }}
+  </form>
+  {% endif %}
+  {% if d.history %}
+  <div class="table-wrap"><table class="table">
+  <thead><tr><th>시각</th><th>판정</th><th>판정 주체</th><th>사유</th><th>근거</th></tr></thead>
+  <tbody>
+  {% for h in d.history %}
+  <tr>
+    <td class="col-date">{{ h.checked_at }}</td>
+    <td>{{ verdict_badge(h.verdict) }}</td>
+    <td>{{ h.decided_by }}</td>
+    <td>{{ h.reason|dash }}</td>
+    <td>{% if h.evidence_url %}<a href="{{ h.evidence_url }}" rel="noopener noreferrer" target="_blank">기사</a>{% else %}—{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+  </table></div>
+  {% else %}
+  <p class="empty">판정 전입니다</p>
+  {% endif %}
+</section>
+
+<section class="panel panel--flush{% if edit == 'energy' %} panel--editing{% endif %}" id="energy">
+  <div class="section-head"><h2>신재생 계획{% if edit == 'energy' %} 고치기{% endif %}</h2>{% if d.energy %}<span class="count">{{ d.energy|length }}건</span>{% endif %}<div class="section-head__end">{{ edit_link('energy') }}</div></div>
+  {% if edit == 'energy' %}
+  <form method="post" action="{{ url_for('save', project_id=d.project.id, section='energy') }}">
+    <input type="hidden" name="version" value="{{ versions['energy'] }}">
+    <div class="section-body stack-form">
+      <p class="muted">줄을 비우면 지워집니다. 빈 줄에 적으면 더해집니다. 설치비는 용량 × <a href="{{ url_for('prices') }}">단가</a>입니다.</p>
+      {% for source, kind, capacity in energy_rows %}
+      <div class="energy-row">
+        <label class="field"><span class="field__label">에너지원</span><select class="select energy-source" name="source"{{ invalid('source-' ~ loop.index0) }}>
+          <option value="">고르세요</option>
+          {% for s in energy_sources %}<option value="{{ s }}"{% if s == source %} selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>{{ err('source-' ~ loop.index0) }}</label>
+        <label class="field"><span class="field__label">형식</span><select class="select energy-kind" name="kind"{{ invalid('kind-' ~ loop.index0) }}>
+          <option value="">고르세요</option>
+          {% for k in energy_kinds %}<option value="{{ k.code }}" data-source="{{ k.source }}" data-price="{{ prices.get(k.code) or '' }}"{% if k.code == kind %} selected{% endif %}>{{ k.form }}</option>
+          {% endfor %}
+        </select>{{ err('kind-' ~ loop.index0) }}</label>
+        <label class="field"><span class="field__label">용량(kW)</span><input class="input input--num" type="text" name="capacity" value="{{ capacity }}" inputmode="decimal"{{ invalid('capacity-' ~ loop.index0) }}>{{ err('capacity-' ~ loop.index0) }}</label>
+        <p class="energy-cost-box"><span class="field__label">설치비</span><output class="energy-cost">-</output></p>
+      </div>
       {% endfor %}
-    </select>{{ err('kind-' ~ loop.index0) }}</label>
-    <label>용량(kW) <input type="text" name="capacity" value="{{ capacity }}" inputmode="decimal">{{ err('capacity-' ~ loop.index0) }}</label>
-    <p class="energy-cost-box">설치비 <output class="energy-cost">-</output></p>
+    </div>
+    {{ form_actions() }}
+  </form>
+  <script>
+  (function () {
+    // 고른 에너지원의 형식만 남기고, 용량 × 단가를 바로 보인다. 저장할 때 서버가 다시 검사·계산한다.
+    function update(row) {
+      var source = row.querySelector(".energy-source").value;
+      var kind = row.querySelector(".energy-kind");
+      Array.prototype.forEach.call(kind.options, function (o) {
+        var other = o.value !== "" && o.dataset.source !== source;
+        o.hidden = other;
+        o.disabled = other;
+      });
+      if (kind.selectedOptions[0] && kind.selectedOptions[0].disabled) { kind.value = ""; }
+      var opt = kind.selectedOptions[0];
+      var cap = parseFloat(row.querySelector("[name=capacity]").value.replace(/,/g, ""));
+      var price = opt && opt.dataset.price ? Number(opt.dataset.price) : NaN;
+      var out = row.querySelector(".energy-cost");
+      if (opt && opt.value && !opt.dataset.price) { out.textContent = "단가 없음"; }
+      else if (cap > 0 && price > 0) { out.textContent = Math.round(cap * price).toLocaleString("ko-KR") + "원"; }
+      else { out.textContent = "-"; }
+    }
+    document.querySelectorAll(".energy-row").forEach(function (row) {
+      row.addEventListener("input", function () { update(row); });
+      row.addEventListener("change", function () { update(row); });
+      update(row);
+    });
+  })();
+  </script>
+  {% endif %}
+  {% if d.energy %}
+  <div class="table-wrap"><table class="table">
+  <thead><tr><th>에너지원</th><th>형식</th><th>용량</th><th>설치비</th></tr></thead>
+  <tbody>
+  {% for e in d.energy %}
+  {% set k = kinds_by_code.get(e.source_type) %}<tr><td>{{ k.source if k else e.source_type }}</td><td>{{ k.form if k else '-' }}</td><td>{{ e.capacity_kw }} kW</td><td>{{ e.cost|won }}</td></tr>
+  {% endfor %}
+  </tbody>
+  </table></div>
+  <div class="sum"><span>합계</span><span class="sum__value">{{ d.energy_total|won }}</span></div>
+  {% if d.energy_unpriced %}
+  <div class="panel__inset panel__inset--bottom"><div class="notice notice--warning"><span class="notice__title">주의</span><span>단가가 없어 합계에서 빠짐: {{ d.energy_unpriced|join(', ') }}</span></div></div>
+  {% endif %}
+  {% else %}
+  <p class="empty">신재생 계획이 없습니다</p>
+  {% endif %}
+</section>
+
+</div>
+<aside class="split__side">
+
+<section class="panel panel--flush{% if edit == 'dept' %} panel--editing{% endif %}" id="dept">
+  <div class="section-head"><h2>실행부서{% if edit == 'dept' %} 고치기{% endif %}</h2><div class="section-head__end">{{ edit_link('dept') }}</div></div>
+  {% if edit == 'dept' %}
+  {% set c = d.contact %}
+  <form method="post" action="{{ url_for('save', project_id=d.project.id, section='dept') }}">
+    <input type="hidden" name="version" value="{{ versions['dept'] }}">
+    <div class="section-body stack-form">
+      {% if dept_candidates %}
+      <div><p class="group-title">후보에서 고르기 <span class="muted">후보에 부서장이 적혀 있으면 아래 빈 부서장 칸을 채웁니다</span></p>
+        <div class="candidates">
+          {% for cand in dept_candidates %}
+          <label class="candidate"><input type="radio" name="pick" value="{{ cand.id }}"{% if form.get('pick') == cand.id|string %} checked{% endif %}><span class="candidate__name">{{ cand.exec_dept }}</span>
+            {% if cand.snippet %}<span class="candidate__quote">{{ cand.snippet }}</span>{% endif %}
+            {% if cand.head_tel or cand.source_file %}<span class="candidate__meta">{% if cand.source_file %}{{ cand.source_file }}{% endif %}{% if cand.source_file and cand.head_tel %} · {% endif %}{% if cand.head_tel %}부서장 {{ cand.head_tel }}{% endif %}</span>{% endif %}
+          </label>
+          {% endfor %}
+        </div></div>
+      {% endif %}
+      <div class="form-grid form-grid--side">
+        <label class="field wide"><span class="field__label">실행부서</span>
+          <input class="input" type="text" name="exec_dept" value="{{ form.get('exec_dept', d.exec_dept or '') }}"{{ invalid('exec_dept') }}>{{ err('exec_dept') }}
+          <span class="field__help">후보를 고르면 이 칸이 그대로여도 후보를 씁니다. 다른 부서는 여기에 직접 적으세요</span></label>
+        <label class="field wide"><span class="field__label">근거 문장</span><textarea class="input" name="snippet" rows="3"{{ invalid('snippet') }}>{{ form.get('snippet', d.exec_snippet or '') }}</textarea>{{ err('snippet') }}</label>
+      </div>
+      <div><p class="group-title">부서장</p><div class="form-grid form-grid--side">
+        <label class="field"><span class="field__label">이름</span><input class="input" type="text" name="head_name" value="{{ val('head_name', c.head_name if c else none) }}"{{ invalid('head_name') }}>{{ err('head_name') }}</label>
+        <label class="field"><span class="field__label">직위</span><input class="input" type="text" name="head_position" value="{{ val('head_position', c.head_position if c else none) }}"{{ invalid('head_position') }}>{{ err('head_position') }}</label>
+        <label class="field"><span class="field__label">직통번호</span><input class="input num" type="text" name="head_tel" inputmode="tel" value="{{ val('head_tel', c.head_tel if c else none) }}"{{ invalid('head_tel') }}>{{ err('head_tel') }}</label>
+      </div></div>
+      <div><p class="group-title">실무 담당자{% if d.contact_auto %} <span class="auto">공고문</span> <span class="muted group-title__help">공고문에서 읽은 값입니다. 저장하면 확인한 값이 됩니다</span>{% endif %}</p><div class="form-grid form-grid--side">
+        <label class="field"><span class="field__label">이름{% if 'staff_name' in d.contact_auto %} <span class="auto">공고문</span>{% endif %}</span><input class="input" type="text" name="staff_name" value="{{ val('staff_name', c.staff_name if c else none) }}"{{ invalid('staff_name') }}>{{ err('staff_name') }}</label>
+        <label class="field"><span class="field__label">직위{% if 'staff_position' in d.contact_auto %} <span class="auto">공고문</span>{% endif %}</span><input class="input" type="text" name="staff_position" value="{{ val('staff_position', c.staff_position if c else none) }}"{{ invalid('staff_position') }}>{{ err('staff_position') }}</label>
+        <label class="field"><span class="field__label">직통번호{% if 'staff_tel' in d.contact_auto %} <span class="auto">공고문</span>{% endif %}</span><input class="input num" type="text" name="staff_tel" inputmode="tel" value="{{ val('staff_tel', c.staff_tel if c else none) }}"{{ invalid('staff_tel') }}>{{ err('staff_tel') }}</label>
+      </div></div>
+      <p class="muted">연락처는 {{ d.project.org_name }}의 그 부서 공통입니다. 같은 부서가 실행부서인 사업에 모두 보입니다.</p>
+    </div>
+    {{ form_actions() }}
+  </form>
+  {% endif %}
+  {% if d.exec_dept %}
+  {% set c = d.contact %}
+  <div class="section-body section-body--people">
+    <div class="dept-current"><strong>{{ d.exec_dept }}</strong><span class="badge badge--done">확정</span></div>
+    <div class="person"><span class="person__role">부서장{% if c and c.head_position %} · {{ c.head_position }}{% endif %}</span><span class="person__name">{{ (c.head_name if c else none)|dash }}</span>{{ tel(c.head_tel if c else none) }}</div>
+    <div class="person"><span class="person__role">실무 담당자{% if c and c.staff_position %} · {{ c.staff_position }}{% endif %}{% if d.contact_auto %} <span class="auto">공고문</span>{% endif %}</span><span class="person__name">{{ (c.staff_name if c else none)|dash }}</span>{{ tel(c.staff_tel if c else none) }}</div>
+    <p class="muted">{{ d.project.org_name }} {{ d.exec_dept }} 공통{% if c %} · {{ c.updated_at[:10] }} {{ c.updated_by_name or '' }}{% endif %}</p>
+  </div>
+  {% else %}
+  <p class="empty">실행부서를 확정하면 연락처를 적을 수 있습니다</p>
+  {% endif %}
+  {% if d.depts %}
+  <details class="details-row"><summary>조회 기록 {{ d.depts|length }}건</summary>
+  <div class="table-wrap"><table class="table">
+  <thead><tr><th>실행부서</th><th>상태</th><th>판정</th><th>계약부서</th><th>근거 문장</th><th>출처</th><th>사유</th><th>조회 시각</th></tr></thead>
+  <tbody>
+  {% for p in d.depts %}
+  <tr>
+    <td>{{ p.exec_dept|dash }}</td>
+    <td>{% if p.confirmed %}확정{% elif p.exec_dept %}후보{% else %}—{% endif %}</td>
+    <td>{{ p.by_label }}</td>
+    <td>{{ p.contract_dept|dash }}</td>
+    <td>{{ p.snippet|dash }}</td>
+    <td>{{ p.source_file|dash }}</td>
+    <td>{{ p.note|dash }}</td>
+    <td class="col-date">{{ p.checked_at }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+  </table></div>
+  </details>
+  {% else %}
+  <p class="details-row muted">실행부서 조회 기록이 없습니다</p>
+  {% endif %}
+</section>
+
+<section class="panel panel--flush" id="nr">
+  <div class="section-head"><h2>설치계획서</h2>{% if d.nr_plans %}<span class="count">{{ d.nr_plans|length }}건</span>{% endif %}</div>
+  {% if d.nr_plans %}
+  <div class="section-body section-body--list">
+  {% for n in d.nr_plans %}
+  <div class="nr-plan">
+    <a class="title" href="{{ url_for('nr_detail', plan_id=n.id) }}">{{ n.key }}</a>
+    <div class="muted">{{ n.building_name }} · {{ n.dept|dash }} · {{ n.updated_at[:10] }} 받음</div>
+    <div class="nr-plan__energy">{% for e in load_energy(n.energy_json) %}{{ e.source }} {{ e.form }} {{ e.capacity_kw }} kW{% if not loop.last %}<br>{% endif %}{% else %}—{% endfor %}</div>
+    <div><span class="badge badge--unknown">{{ n.match_state }}</span>{% if n.skipped %} <span class="bad">웹에서 고친 값이 있어 반영하지 않음: {{ n.skipped }}</span>{% endif %}</div>
   </div>
   {% endfor %}
-  {{ buttons() }}
-</form>
-<script>
-(function () {
-  // 고른 에너지원의 형식만 남기고, 용량 × 단가를 바로 보인다. 저장할 때 서버가 다시 검사·계산한다.
-  function update(row) {
-    var source = row.querySelector(".energy-source").value;
-    var kind = row.querySelector(".energy-kind");
-    Array.prototype.forEach.call(kind.options, function (o) {
-      var other = o.value !== "" && o.dataset.source !== source;
-      o.hidden = other;
-      o.disabled = other;
-    });
-    if (kind.selectedOptions[0] && kind.selectedOptions[0].disabled) { kind.value = ""; }
-    var opt = kind.selectedOptions[0];
-    var cap = parseFloat(row.querySelector("[name=capacity]").value.replace(/,/g, ""));
-    var price = opt && opt.dataset.price ? Number(opt.dataset.price) : NaN;
-    var out = row.querySelector(".energy-cost");
-    if (opt && opt.value && !opt.dataset.price) { out.textContent = "단가 없음"; }
-    else if (cap > 0 && price > 0) { out.textContent = Math.round(cap * price).toLocaleString("ko-KR") + "원"; }
-    else { out.textContent = "-"; }
-  }
-  document.querySelectorAll(".energy-row").forEach(function (row) {
-    row.addEventListener("input", function () { update(row); });
-    row.addEventListener("change", function () { update(row); });
-    update(row);
-  });
-})();
-</script>
-{% endif %}
-{% if d.energy %}
-<div class="table-wrap"><table>
-<thead><tr><th>에너지원</th><th>형식</th><th>용량</th><th>설치비</th></tr></thead>
-<tbody>
-{% for e in d.energy %}
-{% set k = kinds_by_code.get(e.source_type) %}<tr><td>{{ k.source if k else e.source_type }}</td><td>{{ k.form if k else '-' }}</td><td>{{ e.capacity_kw }} kW</td><td>{{ e.cost|won }}</td></tr>
-{% endfor %}
-</tbody>
-</table></div>
-<p>합계 {{ d.energy_total|won }}{% if d.energy_unpriced %}
-<span class="bad"> — 단가가 없어 합계에서 빠짐: {{ d.energy_unpriced|join(', ') }}</span>{% endif %}</p>
-{% else %}
-<p class="muted">신재생 계획이 없습니다</p>
-{% endif %}
+  </div>
+  {% else %}
+  <p class="empty">연결된 설치계획서가 없습니다</p>
+  {% endif %}
+</section>
 
-<h2>설치계획서</h2>
-{% if d.nr_plans %}
-<div class="table-wrap"><table>
-<thead><tr><th>신청번호</th><th>건물명</th><th>담당부서</th><th>에너지원</th><th>받은 때</th><th>상태</th></tr></thead>
-<tbody>
-{% for n in d.nr_plans %}
-<tr><td><a href="{{ url_for('nr_detail', plan_id=n.id) }}">{{ n.key }}</a></td><td>{{ n.building_name }}</td><td>{{ n.dept|dash }}</td>
-<td>{% for e in load_energy(n.energy_json) %}{{ e.source }} {{ e.form }} {{ e.capacity_kw }} kW{% if not loop.last %}<br>{% endif %}{% else %}—{% endfor %}</td>
-<td>{{ n.updated_at[:10] }}</td>
-<td>{{ n.match_state }}{% if n.skipped %} <span class="bad">웹에서 고친 값이 있어 반영하지 않음: {{ n.skipped }}</span>{% endif %}</td></tr>
-{% endfor %}
-</tbody>
-</table></div>
-{% else %}
-<p class="muted">연결된 설치계획서가 없습니다</p>
-{% endif %}
+<section class="panel panel--flush" id="edits">
+  <div class="section-head"><h2>수정 이력 {{ d.edits|length }}건</h2></div>
+  {% if d.edits %}
+  {% macro edit_item(e) %}<li><time>{{ e.edited_at[5:16]|replace('T', ' ') }}</time><span>{{ e.user_name or '(2단계 기록)' }} · {{ e.label }}<br><del>{{ e.old_value|dash }}</del> → <ins>{{ e.new_value|dash }}</ins></span></li>{% endmacro %}
+  <div class="section-body section-body--list">
+    <ul class="log">{% for e in d.edits[:3] %}{{ edit_item(e) }}{% endfor %}</ul>
+    {% if d.edits|length > 3 %}
+    <details class="log-more"><summary class="btn btn--sm btn--quiet">모두 보기</summary><ul class="log">{% for e in d.edits[3:] %}{{ edit_item(e) }}{% endfor %}</ul></details>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="empty">웹에서 고친 기록이 없습니다</p>
+  {% endif %}
+</section>
 
-<h2>수정 이력 {{ d.edits|length }}건</h2>
-{% if d.edits %}
-<div class="table-wrap"><table>
-<thead><tr><th>시각</th><th>누가</th><th>칸</th><th>이전 값</th><th>새 값</th></tr></thead>
-<tbody>
-{% for e in d.edits %}
-<tr><td>{{ e.edited_at }}</td><td>{{ e.user_name or '(2단계 기록)' }}</td><td>{{ e.label }}</td><td>{{ e.old_value|dash }}</td><td>{{ e.new_value|dash }}</td></tr>
-{% endfor %}
-</tbody>
-</table></div>
-{% else %}
-<p class="muted">웹에서 고친 기록이 없습니다</p>
-{% endif %}
+</aside>
+</div>
 {% endblock %}

@@ -1772,11 +1772,11 @@ def test_the_form_opens_with_the_current_contacts_and_marks_notice_values(world)
     conn.close()
     client = _client(path)
     shown = _text(client.get(f"/project/{ids['gym']}"))
-    assert "063-000-0001" in shown and "(공고문)" in shown
+    assert "063-000-0001" in shown and '<span class="auto">공고문</span>' in shown
     form = _text(client.get(f"/project/{ids['gym']}?edit=dept"))
     assert 'name="staff_tel" inputmode="tel" value="063-000-0001"' in form
     _post(client, f"/project/{ids['gym']}/edit/dept", _dept_form(client, ids["gym"], **CONTACT))
-    assert "(공고문)" not in _text(client.get(f"/project/{ids['gym']}"))
+    assert '<span class="auto">공고문</span>' not in _text(client.get(f"/project/{ids['gym']}"))
 
 
 def test_renaming_the_department_leaves_contacts_alone_and_says_so(world):
@@ -2070,7 +2070,7 @@ def test_the_project_form_saves_the_winner_and_shows_it_in_the_project_table(wor
     assert resp.status_code == 302
     page = _text(client.get(resp.headers["Location"]))
     assert "바꾼 칸: 낙찰업체·낙찰일" in page
-    assert "<th>낙찰업체</th><td>이관건축</td>" in page
+    assert "<dt>낙찰업체</dt><dd>이관건축</dd>" in page
 
 
 def test_picking_an_imported_candidate_fills_the_empty_head_fields(world):

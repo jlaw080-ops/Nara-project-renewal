@@ -325,6 +325,45 @@ a.btn { text-decoration: none; }
 .bulkbar__reason .input { max-width: 16rem; }
 .bulkbar .muted { font-weight: 400; }
 
+/* ---------- 사업 상세 화면 보강 (UI v2 단계 3) ---------- */
+.detail-head__title { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.hide-pop { position: relative; }
+.hide-pop summary { list-style: none; }
+.hide-pop summary::-webkit-details-marker { display: none; }
+.hide-pop__form {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 10; width: 20rem;
+  display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3);
+  background: var(--surface); border: var(--stroke-hairline) solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-pop);
+}
+.notice .notice__end { margin-left: auto; }
+.notice .inline { display: inline; }
+.panel__inset { padding: var(--space-3) var(--space-4) 0; }
+.panel__inset--bottom { padding: var(--space-3) var(--space-4); }
+.section-body--people { padding-top: var(--space-2); padding-bottom: var(--space-2); }
+.section-body--people .muted { margin: var(--space-2) 0 0; }
+.section-body--list { padding-top: var(--space-1); padding-bottom: var(--space-1); }
+.dept-current { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; }
+.dept-current strong { font-size: 15px; }
+.details-row { border-top: var(--stroke-hairline) solid var(--line); padding: var(--space-2) var(--space-4); margin: 0; }
+.details-row summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.details-row .table-wrap { margin: var(--space-2) calc(-1 * var(--space-4)) 0; max-height: 40vh; }
+.nr-plan { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) 0; border-bottom: var(--stroke-hairline) solid var(--line); }
+.nr-plan:last-child { border-bottom: 0; }
+.nr-plan .title { font-weight: 600; text-decoration: none; }
+.nr-plan__energy { font-size: 13px; }
+.log-more summary { display: inline-flex; margin: var(--space-1) 0 var(--space-2) calc(-1 * var(--space-3)); list-style: none; }
+.log-more summary::-webkit-details-marker { display: none; }
+.stack-form { display: flex; flex-direction: column; gap: 20px; }
+.stack-form > .muted { margin: 0; }
+.form-grid--side { grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); }
+.group-title__help { font-weight: 400; }
+.energy-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: var(--space-3) var(--space-4); align-items: start; }
+.energy-cost-box { margin: 0; display: flex; flex-direction: column; gap: var(--space-1); min-height: var(--control-md); justify-content: flex-start; }
+.energy-cost { display: inline-flex; align-items: center; height: var(--control-md); font-variant-numeric: tabular-nums; font-weight: 600; }
+.tabs a .count { margin-left: 4px; }
+.tabs { overflow-y: hidden; }
+.split .table-wrap { max-height: none; }
+
 /* =====================================================================
    임시 호환 구역 (UI v2 단계 1) — 아직 새 클래스로 바꾸지 않은 화면이 깨지지 않게
    옛 클래스와 맨 요소를 새 디자인 토큰으로 정의한다. 화면을 하나씩 바꾸면서 지우고,
@@ -362,13 +401,10 @@ table:not(.table) td { font-variant-numeric: tabular-nums; }
 .notes li { color: var(--danger); }
 .field-error { color: var(--danger); font-size: 12px; font-weight: 600; }
 .saved { padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--success-soft); color: var(--fg); border-left: 4px solid var(--success); }
-.edit-link { font-size: 12px; font-weight: 400; margin-left: var(--space-2); }
 .edit-form { display: flex; flex-direction: column; gap: var(--space-3); max-width: var(--form-max-width); }
 .edit-form label { display: flex; flex-direction: column; gap: var(--space-1); font-size: 13px; font-weight: 600; color: var(--fg-secondary); }
 .edit-form fieldset { border: var(--stroke-hairline) solid var(--line); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); }
 .edit-form .choice { flex-direction: row; align-items: baseline; gap: var(--space-2); font-weight: 400; color: var(--fg); }
-.energy-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
-.energy-cost-box { margin: 0; min-height: var(--control-md); display: flex; align-items: center; gap: var(--space-1); }
 .price-input { text-align: right; width: 12rem; }
 .hide-bar, .hide-one { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); align-items: flex-end; }
 .hide-bar label, .hide-one label { display: flex; flex-direction: column; gap: var(--space-1); }
