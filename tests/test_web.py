@@ -788,7 +788,8 @@ def test_a_human_verdict_is_marked_locked_and_release_unlocks_it(world):
     url = f"/project/{ids['gym']}"
     _post(client, f"{url}/edit/verdict", {"verdict": BUILDING, "reason": "현장 확인"})
     assert "자동 판정이 이 사업을 건너뜁니다" in _text(client.get(url))
-    assert "(사람)" in _text(client.get("/?q=다목적체육관"))
+    # 사람이 정한 값은 배지 옆 "수동" 표시(.by-human)다 — UI v2에서 "(사람)"을 대신한다
+    assert '<span class="by-human">수동</span>' in _text(client.get("/?q=다목적체육관"))
     assert _post(client, f"{url}/release", {}).status_code == 302
     text = _text(client.get(url))
     assert "자동 판정이 이 사업을 건너뜁니다" not in text

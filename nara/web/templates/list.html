@@ -1,123 +1,145 @@
 {% extends "base.html" %}
+{% from "_macros.html" import verdict_badge %}
 {% block body %}
 {% macro sort_th(key, label) %}<th{% if f.sort == key %} aria-sort="{{ 'descending' if f.desc else 'ascending' }}"{% endif %}><a href="{{ sort_links[key] }}">{{ label }}</a>{% if f.sort == key %} <span aria-hidden="true">{{ '▼' if f.desc else '▲' }}</span>{% endif %}</th>{% endmacro %}
-<h1>사업 조회</h1>
+<div class="page__head">
+  <div class="page__title">
+    <h1>사업 조회</h1>
+    <div class="runs">
+    {% for r in runs %}
+      <span class="run{% if not r.healthy %} run--fail{% elif r.status_label == '실행 중' %} run--running{% endif %}">{{ r.label }} {{ r.started_at|dash }} {{ r.status_label }}</span>
+    {% endfor %}
+    </div>
+  </div>
+  <form method="post" class="runnow" action="{{ url_for('run_step') }}">
+    <label class="field__label" for="run-step">지금 조회</label>
+    <select class="select select--sm" id="run-step" name="step">{% for k, v in manual_steps.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
+    <button type="submit" class="btn btn--sm btn--secondary">지금 실행</button>
+    <span class="muted">예약 실행과 같은 범위(관심기관)로 바로 돕니다. 끝나면 상태 줄에 보입니다.</span>
+  </form>
+</div>
 
-<p class="runs">
-{% for r in runs %}
-  <span class="{{ '' if r.healthy else 'bad' }}">{{ r.label }} {{ r.started_at|dash }} {{ r.status_label }}</span>{% if not loop.last %} · {% endif %}
-{% endfor %}
-</p>
-<form method="post" class="inline" action="{{ url_for('run_step') }}">
-  <label>지금 조회
-    <select name="step">{% for k, v in manual_steps.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
-  </label>
-  <button type="submit">지금 실행</button>
-  <span class="muted">예약 실행과 같은 범위(관심기관)로 바로 돕니다. 끝나면 상태 줄에 보입니다.</span>
-</form>
+{% if nr_pending %}
+<div class="notice"><span class="notice__title">확인 필요</span><span>설치계획 확인 필요 {{ nr_pending }}건</span><a href="{{ url_for('nr_list') }}">설치계획 보기</a></div>
+{% endif %}
 
+<section class="panel" aria-label="조회 조건">
 <form class="filters" method="get" action="{{ url_for('index') }}">
-  <fieldset class="org-pick">
-    <legend>수요기관 <span id="org-count" class="muted">{% if f.orgs %}{{ f.orgs|length }}곳 선택{% endif %}</span></legend>
-    <div class="org-tools">
-      <input type="search" id="org-search" placeholder="기관 이름 검색" aria-label="수요기관 검색" autocomplete="off">
-      <button type="button" id="org-all">보이는 기관 모두 선택</button>
-      <button type="button" id="org-none">선택 해제</button>
+  <div class="field picker">
+    <span class="field__label" id="org-label">수요기관</span>
+    <details>
+      <summary class="btn btn--secondary picker__button" aria-labelledby="org-label org-count"><span id="org-count">{% if f.orgs %}{{ f.orgs|length }}곳 선택{% else %}전체{% endif %}</span> <span aria-hidden="true">▾</span></summary>
+      <div class="picker__pop">
+        <div class="org-tools">
+          <input class="input input--sm" type="search" id="org-search" placeholder="기관 이름 검색" aria-label="수요기관 검색" autocomplete="off">
+          <button type="button" class="btn btn--sm btn--secondary" id="org-all">보이는 기관 모두 선택</button>
+          <button type="button" class="btn btn--sm btn--quiet" id="org-none">선택 해제</button>
+        </div>
+        <div class="picker__list org-list">
+          {% for o in orgs %}
+          <label class="check"><input type="checkbox" name="org" value="{{ o.id }}"{% if o.id in f.orgs %} checked{% endif %}> {{ o.name }}{% if o.tier == 'focus' %} ★{% endif %}</label>
+          {% endfor %}
+        </div>
+      </div>
+    </details>
+  </div>
+  <label class="field filters__grow"><span class="field__label">이름 검색</span>
+    <input class="input" type="search" name="q" value="{{ f.q }}" placeholder="공고명 또는 사업명"></label>
+  <div class="field"><span class="field__label">공고일</span>
+    <div class="daterange">
+      <input class="input num" type="date" name="from" value="{{ f.date_from }}" aria-label="공고일 시작">
+      <span class="muted" aria-hidden="true">~</span>
+      <input class="input num" type="date" name="to" value="{{ f.date_to }}" aria-label="공고일 끝">
     </div>
-    <div class="org-list">
-      {% for o in orgs %}
-      <label><input type="checkbox" name="org" value="{{ o.id }}"{% if o.id in f.orgs %} checked{% endif %}> {{ o.name }}{% if o.tier == 'focus' %} ★{% endif %}</label>
-      {% endfor %}
-    </div>
-  </fieldset>
-  <label>관심기관
-    <span><input type="checkbox" name="focus" value="1"{% if f.focus_only %} checked{% endif %}> 관심기관만</span>
-  </label>
-  <label>실행부서
-    <span><input type="checkbox" name="dept" value="review"{% if f.dept_review %} checked{% endif %}> 실행부서 검토 필요</span>
-  </label>
-  <label>숨김
-    <span><input type="checkbox" name="hidden" value="1"{% if f.hidden %} checked{% endif %}> 숨긴 사업만</span>
-  </label>
-  <label>이름 검색
-    <input type="search" name="q" value="{{ f.q }}" placeholder="공고명 또는 사업명">
-  </label>
-  <label>공고일 시작 <input type="date" name="from" value="{{ f.date_from }}"></label>
-  <label>공고일 끝 <input type="date" name="to" value="{{ f.date_to }}"></label>
-  <label>진행현황
-    <select name="verdict" multiple size="5">
-      {% for v in verdict_choices %}
-      <option value="{{ v }}"{% if v in f.verdicts %} selected{% endif %}>{{ v }}</option>
-      {% endfor %}
-    </select>
-  </label>
+  </div>
   <input type="hidden" name="sort" value="{{ f.sort }}">
   <input type="hidden" name="desc" value="{{ '1' if f.desc else '0' }}">
-  <button type="submit">조회</button>
-  <a href="{{ url_for('index') }}">조건 지우기</a>
+  <div class="filters__actions">
+    <a class="btn btn--quiet" href="{{ url_for('index') }}">조건 지우기</a>
+    <button class="btn" type="submit">조회</button>
+  </div>
+  <div class="field filters__row"><span class="field__label">진행현황</span>
+    <div class="chips">
+      {% for v in verdict_choices %}
+      <label class="chip"><input type="checkbox" name="verdict" value="{{ v }}"{% if v in f.verdicts %} checked{% endif %}> {{ v }}</label>
+      {% endfor %}
+      <span class="chips__sep" aria-hidden="true"></span>
+      <label class="chip"><input type="checkbox" name="focus" value="1"{% if f.focus_only %} checked{% endif %}> ★ 관심기관만</label>
+      <label class="chip"><input type="checkbox" name="dept" value="review"{% if f.dept_review %} checked{% endif %}> 실행부서 검토 필요</label>
+      <label class="chip"><input type="checkbox" name="hidden" value="1"{% if f.hidden %} checked{% endif %}> 숨긴 사업만</label>
+    </div>
+  </div>
 </form>
+</section>
 
-{% if nr_pending %}<p class="saved"><a href="{{ url_for('nr_list') }}">설치계획 확인 필요 {{ nr_pending }}건</a></p>{% endif %}
-<p><strong>{{ result.total }}건 중 {{ result.matched }}건</strong>
-{% if conditions %}<span class="muted">조건: {{ conditions|join(' · ') }}</span>{% endif %}
-<a href="{{ url_for('print_list') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}" target="_blank" rel="noopener">PDF로 출력</a> · <a href="{{ url_for('export_xlsx') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}">엑셀로 받기</a></p>
-{% if result.excluded_no_notice %}
-<p class="muted">공고일 조건이 걸려 공고가 없는 사업 {{ result.excluded_no_notice }}건이 제외되었습니다</p>
-{% endif %}
-{% if result.truncated %}
-<p class="bad">{{ result.rows|length }}건만 표시합니다. 조건을 좁혀 주세요</p>
-{% endif %}
-{% if notes %}
-<ul class="notes">{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul>
-{% endif %}
-
-<form method="post" id="hide-form" action="{{ url_for('unhide' if f.hidden else 'hide') }}">
-<input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
-<p class="hide-bar">
-{% if f.hidden %}<button type="submit">선택한 사업 숨김 풀기</button>
-{% else %}<label>숨기는 이유(선택) <input type="text" name="hide_reason" maxlength="200" placeholder="예: 도로 공사"></label>
-<button type="submit">선택한 사업 숨기기</button>{% endif %}
-<span class="muted">숨긴 사업은 목록·PDF에서 빠지고 자동 판정·실행부서 찾기를 건너뜁니다.</span></p>
-<div class="table-wrap"><table>
-<thead><tr>
-  <th><input type="checkbox" id="pick-all" aria-label="모두 고르기"></th>
-  {{ sort_th("org", "수요기관") }}
-  {{ sort_th("name", "사업명") }}
-  {{ sort_th("notice_date", "공고일") }}
-  {{ sort_th("open_date", "개찰일") }}
-  {{ sort_th("verdict", "진행현황") }}
-  <th>낙찰업체</th>
-  <th>실행부서</th>
-  <th>신재생 계획</th>
-</tr></thead>
-<tbody>
-{% for r in result.rows %}
-<tr>
-  <td><input type="checkbox" name="pid" value="{{ r.id }}" aria-label="{{ r.name }} 고르기"></td>
-  <td>{{ r.org_name }}</td>
-  <td><a href="{{ url_for('detail', project_id=r.id) }}">{{ r.name }}</a>
-    {% if r.matched_title %}<div class="muted">공고명: {{ r.matched_title }}</div>{% endif %}</td>
-  <td>{{ r.notice_date|dash }}</td>
-  <td>{{ r.open_date|dash }}</td>
-  <td>{{ r.verdict or no_verdict }}{% if r.verdict_by == 'human' %} <span class="muted">(사람)</span>{% endif %}</td>
-  <td>{{ r.winner|dash }}</td>
-  <td>{% if r.exec_dept %}{{ r.exec_dept }}{% elif r.dept_review %}<span class="muted">검토 필요</span>{% else %}—{% endif %}</td>
-  <td>{{ r.energy|dash }}</td>
-</tr>
-{% else %}
-<tr><td colspan="9" class="muted">조건에 맞는 사업이 없습니다</td></tr>
-{% endfor %}
-</tbody>
-</table></div>
-</form>
+<section class="panel panel--flush" aria-label="결과">
+  <div class="resultbar">
+    <span class="resultbar__count">{{ result.total }}건 중 {{ result.matched }}건</span>
+    {% if conditions %}<span class="muted">조건: {{ conditions|join(' · ') }}</span>{% endif %}
+    <span class="resultbar__end">
+      <a class="btn btn--sm btn--secondary" href="{{ url_for('print_list') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}" target="_blank" rel="noopener">PDF로 출력</a>
+      <a class="btn btn--sm btn--secondary" href="{{ url_for('export_xlsx') }}{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}">엑셀로 받기</a>
+    </span>
+  </div>
+  {% if result.excluded_no_notice or result.truncated or notes %}
+  <div class="panel__notes">
+    {% if result.excluded_no_notice %}<p class="muted">공고일 조건이 걸려 공고가 없는 사업 {{ result.excluded_no_notice }}건이 제외되었습니다</p>{% endif %}
+    {% if result.truncated %}<p class="bad">{{ result.rows|length }}건만 표시합니다. 조건을 좁혀 주세요</p>{% endif %}
+    {% if notes %}<ul class="notes">{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+  </div>
+  {% endif %}
+  <form method="post" id="hide-form" action="{{ url_for('unhide' if f.hidden else 'hide') }}">
+  <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+  <div class="bulkbar" id="bulkbar">
+    <span id="pick-count">0건 고름</span>
+    {% if f.hidden %}<button type="submit" class="btn btn--sm">선택한 사업 숨김 풀기</button>
+    {% else %}<label class="bulkbar__reason"><span class="muted">숨기는 이유(선택)</span> <input class="input input--sm" type="text" name="hide_reason" maxlength="200" placeholder="예: 도로 공사"></label>
+    <button type="submit" class="btn btn--sm">선택한 사업 숨기기</button>{% endif %}
+    <button type="button" class="btn btn--sm btn--quiet" id="pick-none">선택 해제</button>
+    <span class="muted">숨긴 사업은 목록·PDF에서 빠지고 자동 판정·실행부서 찾기를 건너뜁니다.</span>
+  </div>
+  <div class="table-wrap"><table class="table">
+  <thead><tr>
+    <th class="col-check"><input type="checkbox" id="pick-all" aria-label="모두 고르기"></th>
+    {{ sort_th("org", "수요기관") }}
+    {{ sort_th("name", "사업명") }}
+    {{ sort_th("notice_date", "공고일") }}
+    {{ sort_th("open_date", "개찰일") }}
+    {{ sort_th("verdict", "진행현황") }}
+    <th>낙찰업체</th>
+    <th>실행부서</th>
+    <th>신재생 계획</th>
+  </tr></thead>
+  <tbody>
+  {% for r in result.rows %}
+  <tr>
+    <td class="col-check"><input type="checkbox" name="pid" value="{{ r.id }}" aria-label="{{ r.name }} 고르기"></td>
+    <td>{{ r.org_name }}</td>
+    <td><a class="title" href="{{ url_for('detail', project_id=r.id) }}">{{ r.name }}</a>
+      {% if r.matched_title %}<span class="sub">공고명: {{ r.matched_title }}</span>{% endif %}</td>
+    <td class="col-date">{{ r.notice_date|dash }}</td>
+    <td class="col-date">{{ r.open_date|dash }}</td>
+    <td>{{ verdict_badge(r.verdict, r.verdict_by, no_verdict) }}</td>
+    <td>{{ r.winner|dash }}</td>
+    <td>{% if r.exec_dept %}{{ r.exec_dept }}{% elif r.dept_review %}<span class="badge badge--none">검토 필요</span>{% else %}—{% endif %}</td>
+    <td>{{ r.energy|dash }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="9" class="empty">조건에 맞는 사업이 없습니다</td></tr>
+  {% endfor %}
+  </tbody>
+  </table></div>
+  </form>
+</section>
 <script>
 (function () {
+  // 수요기관 펼침: 검색으로 거르고, 보이는 것만 모두 선택·해제. 펼침 단추 글자는 "N곳 선택"/"전체".
   var boxes = Array.prototype.slice.call(document.querySelectorAll('.org-list input[name=org]'));
   var count = document.getElementById("org-count");
   function shown(box) { return !box.parentElement.hidden; }
   function recount() {
     var n = boxes.filter(function (b) { return b.checked; }).length;
-    count.textContent = n ? n + "곳 선택" : "";
+    count.textContent = n ? n + "곳 선택" : "전체";
   }
   document.getElementById("org-search").addEventListener("input", function (e) {
     var q = e.target.value.replace(/\s+/g, "");
@@ -135,8 +157,33 @@
   });
   boxes.forEach(function (b) { b.addEventListener("change", recount); });
 })();
-document.getElementById("pick-all").addEventListener("change", function (e) {
-  document.querySelectorAll('#hide-form input[name=pid]').forEach(function (box) { box.checked = e.target.checked; });
-});
+(function () {
+  // 일괄 작업 줄은 고른 행이 있을 때만 보인다. JS가 없으면 늘 보인다.
+  var all = document.getElementById("pick-all");
+  var picks = Array.prototype.slice.call(document.querySelectorAll('#hide-form input[name=pid]'));
+  var bar = document.getElementById("bulkbar");
+  var label = document.getElementById("pick-count");
+  function refresh() {
+    var n = 0;
+    picks.forEach(function (box) {
+      var row = box.closest("tr");
+      if (box.checked) { n++; row.setAttribute("aria-selected", "true"); }
+      else { row.removeAttribute("aria-selected"); }
+    });
+    label.textContent = n + "건 고름";
+    bar.hidden = n === 0;
+    all.checked = n > 0 && n === picks.length;
+  }
+  all.addEventListener("change", function (e) {
+    picks.forEach(function (box) { box.checked = e.target.checked; });
+    refresh();
+  });
+  document.getElementById("pick-none").addEventListener("click", function () {
+    picks.forEach(function (box) { box.checked = false; });
+    refresh();
+  });
+  picks.forEach(function (box) { box.addEventListener("change", refresh); });
+  refresh();
+})();
 </script>
 {% endblock %}

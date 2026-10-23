@@ -293,6 +293,38 @@ textarea.input { height: auto; padding: var(--space-2) var(--space-3); }
 .appbar .btn--quiet:hover { color: var(--on-navy); background: rgba(255, 255, 255, 0.12); }
 form.inline { display: inline; }
 
+/* ---------- 사업 조회 화면 보강 (UI v2 단계 2) ---------- */
+a.btn { text-decoration: none; }
+.page__title { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.runnow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.select--sm, .input--sm { height: var(--control-sm); }
+.filters__row { flex-basis: 100%; }
+.daterange { display: flex; align-items: center; gap: var(--space-2); }
+.daterange .input { width: 10.5rem; }
+/* 칩은 라벨 + 숨긴 체크박스. 키보드로 고를 수 있고 JS가 없어도 폼으로 간다. */
+.chip { position: relative; }
+.chip input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+.chip:has(input:checked) { background: var(--primary-soft); border-color: var(--primary); color: var(--primary-hover); font-weight: 600; }
+.chip:has(input:focus-visible) { outline: var(--stroke-focus) solid var(--primary); outline-offset: 2px; }
+.chip:hover { border-color: var(--fg-secondary); }
+.chips__sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 var(--space-1); }
+/* 수요기관 펼침은 <details>. 펼침 단추는 보조 버튼 모양. */
+.picker details { position: relative; }
+.picker summary { list-style: none; }
+.picker summary::-webkit-details-marker { display: none; }
+.picker__pop .org-tools { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.picker__pop .org-tools .input { flex: 1 1 10rem; }
+.picker__list .check { font-size: 13px; min-height: 28px; }
+.picker__list .check[hidden] { display: none; }
+.panel__notes { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-4); border-bottom: var(--stroke-hairline) solid var(--line); }
+.panel__notes p, .panel__notes ul { margin: 0; }
+.panel__notes ul { padding-left: 1.2em; }
+.bulkbar { flex-wrap: wrap; }
+.bulkbar[hidden] { display: none; }
+.bulkbar__reason { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 400; }
+.bulkbar__reason .input { max-width: 16rem; }
+.bulkbar .muted { font-weight: 400; }
+
 /* =====================================================================
    임시 호환 구역 (UI v2 단계 1) — 아직 새 클래스로 바꾸지 않은 화면이 깨지지 않게
    옛 클래스와 맨 요소를 새 디자인 토큰으로 정의한다. 화면을 하나씩 바꾸면서 지우고,

@@ -1,0 +1,8 @@
+{# 모든 화면이 같이 쓰는 조각. #}
+
+{# 진행현황 배지. 값 → 색: 착공 전 파랑 · 시공 중 주황 · 준공 완료 초록 · 미확인 회색 · 판정 전 테두리만.
+   사람이 정한 값은 옆에 "수동". 색만으로 구분하지 않도록 글자가 늘 같이 있다. #}
+{% macro verdict_badge(verdict, by=none, none_label='판정 전') -%}
+{%- set kind = {'착공 전(설계 단계)': 'before', '시공 중': 'building', '준공 완료': 'done', '미확인': 'unknown'}.get(verdict, 'none') -%}
+<span class="badge badge--{{ kind }}">{{ verdict or none_label }}</span>{% if by == 'human' %}<span class="by-human">수동</span>{% endif %}
+{%- endmacro %}
