@@ -1,65 +1,89 @@
 {% extends "base.html" %}
+{% block title %}설정 변경 확인{% endblock %}
 {% block body %}
+<div class="narrow narrow--wide">
+<a class="crumb" href="{{ url_for('settings') }}">← 설정</a>
 <h1>설정 변경 확인</h1>
-{% if message %}<p class="bad">{{ message }}</p>{% endif %}
-{% for w in warnings %}<p class="bad">{{ w }}</p>{% endfor %}
-<form method="post" action="{{ url_for('settings_apply') }}">
+{% if message %}<div class="notice notice--danger" role="alert"><span class="notice__title">저장 안 됨</span><span>{{ message }}</span></div>{% endif %}
+{% for w in warnings %}<div class="notice notice--warning"><span class="notice__title">주의</span><span>{{ w }}</span></div>{% endfor %}
+<form method="post" id="apply-form" action="{{ url_for('settings_apply') }}">
   {% for kind in kinds %}
     {% for v in form.getlist('remove_' ~ kind) %}<input type="hidden" name="remove_{{ kind }}" value="{{ v }}">{% endfor %}
     <input type="hidden" name="add_{{ kind }}" value="{{ form.get('add_' ~ kind, '') }}">
   {% endfor %}
   <input type="hidden" name="fingerprint" value="{{ plan.fingerprint }}">
 
-  <h2>바뀌는 값</h2>
-  <ul>
-  {% for kind in kinds %}
-    {% set added = plan.change.adds|selectattr(0, 'equalto', kind)|list %}
-    {% set gone = plan.change.removes|selectattr(0, 'equalto', kind)|list %}
-    {% if added or gone %}
-    <li>{{ labels[kind] }} —
-      {% if added %}더함: {% for a in added %}{{ a[1] }}{% if a[2] %} → {{ a[2] }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
-      {% if added and gone %} / {% endif %}
-      {% if gone %}뺌: {{ gone|map(attribute=1)|join(', ') }}{% endif %}
-    </li>
+  <section class="panel panel--flush" aria-label="바뀌는 값">
+    <div class="section-head"><h2>바뀌는 값</h2><span class="count">{{ plan.change.adds|length + plan.change.removes|length }}개</span></div>
+    <div class="section-body"><ul class="diff">
+    {% for kind in kinds %}
+      {% set added = plan.change.adds|selectattr(0, 'equalto', kind)|list %}
+      {% set gone = plan.change.removes|selectattr(0, 'equalto', kind)|list %}
+      {% if added or gone %}
+      <li><span class="diff__kind">{{ labels[kind] }}</span><span class="values values--open">
+        {% for a in added %}<span class="value value--add">+ {{ a[1] }}{% if a[2] %} <span class="to">→ {{ a[2] }}</span>{% endif %}</span>{% endfor %}
+        {% for g in gone %}<span class="value value--remove">− {{ g[1] }}</span>{% endfor %}
+      </span></li>
+      {% endif %}
+    {% endfor %}
+    </ul></div>
+  </section>
+
+  <section class="panel panel--flush" aria-label="영향">
+    <div class="section-head"><h2>이미 모은 사업에 미치는 영향</h2></div>
+    <div class="section-body setting__body">
+      <div class="impact impact--4">
+        <div class="impact__item{% if plan.hide %} impact__item--warn{% endif %}"><span class="muted">걸리는 사업</span><span class="impact__n">{{ plan.hide|length }}건</span><span class="muted">{% if plan.hide %}숨길지 아래에서 고릅니다{% else %}없음{% endif %}</span></div>
+        <div class="impact__item"><span class="muted">관심에서 빠질 기관</span><span class="impact__n">{{ plan.demote|length }}곳</span><span class="muted">{% if plan.demote %}사업 {{ plan.demote|sum(attribute='projects') }}건 · {{ plan.demote|map(attribute='name')|join(', ') }}{% else %}없음{% endif %}</span></div>
+        <div class="impact__item"><span class="muted">관심으로 올릴 기관</span><span class="impact__n">{{ plan.promote|length }}곳</span><span class="muted">{% if plan.promote %}{{ plan.promote|map(attribute='name')|join(', ') }}{% else %}없음{% endif %}</span></div>
+        <div class="impact__item"><span class="muted">다시 수집해야 들어오는 공고</span><span class="impact__n">{{ '있음' if plan.widened else '없음' }}</span><span class="muted">{% if plan.widened %}전에 걸러진 공고는 다시 수집해야 들어옵니다(<code>nara backfill</code>){% else %}제외 조건이 넓어지지 않았습니다{% endif %}</span></div>
+      </div>
+      {% if plan.demote %}<p class="muted">관심에서 빠진 기관은 일반 기관이 되어 요일별로 조회합니다. 사업과 판정 기록은 그대로입니다.</p>{% endif %}
+      {% if plan.hide %}
+      <div class="notice notice--warning"><span class="notice__title">숨길 사업 고르기</span><span>이미 수집된 사업 중 {{ plan.hide|length }}건이 걸립니다. 숨길 사업만 체크하세요. 체크하지 않은 사업은 그대로 둡니다. 숨긴 사업은 "숨긴 사업"에서 되돌릴 수 있습니다.</span></div>
+      {% endif %}
+    </div>
+    {% if plan.hide %}
+    <div class="table-wrap"><table class="table">
+    <thead><tr><th class="col-check"><input type="checkbox" id="hide-all" aria-label="모두 선택"></th><th>수요기관</th><th>사업</th><th>걸린 이유</th></tr></thead>
+    <tbody>
+    {% for c in plan.hide %}
+    <tr><td class="col-check"><input type="checkbox" name="hide" value="{{ c.project_id }}"></td><td>{{ c.org_name }}</td><td><a class="title" href="{{ url_for('detail', project_id=c.project_id) }}" target="_blank" rel="noopener">{{ c.name }} ↗</a></td><td>{{ c.reason }}</td></tr>
+    {% endfor %}
+    </tbody></table></div>
     {% endif %}
-  {% endfor %}
-  </ul>
+  </section>
 
-  {% if plan.widened %}<p class="muted">전에 걸러진 공고는 다시 수집해야 들어옵니다(<code>nara backfill</code>)</p>{% endif %}
-
-  {% if plan.hide %}
-  <h2>이미 수집된 사업 중 {{ plan.hide|length }}건이 걸립니다</h2>
-  <p class="muted">숨길 사업만 체크하세요. 체크하지 않은 사업은 그대로 둡니다. 숨긴 사업은 "숨긴 사업"에서 되돌릴 수 있습니다.</p>
-  <label><input type="checkbox" id="hide-all"> 모두 선택</label>
-  <div class="table-wrap"><table>
-  <thead><tr><th>숨김</th><th>수요기관</th><th>사업</th><th>걸린 이유</th></tr></thead>
-  <tbody>
-  {% for c in plan.hide %}
-  <tr><td><input type="checkbox" name="hide" value="{{ c.project_id }}"></td><td>{{ c.org_name }}</td><td><a href="{{ url_for('detail', project_id=c.project_id) }}" target="_blank" rel="noopener">{{ c.name }}</a></td><td>{{ c.reason }}</td></tr>
-  {% endfor %}
-  </tbody></table></div>
-  {% endif %}
-
-  {% if plan.demote %}
-  <h2>관심에서 빠질 기관 {{ plan.demote|length }}곳 (사업 {{ plan.demote|sum(attribute='projects') }}건)</h2>
-  <p class="muted">일반 기관이 되어 요일별로 조회합니다. 사업과 판정 기록은 그대로입니다.</p>
-  <ul>{% for m in plan.demote %}<li>{{ m.name }} ({{ m.projects }}건)</li>{% endfor %}</ul>
-  {% endif %}
-  {% if plan.promote %}
-  <h2>관심으로 올릴 기관 {{ plan.promote|length }}곳</h2>
-  <ul>{% for m in plan.promote %}<li>{{ m.name }}</li>{% endfor %}</ul>
-  {% endif %}
-
-  <button type="submit">확인 저장</button>
-  <a href="{{ url_for('settings') }}">취소</a>
+  <div class="savebar" role="region" aria-label="저장">
+    <span class="savebar__msg" id="save-msg">값 {{ plan.change.adds|length + plan.change.removes|length }}개 변경</span>
+    <span class="savebar__end"><a class="btn btn--quiet" href="{{ url_for('settings') }}">취소</a><button type="submit" class="btn">확인 저장</button></span>
+  </div>
 </form>
+</div>
 <script>
 (function () {
+  // 모두 선택과 고른 행 표시. 저장 줄에 숨길 건수를 더해 보인다.
   var all = document.getElementById("hide-all");
   if (!all) return;
+  var picks = Array.prototype.slice.call(document.querySelectorAll("input[name=hide]"));
+  var msg = document.getElementById("save-msg");
+  var base = msg.textContent;
+  function refresh() {
+    var n = 0;
+    picks.forEach(function (b) {
+      var row = b.closest("tr");
+      if (b.checked) { n++; row.setAttribute("aria-selected", "true"); }
+      else { row.removeAttribute("aria-selected"); }
+    });
+    msg.textContent = n ? base + " · 사업 " + n + "건 숨김" : base;
+    all.checked = n > 0 && n === picks.length;
+  }
   all.addEventListener("change", function (e) {
-    document.querySelectorAll('input[name=hide]').forEach(function (b) { b.checked = e.target.checked; });
+    picks.forEach(function (b) { b.checked = e.target.checked; });
+    refresh();
   });
+  picks.forEach(function (b) { b.addEventListener("change", refresh); });
+  refresh();
 })();
 </script>
 {% endblock %}
