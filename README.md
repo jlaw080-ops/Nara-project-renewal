@@ -47,6 +47,25 @@ Claude API 키가 없거나 답을 못 받은 건은 사유에 "Claude 확인 �
 `http://<이 PC IP>:8120` 주소를 알려 준다. 사내망 안에서는 http라 비밀번호가 암호화되지 않으니
 다른 곳에서 쓰는 비밀번호는 쓰지 않는다. 이 PC가 켜져 있어야 한다.
 
+### 이 PC에서 로그인과 함께 켜기
+
+작업 스케줄러의 `\nara\web` 작업이 Windows 로그인 때 창 없이 `nara serve`를 띄운다. 출력은
+`data\logs\web.log`에 쌓이고, 꺼지면 1분 뒤 다시 켜진다. 바탕화면의 "나라 앱" 아이콘으로 연다.
+
+```powershell
+# 지금 끄기 — 작업만 멈추면 서버 프로세스가 남으므로 8120 포트를 쓰는 프로세스도 끈다
+Stop-ScheduledTask -TaskPath '\nara\' -TaskName web; Get-NetTCPConnection -LocalPort 8120 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+Start-ScheduledTask -TaskPath '\nara\' -TaskName web    # 다시 켜기
+Disable-ScheduledTask -TaskPath '\nara\' -TaskName web  # 자동 실행 해제 (끄기와 함께)
+```
+
+작업은 등록만 저장소 밖(이 PC의 작업 스케줄러)에 있다. 다른 PC에 새로 둘 때는 `slot-09` 작업처럼
+`conhost.exe --headless cmd.exe /d /c "... uv run nara serve >> data\logs\web.log 2>&1"`을
+"로그온할 때" 트리거, 실행 시간 제한 없음, 실패 시 1분 뒤 재시작으로 등록한다.
+
+서버가 켜져 있으면 `.venv`가 잠겨 `uv sync`가 실패한다. 의존성이 바뀐 코드를 받을 때는 먼저
+끄고, `uv sync` 뒤 다시 켠다.
+
 서버 설치는 [deploy/setup.md](deploy/setup.md)에 있다. 서버에서는 `nara run slot 09|12|15`가
 하루 세 번 수집하고 `nara backup`이 매일 백업한다.
 
