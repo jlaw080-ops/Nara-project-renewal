@@ -137,7 +137,7 @@ def doctor(db: Path = typer.Option(DEFAULT_DB, help="SQLite 경로")) -> None:
 
 @app.command()
 def serve(
-    port: int = typer.Option(8000, min=1, max=65535, help="포트"),
+    port: int = typer.Option(8120, min=1, max=65535, help="포트"),
     db: Path = typer.Option(DEFAULT_DB, help="SQLite 경로"),
     env: Path = typer.Option(DEFAULT_ENV, help="비밀값 파일"),
     production: bool = typer.Option(False, "--production", help="서버용: waitress로 띄운다"),

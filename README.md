@@ -20,7 +20,7 @@ uv run nara enrich award --tier focus                   # 낙찰업체 조회
 uv run nara enrich status                               # 진행현황 판정 (구글 뉴스, 키 불필요)
 uv run nara migrate tsv <파일> --tab 전북특별자치도      # 기존 시트 이관
 uv run nara doctor                                      # 데이터 점검
-uv run nara serve                                       # 조회·입력 화면 → http://127.0.0.1:8000
+uv run nara serve                                       # 조회·입력 화면 → http://127.0.0.1:8120
 ```
 
 화면에서 고친 값은 `edit_log`에 남는다. 시트를 다시 이관하면 지난 이관 뒤 시트에서
@@ -44,7 +44,7 @@ Claude API 키가 없거나 답을 못 받은 건은 사유에 "Claude 확인 �
 보이고, 첫 로그인에서 바꾼다.
 
 사내망의 다른 PC에서 써 보게 하려면 `uv run nara serve --lan`으로 띄우고, 화면에 나온
-`http://<이 PC IP>:8000` 주소를 알려 준다. 사내망 안에서는 http라 비밀번호가 암호화되지 않으니
+`http://<이 PC IP>:8120` 주소를 알려 준다. 사내망 안에서는 http라 비밀번호가 암호화되지 않으니
 다른 곳에서 쓰는 비밀번호는 쓰지 않는다. 이 PC가 켜져 있어야 한다.
 
 서버 설치는 [deploy/setup.md](deploy/setup.md)에 있다. 서버에서는 `nara run slot 09|12|15`가
