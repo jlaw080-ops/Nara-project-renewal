@@ -30,7 +30,7 @@ from nara import auth, settings_store
 from nara.config import Settings
 from nara.db import attachments_dir
 from nara.energy import EnergyKind, load_kinds
-from nara.nr_apply import ignore_plan, ingest, link_plan
+from nara.nr_apply import ignore_plan, ingest, link_plan, new_projects_for_pending
 from nara.nr_match import candidates
 from nara.nr_plan import load_energy
 from nara.runlog import run_log
@@ -751,6 +751,29 @@ def create_app(
             return redirect(url_for("detail", project_id=pid))
 
         return _nr_write(plan_id, act)
+
+    @app.post("/nr/new")
+    def nr_new_bulk():
+        plan_ids = _project_ids(request.form.getlist("plan"))
+        if not plan_ids:
+            flash("새 사업으로 추가할 설치계획서가 없습니다")
+            return redirect(url_for("nr_list"))
+        if current_app.config.get("SETTINGS") is None:
+            abort(503)
+        now = datetime.now().isoformat(timespec="seconds")
+        try:
+            with closing(_rw_conn()) as conn:
+                done = new_projects_for_pending(conn, plan_ids, _settings(conn), now)
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc):
+                raise
+            flash(BUSY_MESSAGE)
+            return redirect(url_for("nr_list"))
+        if done:
+            flash(f"{done}건을 새 사업으로 추가했습니다")
+        else:
+            flash("새 사업으로 추가할 설치계획서가 없습니다")
+        return redirect(url_for("nr_list"))
 
     @app.post("/nr/<int:plan_id>/ignore")
     def nr_ignore(plan_id: int):

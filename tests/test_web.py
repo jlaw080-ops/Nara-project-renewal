@@ -1707,6 +1707,71 @@ def test_a_person_can_ignore_a_plan_or_make_a_new_project(world):
     assert "봉동 체험관" in _text(client.get("/nr?state=ignored"))
 
 
+def _two_pending_plans(path, ids):
+    """사업이 둘로 갈려 둘 다 '확인 필요'로 남는 설치계획서 두 건."""
+    _second_gym(path, ids)
+    _nr(path, NR_ROW, {**NR_ROW, "key": "2026-003"})
+    return _plan_id(path, "2026-001"), _plan_id(path, "2026-003")
+
+
+def _plan_states(path):
+    conn = connect(path)
+    try:
+        rows = conn.execute("SELECT key, match_state, project_id FROM nr_plan").fetchall()
+        return {r["key"]: (r["match_state"], r["project_id"]) for r in rows}
+    finally:
+        conn.close()
+
+
+def test_picked_pending_plans_all_become_new_projects_at_once(world):
+    path, ids = world
+    first, second = _two_pending_plans(path, ids)
+    client = _client(path)
+    resp = _post(client, "/nr/new", {"plan": [str(first), str(second)]})
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/nr")
+    states = _plan_states(path)
+    for key in ("2026-001", "2026-003"):
+        state, pid = states[key]
+        assert state == "human" and pid not in (None, ids["gym"])
+    page = _text(client.get("/nr"))
+    assert "2건을 새 사업으로 추가했습니다" in page
+    assert "확인 필요 0건" in page
+
+
+def test_bulk_new_leaves_plans_that_are_no_longer_pending_alone(world):
+    path, ids = world
+    first, second = _two_pending_plans(path, ids)
+    client = _client(path)
+    assert _post(client, f"/nr/{second}/ignore", {}).status_code == 302
+    resp = _post(client, "/nr/new", {"plan": [str(first), str(second), "abc", "99999"]})
+    assert resp.status_code == 302
+    states = _plan_states(path)
+    assert states["2026-001"][0] == "human"
+    assert states["2026-003"] == ("ignored", None)
+    assert "1건을 새 사업으로 추가했습니다" in _text(client.get("/nr"))
+
+
+def test_bulk_new_with_nothing_picked_says_so(world):
+    path, ids = world
+    _two_pending_plans(path, ids)
+    client = _client(path)
+    assert _post(client, "/nr/new", {}).status_code == 302
+    assert "새 사업으로 추가할 설치계획서가 없습니다" in _text(client.get("/nr"))
+    assert _plan_states(path)["2026-001"][0] == "pending"
+
+
+def test_only_the_pending_tab_has_pick_boxes_and_the_bulk_button(world):
+    path, ids = world
+    first, _ = _two_pending_plans(path, ids)
+    client = _client(path)
+    pending = _text(client.get("/nr"))
+    assert 'id="pick-all"' in pending
+    assert f'name="plan" value="{first}"' in pending
+    assert "선택 항목 새 사업으로 추가" in pending
+    linked = _text(client.get("/nr?state=auto"))
+    assert 'id="pick-all"' not in linked and 'name="plan"' not in linked
+
+
 def test_plan_actions_refuse_bad_ids_and_other_sites(world):
     path, _ = world
     _nr(path, NR_ROW)

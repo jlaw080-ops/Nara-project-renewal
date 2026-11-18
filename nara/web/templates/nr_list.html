@@ -14,11 +14,22 @@
 </nav>
 <section class="panel panel--flush" aria-label="설치계획서 목록">
   <div class="resultbar"><span class="resultbar__count">{{ labels[state] }} {{ rows|length }}건</span><span class="muted">점수는 기관·건물명·준공예정일이 사업과 얼마나 맞는지입니다(1에 가까울수록 같음).</span></div>
+  {% set pickable = state == 'pending' and rows %}
+  {% if pickable %}
+  <form method="post" id="nr-form" action="{{ url_for('nr_new_bulk') }}">
+  <div class="bulkbar" id="bulkbar">
+    <span id="pick-count">0건 고름</span>
+    <button type="submit" class="btn btn--sm">선택 항목 새 사업으로 추가</button>
+    <button type="button" class="btn btn--sm btn--quiet" id="pick-none">선택 해제</button>
+    <span class="muted">고른 설치계획서마다 기관·건물명으로 새 사업을 만들어 연결합니다.</span>
+  </div>
+  {% endif %}
   <div class="table-wrap"><table class="table">
-  <thead><tr><th>기관명</th><th>건물명</th><th>준공예정일</th><th>연결된 사업</th><th>점수</th><th>받은 때</th><th class="col-num"></th></tr></thead>
+  <thead><tr>{% if pickable %}<th class="col-check"><input type="checkbox" id="pick-all" aria-label="모두 고르기"></th>{% endif %}<th>기관명</th><th>건물명</th><th>준공예정일</th><th>연결된 사업</th><th>점수</th><th>받은 때</th><th class="col-num"></th></tr></thead>
   <tbody>
   {% for n in rows %}
   <tr>
+    {% if pickable %}<td class="col-check"><input type="checkbox" name="plan" value="{{ n.id }}" aria-label="{{ n.building_name }} 고르기"></td>{% endif %}
     <td>{{ n.org_name }}</td>
     <td><a class="title" href="{{ url_for('nr_detail', plan_id=n.id) }}">{{ n.building_name }}</a></td>
     <td class="col-date">{{ n.end_date|dash }}</td>
@@ -32,5 +43,38 @@
   {% endfor %}
   </tbody>
   </table></div>
+  {% if pickable %}</form>{% endif %}
 </section>
+{% if pickable %}
+<script>
+(function () {
+  // 일괄 작업 줄은 고른 행이 있을 때만 보인다. JS가 없으면 늘 보인다.
+  var all = document.getElementById("pick-all");
+  var picks = Array.prototype.slice.call(document.querySelectorAll('#nr-form input[name=plan]'));
+  var bar = document.getElementById("bulkbar");
+  var label = document.getElementById("pick-count");
+  function refresh() {
+    var n = 0;
+    picks.forEach(function (box) {
+      var row = box.closest("tr");
+      if (box.checked) { n++; row.setAttribute("aria-selected", "true"); }
+      else { row.removeAttribute("aria-selected"); }
+    });
+    label.textContent = n + "건 고름";
+    bar.hidden = n === 0;
+    all.checked = n > 0 && n === picks.length;
+  }
+  all.addEventListener("change", function (e) {
+    picks.forEach(function (box) { box.checked = e.target.checked; });
+    refresh();
+  });
+  document.getElementById("pick-none").addEventListener("click", function () {
+    picks.forEach(function (box) { box.checked = false; });
+    refresh();
+  });
+  picks.forEach(function (box) { box.addEventListener("change", refresh); });
+  refresh();
+})();
+</script>
+{% endif %}
 {% endblock %}

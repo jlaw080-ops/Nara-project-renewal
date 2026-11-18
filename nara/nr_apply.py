@@ -239,6 +239,24 @@ def link_plan(
     return project_id
 
 
+def new_projects_for_pending(
+    conn: sqlite3.Connection, plan_ids: list[int], settings: Settings, now: str
+) -> int:
+    """고른 설치계획서 중 아직 '확인 필요'인 것만 새 사업으로 연결한다. 연결한 건수를 돌려준다.
+
+    그새 연결·무시된 건이나 없는 id는 건너뛴다.
+    오래 열어 둔 화면에서 눌러도 사람 판단을 덮지 않는다.
+    """
+    done = 0
+    for plan_id in dict.fromkeys(plan_ids):
+        row = conn.execute("SELECT match_state FROM nr_plan WHERE id = ?", (plan_id,)).fetchone()
+        if row is None or row["match_state"] != "pending":
+            continue
+        link_plan(conn, plan_id, None, settings, now)
+        done += 1
+    return done
+
+
 def ignore_plan(conn: sqlite3.Connection, plan_id: int, now: str | None = None) -> None:
     """무시한다. 연결돼 있던 사업의 설비는 남은 설치계획서로 다시 맞춘다."""
     plan = conn.execute("SELECT project_id FROM nr_plan WHERE id = ?", (plan_id,)).fetchone()
