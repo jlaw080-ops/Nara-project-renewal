@@ -1,6 +1,12 @@
 """공고를 받아들일지 결정하는 순수 함수들."""
 
+import re
+
 from nara.config import Settings
+
+# 광역(특별시·광역시·특별자치시·도·특별자치도) 뒤에 시·군·구만 이어지면 지자체다.
+_REGION = re.compile(r"\S+(특별시|광역시|특별자치시|특별자치도|도)")
+_LOCAL = re.compile(r"\S+(시|군|구)")
 
 
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
@@ -30,3 +36,11 @@ def is_focus_org(org: str, settings: Settings) -> bool:
     있으면 관심 기관."""
     name = (org or "").strip()
     return name in settings.focus_exact_orgs or _contains_any(name, settings.focus_orgs)
+
+
+def is_local_government(org: str) -> bool:
+    """수요기관이 지자체 본청이나 시·군·구인가. 산하 대학·사업소·교육청은 아니다."""
+    words = (org or "").split()
+    if not words or not _REGION.fullmatch(words[0]):
+        return False
+    return all(_LOCAL.fullmatch(w) for w in words[1:])

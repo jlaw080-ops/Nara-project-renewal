@@ -67,8 +67,29 @@ def test_collect_range_stores_passing_notices(conn):
     assert conn.execute("SELECT COUNT(*) FROM project").fetchone()[0] == 2
 
 
-def test_collect_range_drops_non_technical_service(conn):
-    items = [_raw("A1", "전북특별자치도 완주군", "완주 체육관 실시설계용역", div="일반용역")]
+def test_collect_range_drops_general_service_from_non_local_government(conn):
+    items = [
+        _raw("A1", "한국원자력연구원", "SMR 최적화 설계 지원", div="일반용역"),
+        _raw("A2", "서울특별시 서울시립대학교", "기획전 전시 설계 및 설치 용역", div="일반용역"),
+    ]
+    with _client(items) as client:
+        added = collect_range(conn, client, "KEY", SETTINGS, BEGIN, END, RunCounters())
+    assert added == 0
+
+
+def test_collect_range_keeps_general_service_from_local_government(conn):
+    # 2026-10-28 울산 남구 공고는 나라장터가 '일반용역'으로 분류해 빠졌다.
+    items = [
+        _raw("R26BK01795966", "울산광역시 남구", "도산도서관 그린리모델링 사업 실시설계용역",
+             div="일반용역"),
+    ]  # fmt: skip
+    with _client(items) as client:
+        added = collect_range(conn, client, "KEY", SETTINGS, BEGIN, END, RunCounters())
+    assert added == 1
+
+
+def test_collect_range_drops_other_service_kinds_even_from_local_government(conn):
+    items = [_raw("A1", "전북특별자치도 완주군", "완주 체육관 실시설계용역", div="일반용역(리스)")]
     with _client(items) as client:
         added = collect_range(conn, client, "KEY", SETTINGS, BEGIN, END, RunCounters())
     assert added == 0

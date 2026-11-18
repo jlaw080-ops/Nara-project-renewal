@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from nara.config import load_settings
-from nara.filters import is_focus_org, org_passes, title_passes
+from nara.filters import is_focus_org, is_local_government, org_passes, title_passes
 
 SETTINGS = load_settings(Path(__file__).resolve().parents[1] / "config.toml")
 
@@ -101,3 +101,38 @@ def test_org_rejected_by_excluded_keyword(org):
 )
 def test_is_focus_org_matches_by_substring(org, expected):
     assert is_focus_org(org, SETTINGS) is expected
+
+
+@pytest.mark.parametrize(
+    "org",
+    [
+        "울산광역시 남구",
+        "서울특별시",
+        "세종특별자치시",
+        "강원특별자치도",
+        "경상북도 칠곡군",
+        "충청북도 제천시",
+        "경기도 용인시 처인구",
+        "전남광주통합특별시",
+    ],
+)
+def test_local_governments_are_recognised_by_name(org):
+    assert is_local_government(org)
+
+
+@pytest.mark.parametrize(
+    "org",
+    [
+        "",
+        "한국원자력연구원",
+        "서울특별시 서울시립대학교",  # 지자체 산하 대학
+        "서울특별시 서울시립대학교 산학협력단",
+        "서울특별시 미래한강본부",  # 사업소·본부는 지자체 본청·시군구가 아니다
+        "울산광역시교육청 울산광역시강남교육지원청",
+        "재단법인 대구전통시장진흥재단",
+        "주식회사 제이어스",
+        "한국도로공사",
+    ],
+)
+def test_other_agencies_are_not_local_governments(org):
+    assert not is_local_government(org)

@@ -7,14 +7,24 @@ from datetime import date, datetime, timedelta
 import httpx
 
 from nara.config import Settings
-from nara.filters import is_focus_org, org_passes, title_passes
+from nara.filters import is_focus_org, is_local_government, org_passes, title_passes
 from nara.g2b.list_api import NoticeItem, iter_notices
 from nara.runlog import RunCounters
 from nara.store import ensure_project, promote_focus_orgs, upsert_notice, upsert_org
 
+# 지자체 건축 설계도 나라장터가 일반용역으로 분류할 때가 있다(2026-10 울산 남구 도서관).
+# 일반용역은 연구·전시·장비 설계가 대부분이라 지자체 공고만 받는다.
+LOCAL_GOVERNMENT_SERVICE_DIV = "일반용역"
+
+
+def _service_div_passes(item: NoticeItem, settings: Settings) -> bool:
+    if item.service_div == settings.service_div_name:
+        return True
+    return item.service_div == LOCAL_GOVERNMENT_SERVICE_DIV and is_local_government(item.org_name)
+
 
 def _accepts(item: NoticeItem, settings: Settings) -> bool:
-    if item.service_div != settings.service_div_name:
+    if not _service_div_passes(item, settings):
         return False
     if settings.skip_cancelled and "취소" in item.kind:
         return False
