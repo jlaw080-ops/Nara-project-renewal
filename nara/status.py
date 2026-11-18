@@ -10,12 +10,14 @@ from datetime import datetime
 
 from nara.config import Secrets
 from nara.naver import SearchResult
+from nara.nr_apply import LINKED
 from nara.runlog import RunCounters
 from nara.verdict import (
     UNKNOWN,
     Facts,
     Judgment,
     date_conflict,
+    date_verdict,
     demote_premature_completion,
     demote_without_evidence,
     read_news,
@@ -144,6 +146,18 @@ def _project_open_date(conn: sqlite3.Connection, project_id: int, today: str) ->
     return future[0] if future else ""
 
 
+def _has_linked_plan(conn: sqlite3.Connection, project_id: int) -> bool:
+    """사람이나 자동 매칭이 이 사업에 연결한 설치계획서가 있는가. 확인 필요·무시는 아니다."""
+    marks = ", ".join("?" for _ in LINKED)
+    return (
+        conn.execute(
+            f"SELECT 1 FROM nr_plan WHERE project_id = ? AND match_state IN ({marks})",
+            (project_id, *LINKED),
+        ).fetchone()
+        is not None
+    )
+
+
 def judge_project(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
@@ -169,7 +183,23 @@ def judge_project(
     open_date = _project_open_date(conn, row["id"], today)
     dates = (row["start_date"] or "", row["end_date"] or "")
 
-    verdict, reason = rule_verdict(Facts(has_winner=has_winner, open_date=open_date, today=today))
+    # 설치계획서가 붙은 사업은 준공예정일이 확실히 멀 때 그 날짜로 정한다.
+    # 앞뒤 6개월 안이면 날짜로 말하지 않고 아래 공고·뉴스 판정으로 넘어간다.
+    plan_note = ""
+    if _has_linked_plan(conn, row["id"]):
+        by_date = date_verdict(dates[1], today)
+        if by_date is not None:
+            return Judgment(verdict=by_date[0], reason=by_date[1], decided_by="nr", evidence_url="")
+        if dates[1]:
+            plan_note = f"설치계획서 준공예정일 {dates[1]} 앞뒤 6개월 — 날짜로 판정하지 않음"
+
+    has_notice = (
+        conn.execute("SELECT 1 FROM notice WHERE project_id = ?", (row["id"],)).fetchone()
+        is not None
+    )
+    verdict, reason = rule_verdict(
+        Facts(has_winner=has_winner, open_date=open_date, today=today, has_notice=has_notice)
+    )
     decided_by, evidence_url = "rule", ""
 
     query = news_query(row["name"], row["org_name"])
@@ -245,6 +275,9 @@ def judge_project(
     verdict, premature = demote_premature_completion(verdict, dates, today)
     if premature:
         reason = f"{reason} / {premature}"
+
+    if plan_note:
+        reason = f"{reason} / {plan_note}"
 
     conflict = date_conflict(verdict, dates, today)
     if conflict:

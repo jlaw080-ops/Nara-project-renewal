@@ -12,6 +12,7 @@ from nara.verdict import (
     Facts,
     Judgment,
     date_conflict,
+    date_verdict,
     demote_premature_completion,
     demote_without_evidence,
     read_news,
@@ -37,12 +38,17 @@ def test_rule_verdict_uses_passed_opening_when_winner_unknown():
     assert "개찰" in reason
 
 
-def test_rule_verdict_is_unknown_before_opening():
-    """개찰 전이면 아무것도 모른다. 공고일로 추정하지 않는다."""
+def test_rule_verdict_calls_a_design_tender_design_stage_even_before_opening():
+    """나라장터 설계용역 공고가 났다는 것 자체가 설계 단계라는 뜻이다(2026-11-19 사용자 기준)."""
     facts = Facts(has_winner=False, open_date="2026-12-01", today="2026-09-18")
     verdict, reason = rule_verdict(facts)
-    assert verdict == UNKNOWN
-    assert reason
+    assert verdict == BEFORE
+    assert "2026-12-01" in reason
+
+
+def test_rule_verdict_calls_a_notice_without_opening_date_design_stage():
+    facts = Facts(has_winner=False, open_date="", today="2026-09-18", has_notice=True)
+    assert rule_verdict(facts)[0] == BEFORE
 
 
 def test_rule_verdict_is_unknown_without_opening_date():
@@ -666,3 +672,66 @@ def test_read_news_still_reads_a_dated_completion_as_done():
     )
     assert got.verdict == DONE
     assert got.needs_llm is False
+
+
+# 설치계획서 준공예정일 규칙 (2026-11-19 사용자 기준)
+# 6개월 넘게 남음 → 시공 중 / 앞뒤 6개월 안 → 판정하지 않음 / 6개월 넘게 지남 → 준공 완료
+
+
+def test_date_verdict_says_building_when_completion_is_more_than_six_months_away():
+    verdict, reason = date_verdict("2027-06-01", "2026-11-19")
+    assert verdict == BUILDING
+    assert "2027-06-01" in reason
+
+
+def test_date_verdict_counts_exactly_six_months_ahead_as_building():
+    assert date_verdict("2027-05-19", "2026-11-19")[0] == BUILDING
+
+
+def test_date_verdict_leaves_the_six_months_before_completion_undecided():
+    assert date_verdict("2027-05-18", "2026-11-19") is None
+    assert date_verdict("2026-12-01", "2026-11-19") is None
+
+
+def test_date_verdict_leaves_the_first_six_months_after_completion_undecided():
+    """준공예정일이 지났다고 준공한 것은 아니다 — 3~6개월 지연은 흔하다."""
+    assert date_verdict("2026-11-19", "2026-11-19") is None
+    assert date_verdict("2026-08-19", "2026-11-19") is None  # 3개월 지남
+    assert date_verdict("2026-05-20", "2026-11-19") is None
+
+
+def test_date_verdict_says_done_once_completion_is_six_months_past():
+    verdict, reason = date_verdict("2026-05-19", "2026-11-19")
+    assert verdict == DONE
+    assert "2026-05-19" in reason
+    assert date_verdict("2015-12-31", "2026-11-19")[0] == DONE
+
+
+def test_date_verdict_clamps_month_ends():
+    """8월 31일의 6개월 뒤는 2월 말일이다. 존재하지 않는 날짜로 터지면 안 된다."""
+    assert date_verdict("2027-02-28", "2026-08-31")[0] == BUILDING
+    assert date_verdict("2027-02-27", "2026-08-31") is None
+
+
+def test_date_verdict_does_not_guess_without_a_valid_date():
+    assert date_verdict("", "2026-11-19") is None
+    assert date_verdict("2027-13-40", "2026-11-19") is None
+
+
+def test_should_record_lets_the_plan_date_rule_replace_news_and_imports():
+    candidate = Judgment(DONE, "설치계획서 준공예정일 2015-12-31 + 6개월 경과", "nr", "")
+    for who in ("news", "imported", "rule", "llm"):
+        latest = {"verdict": BUILDING, "reason": "x", "decided_by": who}
+        assert should_record(latest, candidate)[0], who
+
+
+def test_should_record_keeps_a_human_verdict_over_the_plan_date_rule():
+    candidate = Judgment(DONE, "설치계획서 준공예정일 2015-12-31 + 6개월 경과", "nr", "")
+    latest = {"verdict": BUILDING, "reason": "x", "decided_by": "human"}
+    assert not should_record(latest, candidate)[0]
+
+
+def test_should_record_never_moves_backwards_for_the_plan_date_rule():
+    candidate = Judgment(BUILDING, "설치계획서 준공예정일까지 6개월 넘게 남음", "nr", "")
+    latest = {"verdict": DONE, "reason": "x", "decided_by": "imported"}
+    assert not should_record(latest, candidate)[0]

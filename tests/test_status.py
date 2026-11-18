@@ -1021,3 +1021,83 @@ def test_judge_counts_a_winner_a_person_typed_as_the_design_stage(conn):
     )
     assert got.verdict == BEFORE
     assert got.reason.startswith("낙찰업체가 기록됨 — 설계 단계")
+
+
+def _with_plan(conn, project_id, end_date, state="new"):
+    """설치계획서를 사업에 붙이고 준공예정일을 사업 칸에 반영한다(apply_plans가 하는 일)."""
+    conn.execute(
+        "INSERT INTO nr_plan (key, org_name, building_name, end_date, received_at, updated_at, "
+        "project_id, match_state) VALUES (?, '기관', '건물', ?, ?, ?, ?, ?)",
+        (f"K{project_id}-{state}", end_date, NOW, NOW, project_id, state),
+    )
+    conn.execute("UPDATE project SET end_date = ? WHERE id = ?", (end_date, project_id))
+    conn.commit()
+
+
+def _search_must_not_run(*args, **kwargs):
+    raise AssertionError("날짜로 정해지는 사업은 뉴스를 검색하지 않는다")
+
+
+TODAY = "2026-11-19"
+
+
+def test_a_planned_building_far_from_completion_is_under_construction(conn):
+    project_id = _project(conn, "울산광역시 북구", "북구 장애인복지관")
+    _with_plan(conn, project_id, "2028-03-31")
+    got = judge_project(
+        conn, _row(conn, project_id), SECRETS, TODAY,
+        search=_search_must_not_run, adjudicator=_no_llm,
+    )  # fmt: skip
+    assert (got.verdict, got.decided_by) == (BUILDING, "nr")
+    assert "2028-03-31" in got.reason
+
+
+def test_a_planned_building_long_past_completion_is_done(conn):
+    project_id = _project(conn, "울산광역시 북구", "북구 육아종합지원센터")
+    _with_plan(conn, project_id, "2022-12-31")
+    got = judge_project(
+        conn, _row(conn, project_id), SECRETS, TODAY,
+        search=_search_must_not_run, adjudicator=_no_llm,
+    )  # fmt: skip
+    assert (got.verdict, got.decided_by) == (DONE, "nr")
+
+
+def test_a_planned_building_near_completion_goes_through_the_usual_checks(conn):
+    project_id = _project(conn, "울산광역시 북구", "북구 평생학습관")
+    _with_plan(conn, project_id, "2026-12-31")
+    got = judge_project(
+        conn, _row(conn, project_id), SECRETS, TODAY, search=_no_search, adjudicator=_no_llm
+    )
+    assert got.decided_by == "rule"
+    assert got.verdict not in (BUILDING, DONE)
+    assert "준공예정일 2026-12-31 앞뒤 6개월" in got.reason
+
+
+def test_a_design_tender_with_a_linked_plan_follows_the_plan_dates(conn):
+    project_id = _project(conn, "울산광역시 남구", "옥동 어울림 복합센터 건립공사")
+    _add_notice(conn, project_id, "B1", "2025-03-10")
+    _with_plan(conn, project_id, "2028-12-31", state="auto")
+    got = judge_project(
+        conn, _row(conn, project_id), SECRETS, TODAY,
+        search=_search_must_not_run, adjudicator=_no_llm,
+    )  # fmt: skip
+    assert (got.verdict, got.decided_by) == (BUILDING, "nr")
+
+
+def test_a_plan_that_was_ignored_or_is_still_pending_does_not_decide(conn):
+    for state in ("ignored", "pending"):
+        project_id = _project(conn, "울산광역시 중구", f"중구 시설 {state}")
+        _with_plan(conn, project_id, "2015-12-31", state=state)
+        got = judge_project(
+            conn, _row(conn, project_id), SECRETS, TODAY, search=_no_search, adjudicator=_no_llm
+        )
+        assert got.decided_by == "rule", state
+
+
+def test_a_design_tender_before_opening_is_design_stage(conn):
+    project_id = _project(conn, "울산광역시 남구", "도산도서관 그린리모델링 사업 실시설계용역")
+    _add_notice(conn, project_id, "B2", "2026-12-01")
+    got = judge_project(
+        conn, _row(conn, project_id), SECRETS, TODAY, search=_no_search, adjudicator=_no_llm
+    )
+    assert got.verdict == BEFORE

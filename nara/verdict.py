@@ -1,6 +1,8 @@
 """진행현황 판정 규칙. I/O가 없어야 테스트가 네트워크를 타지 않는다."""
 
+from calendar import monthrange
 from dataclasses import dataclass
+from datetime import date
 
 BEFORE = "착공 전(설계 단계)"
 BUILDING = "시공 중"
@@ -41,6 +43,11 @@ def should_record(latest: dict | None, candidate: Judgment) -> tuple[bool, str]:
     # 모르는 값(오타·대소문자 등)이든 — 규칙 판정은 그것을 밀어내지 못한다.
     # 규칙 판정은 DB 사실로 내리는 것이라 뉴스 근거를 가질 일이 없다.
     # evidence_url 유무로 여는 조건은 두지 않는다 — 그 조건이 우회로였다(F2).
+    # 설치계획서 준공예정일 규칙은 뉴스·이관 판정보다 앞선다(2026-11-19 사용자 기준).
+    # 사람이 직접 정한 판정만은 덮지 않는다.
+    if candidate.decided_by == "nr" and latest.get("decided_by") == "human":
+        return False, f"사람이 정한 '{latest.get('verdict')}' 판정을 날짜 규칙으로 덮지 않는다"
+
     if candidate.decided_by == "rule" and latest.get("decided_by") != "rule":
         return False, (
             f"근거를 보고 내린 '{latest.get('verdict')}' 판정을 규칙 판정으로 밀어내지 않는다"
@@ -116,21 +123,53 @@ class Facts:
     has_winner: bool
     open_date: str  # ISO 또는 ""
     today: str  # ISO
+    has_notice: bool = False  # 나라장터 공고가 하나라도 붙어 있는가
 
 
 def rule_verdict(facts: Facts) -> tuple[str, str]:
     """(판정, 근거). 규칙은 '착공 전'과 '미확인'까지만 말한다.
 
-    '시공 중'·'준공 완료'는 보도 근거가 있어야 내릴 수 있는 판정이라
-    여기서는 절대 나오지 않는다.
+    '시공 중'·'준공 완료'는 보도나 설치계획서 날짜 근거가 있어야 내릴 수 있는
+    판정이라 여기서는 절대 나오지 않는다. 나라장터 설계용역 공고가 났다는 것
+    자체가 설계 단계라는 뜻이라 개찰 전이어도 착공 전으로 본다(2026-11-19 사용자 기준).
     """
     if facts.has_winner:
         return BEFORE, "낙찰업체가 기록됨 — 설계 단계"
     if facts.open_date and facts.open_date <= facts.today:
         return BEFORE, "개찰일이 지났고 낙찰업체 미확인 — 설계 단계"
     if facts.open_date:
-        return UNKNOWN, f"개찰 전(개찰 예정 {facts.open_date})"
+        return BEFORE, f"설계용역 공고 — 설계 단계(개찰 예정 {facts.open_date})"
+    if facts.has_notice:
+        return BEFORE, "설계용역 공고 — 설계 단계"
     return UNKNOWN, "개찰일 없음"
+
+
+PLAN_WINDOW_MONTHS = 6  # 준공예정일 앞뒤 이 기간은 날짜로 판정하지 않는다
+
+
+def _add_months(day: date, months: int) -> date:
+    """달을 더한다. 8월 31일 + 6개월처럼 없는 날짜는 그 달 말일로 맞춘다."""
+    year, month = divmod(day.month - 1 + months, 12)
+    year += day.year
+    month += 1
+    return date(year, month, min(day.day, monthrange(year, month)[1]))
+
+
+def date_verdict(end_date: str, today: str) -> tuple[str, str] | None:
+    """설치계획서 준공예정일로 판정한다. 앞뒤 6개월 안이면 None — 판정하지 않는다.
+
+    준공예정일이 지났다고 준공한 것은 아니고, 남았다고 착공한 것도 아니다.
+    날짜가 확실히 멀 때만 단계를 말한다(2026-11-19 사용자 기준).
+    """
+    try:
+        end, now = date.fromisoformat(end_date), date.fromisoformat(today)
+    except ValueError:
+        return None
+    if end >= _add_months(now, PLAN_WINDOW_MONTHS):
+        return BUILDING, f"설치계획서 준공예정일 {end_date}까지 6개월 넘게 남음"
+    if end <= _add_months(now, -PLAN_WINDOW_MONTHS):
+        return DONE, f"설치계획서 준공예정일 {end_date}에서 6개월 넘게 지남"
+    return None
 
 
 SIGNAL_START = "착공"
