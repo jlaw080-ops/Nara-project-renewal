@@ -1760,6 +1760,42 @@ def test_bulk_new_with_nothing_picked_says_so(world):
     assert _plan_states(path)["2026-001"][0] == "pending"
 
 
+def test_picked_pending_plans_are_all_ignored_at_once(world):
+    path, ids = world
+    first, second = _two_pending_plans(path, ids)
+    client = _client(path)
+    resp = _post(client, "/nr/ignore", {"plan": [str(first), str(second)]})
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/nr")
+    states = _plan_states(path)
+    assert states["2026-001"] == ("ignored", None)
+    assert states["2026-003"] == ("ignored", None)
+    page = _text(client.get("/nr"))
+    assert "2건을 무시했습니다" in page and "확인 필요 0건" in page
+
+
+def test_bulk_ignore_leaves_plans_that_are_no_longer_pending_alone(world):
+    path, ids = world
+    first, second = _two_pending_plans(path, ids)
+    client = _client(path)
+    assert _post(client, "/nr/new", {"plan": [str(second)]}).status_code == 302
+    linked = _plan_states(path)["2026-003"]
+    resp = _post(client, "/nr/ignore", {"plan": [str(first), str(second), "abc"]})
+    assert resp.status_code == 302
+    states = _plan_states(path)
+    assert states["2026-001"] == ("ignored", None)
+    assert states["2026-003"] == linked
+    assert "1건을 무시했습니다" in _text(client.get("/nr"))
+
+
+def test_bulk_ignore_with_nothing_picked_says_so(world):
+    path, ids = world
+    _two_pending_plans(path, ids)
+    client = _client(path)
+    assert _post(client, "/nr/ignore", {}).status_code == 302
+    assert "무시할 설치계획서가 없습니다" in _text(client.get("/nr"))
+    assert _plan_states(path)["2026-001"][0] == "pending"
+
+
 def test_only_the_pending_tab_has_pick_boxes_and_the_bulk_button(world):
     path, ids = world
     first, _ = _two_pending_plans(path, ids)
@@ -1768,6 +1804,7 @@ def test_only_the_pending_tab_has_pick_boxes_and_the_bulk_button(world):
     assert 'id="pick-all"' in pending
     assert f'name="plan" value="{first}"' in pending
     assert "선택 항목 새 사업으로 추가" in pending
+    assert 'formaction="/nr/ignore"' in pending and "선택 항목 무시" in pending
     linked = _text(client.get("/nr?state=auto"))
     assert 'id="pick-all"' not in linked and 'name="plan"' not in linked
 

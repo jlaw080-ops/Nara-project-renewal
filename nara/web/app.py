@@ -30,7 +30,13 @@ from nara import auth, settings_store
 from nara.config import Settings
 from nara.db import attachments_dir
 from nara.energy import EnergyKind, load_kinds
-from nara.nr_apply import ignore_plan, ingest, link_plan, new_projects_for_pending
+from nara.nr_apply import (
+    ignore_pending,
+    ignore_plan,
+    ingest,
+    link_plan,
+    new_projects_for_pending,
+)
 from nara.nr_match import candidates
 from nara.nr_plan import load_energy
 from nara.runlog import run_log
@@ -752,28 +758,37 @@ def create_app(
 
         return _nr_write(plan_id, act)
 
-    @app.post("/nr/new")
-    def nr_new_bulk():
+    def _nr_bulk(action, done_message: str, none_message: str):
+        """고른 설치계획서 일괄 처리 공통. 처리 건수를 알리고 목록으로 돌아간다."""
         plan_ids = _project_ids(request.form.getlist("plan"))
         if not plan_ids:
-            flash("새 사업으로 추가할 설치계획서가 없습니다")
+            flash(none_message)
             return redirect(url_for("nr_list"))
         if current_app.config.get("SETTINGS") is None:
             abort(503)
         now = datetime.now().isoformat(timespec="seconds")
         try:
             with closing(_rw_conn()) as conn:
-                done = new_projects_for_pending(conn, plan_ids, _settings(conn), now)
+                done = action(conn, plan_ids, now)
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc):
                 raise
             flash(BUSY_MESSAGE)
             return redirect(url_for("nr_list"))
-        if done:
-            flash(f"{done}건을 새 사업으로 추가했습니다")
-        else:
-            flash("새 사업으로 추가할 설치계획서가 없습니다")
+        flash(done_message.format(done) if done else none_message)
         return redirect(url_for("nr_list"))
+
+    @app.post("/nr/new")
+    def nr_new_bulk():
+        return _nr_bulk(
+            lambda conn, ids, now: new_projects_for_pending(conn, ids, _settings(conn), now),
+            "{}건을 새 사업으로 추가했습니다",
+            "새 사업으로 추가할 설치계획서가 없습니다",
+        )
+
+    @app.post("/nr/ignore")
+    def nr_ignore_bulk():
+        return _nr_bulk(ignore_pending, "{}건을 무시했습니다", "무시할 설치계획서가 없습니다")
 
     @app.post("/nr/<int:plan_id>/ignore")
     def nr_ignore(plan_id: int):

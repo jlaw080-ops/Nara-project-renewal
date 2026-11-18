@@ -239,22 +239,36 @@ def link_plan(
     return project_id
 
 
+def _still_pending(conn: sqlite3.Connection, plan_ids: list[int]) -> list[int]:
+    """고른 id 중 아직 '확인 필요'인 것만, 중복 없이 고른 순서대로.
+
+    그새 연결·무시된 건이나 없는 id는 뺀다.
+    오래 열어 둔 화면에서 눌러도 사람 판단을 덮지 않는다.
+    """
+    keep = []
+    for plan_id in dict.fromkeys(plan_ids):
+        row = conn.execute("SELECT match_state FROM nr_plan WHERE id = ?", (plan_id,)).fetchone()
+        if row is not None and row["match_state"] == "pending":
+            keep.append(plan_id)
+    return keep
+
+
 def new_projects_for_pending(
     conn: sqlite3.Connection, plan_ids: list[int], settings: Settings, now: str
 ) -> int:
-    """고른 설치계획서 중 아직 '확인 필요'인 것만 새 사업으로 연결한다. 연결한 건수를 돌려준다.
-
-    그새 연결·무시된 건이나 없는 id는 건너뛴다.
-    오래 열어 둔 화면에서 눌러도 사람 판단을 덮지 않는다.
-    """
-    done = 0
-    for plan_id in dict.fromkeys(plan_ids):
-        row = conn.execute("SELECT match_state FROM nr_plan WHERE id = ?", (plan_id,)).fetchone()
-        if row is None or row["match_state"] != "pending":
-            continue
+    """고른 설치계획서 중 아직 '확인 필요'인 것만 새 사업으로 연결한다. 연결한 건수를 돌려준다."""
+    pending = _still_pending(conn, plan_ids)
+    for plan_id in pending:
         link_plan(conn, plan_id, None, settings, now)
-        done += 1
-    return done
+    return len(pending)
+
+
+def ignore_pending(conn: sqlite3.Connection, plan_ids: list[int], now: str) -> int:
+    """고른 설치계획서 중 아직 '확인 필요'인 것만 무시한다. 무시한 건수를 돌려준다."""
+    pending = _still_pending(conn, plan_ids)
+    for plan_id in pending:
+        ignore_plan(conn, plan_id, now)
+    return len(pending)
 
 
 def ignore_plan(conn: sqlite3.Connection, plan_id: int, now: str | None = None) -> None:

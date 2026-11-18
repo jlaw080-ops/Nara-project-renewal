@@ -20,8 +20,9 @@
   <div class="bulkbar" id="bulkbar">
     <span id="pick-count">0건 고름</span>
     <button type="submit" class="btn btn--sm">선택 항목 새 사업으로 추가</button>
+    <button type="submit" class="btn btn--sm btn--secondary" formaction="{{ url_for('nr_ignore_bulk') }}">선택 항목 무시</button>
     <button type="button" class="btn btn--sm btn--quiet" id="pick-none">선택 해제</button>
-    <span class="muted">고른 설치계획서마다 기관·건물명으로 새 사업을 만들어 연결합니다.</span>
+    <span class="muted">새 사업 추가는 고른 건마다 기관·건물명으로 사업을 만들어 연결합니다. 무시한 건은 무시 탭으로 옮겨집니다.</span>
   </div>
   {% endif %}
   <div class="table-wrap"><table class="table">
