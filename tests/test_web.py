@@ -1335,6 +1335,55 @@ def test_a_candidate_is_never_shown_as_the_department(world):
     assert rows[ids["culture"]]["exec_dept"] is None
 
 
+def _head(conn, project_id, dept, name, position, tel):
+    org = conn.execute("SELECT org_id FROM project WHERE id = ?", (project_id,)).fetchone()[0]
+    conn.execute(
+        "INSERT INTO dept_contact (org_id, dept, head_name, head_position, head_tel, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (org, dept, name, position, tel, NOW),
+    )
+
+
+def test_the_list_shows_the_department_head_under_the_department(world):
+    """영업 전화를 걸 사람과 번호를 목록에서 바로 본다."""
+    path, ids = world
+    conn = connect(path)
+    _dept(conn, ids["gym"], "건축과", "2026-09-01T09:00:00")
+    _head(conn, ids["gym"], "건축과", "홍길동", "과장", "063-000-0000")
+    conn.commit()
+    conn.close()
+    row = {r["id"]: r for r in _list(path).rows}[ids["gym"]]
+    assert (row["head_name"], row["head_position"], row["head_tel"]) == (
+        "홍길동", "과장", "063-000-0000"
+    )  # fmt: skip
+    page = _text(_client(path).get("/"))
+    assert "홍길동 과장 · 063-000-0000" in page
+
+
+def test_the_list_shows_position_and_number_when_the_name_is_not_public(world):
+    path, ids = world
+    conn = connect(path)
+    _dept(conn, ids["gym"], "건축과", "2026-09-01T09:00:00")
+    _head(conn, ids["gym"], "건축과", None, "과장", "063-000-0000")
+    conn.commit()
+    conn.close()
+    assert "과장 · 063-000-0000" in _text(_client(path).get("/"))
+
+
+def test_a_candidate_departments_head_is_not_shown_on_the_list(world):
+    """후보 부서의 부서장이 확정 부서의 부서장처럼 보이면 엉뚱한 사람에게 전화한다."""
+    path, ids = world
+    conn = connect(path)
+    _dept(conn, ids["gym"], "건축과", "2026-09-01T09:00:00")
+    _dept(conn, ids["gym"], "문화관광과", "2026-09-28T09:00:00", "rule", confirmed=0)
+    _head(conn, ids["gym"], "문화관광과", "이몽룡", "과장", "063-000-0009")
+    conn.commit()
+    conn.close()
+    row = {r["id"]: r for r in _list(path).rows}[ids["gym"]]
+    assert row["head_tel"] is None
+    assert "063-000-0009" not in _text(_client(path).get("/"))
+
+
 def test_a_new_candidate_does_not_block_a_save_in_progress(world):
     """폼을 연 사이 자동 조회가 후보를 남겨도 확정값은 그대로라 저장이 막히면 안 된다."""
     path, ids = world

@@ -121,7 +121,7 @@
     <td class="col-date">{{ r.open_date|dash }}</td>
     <td>{{ verdict_badge(r.verdict, r.verdict_by, no_verdict) }}</td>
     <td>{{ r.winner|dash }}</td>
-    <td>{% if r.exec_dept %}{{ r.exec_dept }}{% elif r.dept_review %}<span class="badge badge--none">검토 필요</span>{% else %}—{% endif %}</td>
+    <td>{% if r.exec_dept %}{{ r.exec_dept }}{% set head = [r.head_name, r.head_position]|select|join(' ') %}{% if head or r.head_tel %}<span class="sub">{{ [head, r.head_tel]|select|join(' · ') }}</span>{% endif %}{% elif r.dept_review %}<span class="badge badge--none">검토 필요</span>{% else %}—{% endif %}</td>
     <td>{{ r.energy|dash }}</td>
   </tr>
   {% else %}

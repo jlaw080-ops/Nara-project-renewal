@@ -205,6 +205,7 @@ LEFT JOIN ln ON ln.project_id = p.id AND ln.rn = 1
 LEFT JOIN ls ON ls.project_id = p.id AND ls.rn = 1
 LEFT JOIN ld ON ld.project_id = p.id AND ld.rn = 1
 LEFT JOIN lr ON lr.project_id = p.id
+LEFT JOIN dept_contact dc ON dc.org_id = p.org_id AND dc.dept = ld.exec_dept
 LEFT JOIN award a ON a.bid_no = ln.bid_no
 """
 
@@ -295,6 +296,7 @@ def build_list_query(f: Filters) -> tuple[str, list]:
         + "ln.notice_date, ln.open_date, ls.verdict, ls.decided_by AS verdict_by, "
         + "COALESCE(p.winner, a.winner) AS winner, "
         + "ld.exec_dept, (lr.project_id IS NOT NULL AND ld.exec_dept IS NULL) AS dept_review, "
+        + "dc.head_name, dc.head_position, dc.head_tel, "
         + f"{_ENERGY} AS energy, "
         + f"{matched_sql} AS matched_title"
         + _FROM
