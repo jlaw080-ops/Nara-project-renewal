@@ -25,14 +25,14 @@
 {% if result.truncated %}<p class="notice">조건에 맞는 {{ result.matched }}건 중 {{ rows|length }}건만 출력합니다 — 조건을 좁혀 주세요.</p>{% endif %}
 <table>
 <colgroup>
-  <col style="width:6%"><col style="width:10%"><col style="width:9%"><col style="width:5%"><col style="width:5%">
+  <col style="width:6%"><col style="width:14%"><col style="width:12%"><col style="width:5%"><col style="width:5%">
   <col style="width:5%"><col style="width:5%"><col style="width:6%"><col style="width:4%"><col style="width:4%">
-  <col style="width:6%"><col style="width:8%"><col style="width:9%"><col style="width:8%"><col style="width:10%">
+  <col style="width:6%"><col style="width:8%"><col style="width:12%"><col style="width:8%">
 </colgroup>
 <thead><tr>
   <th>수요기관</th><th>공고명</th><th>주소</th><th>공고일(예정일)</th><th>낙찰일(개찰일)</th>
   <th>착공일</th><th>준공(예정)일</th><th>담당부서</th><th>부서장</th><th>직위</th>
-  <th>전화번호</th><th>낙찰업체 설계사무소</th><th>설치계획내용</th><th>신재생에너지원별 예상가</th><th>진행현황</th>
+  <th>전화번호</th><th>낙찰업체 설계사무소</th><th>설치계획내용</th><th>신재생에너지원별 예상가</th>
 </tr></thead>
 <tbody>
 {% for r in rows %}
@@ -51,7 +51,6 @@
   <td>{{ r.winner or '' }}</td>
   <td class="left">{% for line in r.plan %}{{ line }}<br>{% endfor %}</td>
   <td class="left">{% for line in r.costs %}{{ line }}<br>{% endfor %}{% if r.costs %}<span class="total">합계 {{ '{:,}'.format(r.total) }}원</span>{% endif %}{% if r.unpriced %}<br><span class="muted">단가 없음: {{ r.unpriced|join(', ') }}</span>{% endif %}</td>
-  <td>{{ r.status }}</td>
 </tr>
 {% endfor %}
 </tbody>

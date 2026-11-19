@@ -5,11 +5,13 @@ import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from flask import Flask
+from openpyxl import load_workbook
 from typer.testing import CliRunner
 from werkzeug.security import generate_password_hash
 
@@ -1523,7 +1525,7 @@ def test_the_list_shows_the_renewable_plan_instead_of_zeb(world):
 PRINT_HEADERS = [
     "수요기관", "공고명", "주소", "공고일(예정일)", "낙찰일(개찰일)", "착공일", "준공(예정)일",
     "담당부서", "부서장", "직위", "전화번호", "낙찰업체 설계사무소", "설치계획내용",
-    "신재생에너지원별 예상가", "진행현황",
+    "신재생에너지원별 예상가",
 ]  # fmt: skip
 
 
@@ -1551,7 +1553,10 @@ def _print_world(path, ids):
 
 
 def test_the_print_view_lays_out_the_sheet_columns(world):
-    """사업 조회를 시트 양식 그대로 15칸 A4 가로 표로 출력한다(2026-10-02 사용자 양식)."""
+    """사업 조회를 시트 양식대로 A4 가로 표로 출력한다(2026-10-02 사용자 양식).
+
+    진행현황 칸은 PDF에서 뺀다(2026-11-19 사용자 요청). 엑셀에는 남는다.
+    """
     path, ids = world
     _print_world(path, ids)
     text = _text(_client(path).get("/print"))
@@ -1570,12 +1575,30 @@ def test_the_print_view_lays_out_the_sheet_columns(world):
         "PV 50,000,000원",
         "합계 50,000,000원",
         "단가 없음: 풍력",
-        f"{BEFORE} - 26.09 착공 예정",
         "가건축",  # 복지관 낙찰업체
     ):
         assert value in text, value
+    assert "26.09 착공 예정" not in text
     assert "size: A4 landscape" in text
     assert "window.print()" in text
+
+
+def test_the_excel_keeps_the_status_and_carries_the_department_head(world):
+    """엑셀은 15칸 그대로다. 부서장 이름·직위·직통번호가 담겨 영업 전화를 걸 수 있다."""
+    path, ids = world
+    _print_world(path, ids)
+    _two_projects_in_one_department(path, ids)
+    client = _client(path)
+    _post(client, f"/project/{ids['gym']}/edit/dept", _dept_form(client, ids["gym"], **CONTACT))
+    resp = client.get("/export.xlsx")
+    assert resp.status_code == 200
+    ws = load_workbook(BytesIO(resp.data)).active
+    header = [c.value for c in ws[1]]
+    assert header == [*PRINT_HEADERS, "진행현황"]
+    rows = [dict(zip(header, r, strict=True)) for r in ws.iter_rows(min_row=2, values_only=True)]
+    gym = next(r for r in rows if r["공고명"] == "완주군 다목적체육관")
+    assert (gym["부서장"], gym["직위"], gym["전화번호"]) == ("홍길동", "과장", "063-000-0000")
+    assert gym["진행현황"]
 
 
 def test_the_print_view_follows_the_list_filters(world):
