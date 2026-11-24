@@ -61,7 +61,7 @@ Claude API 키가 없거나 답을 못 받은 건은 사유에 "Claude 확인 �
 
 ### 이 PC에서 로그인과 함께 켜기
 
-작업 스케줄러의 `\nara\web` 작업이 Windows 로그인 때 창 없이 `nara serve`를 띄운다. 출력은
+작업 스케줄러의 `\nara\web` 작업이 Windows 로그인 때 창 없이 `nara serve --production`을 띄운다. 출력은
 `data\logs\web.log`에 쌓이고, 꺼지면 1분 뒤 다시 켜진다. 바탕화면의 "나라 앱" 아이콘으로 연다.
 
 ```powershell
@@ -74,6 +74,23 @@ Disable-ScheduledTask -TaskPath '\nara\' -TaskName web  # 자동 실행 해제 (
 작업은 등록만 저장소 밖(이 PC의 작업 스케줄러)에 있다. 다른 PC에 새로 둘 때는 `slot-09` 작업처럼
 `conhost.exe --headless cmd.exe /d /c "... uv run nara serve >> data\logs\web.log 2>&1"`을
 "로그온할 때" 트리거, 실행 시간 제한 없음, 실패 시 1분 뒤 재시작으로 등록한다.
+
+### 밖에서 열기 (Tailscale Funnel)
+
+이 PC의 Tailscale이 `https://<PC 이름>.<tailnet>.ts.net` 주소로 들어온 요청을 127.0.0.1:8120에 잇는다.
+Tailscale은 Windows 서비스라 부팅 때 켜지고, `funnel --bg` 설정도 재부팅 뒤 남는다. 이 PC가 켜져
+있고 로그인돼 있어야 열린다. 처음 한 번 이렇게 둔다.
+
+1. Tailscale 설치·로그인, `tailscale funnel --bg 8120` (처음엔 관리 화면에서 Funnel을 허용하는 링크가 나온다)
+2. `.env`에 `NARA_HOST=<위 주소의 호스트 이름>` — 쿠키를 https 전용으로 하고 그 주소만 믿는다
+3. `\nara\web` 작업을 `nara serve --production`(waitress)으로 띄운다
+
+```powershell
+& "C:\Program Files\Tailscale\tailscale.exe" funnel status          # 공개 상태 보기
+& "C:\Program Files\Tailscale\tailscale.exe" funnel --https=443 off  # 공개 끄기
+```
+
+누구나 주소로 로그인 화면까지는 들어온다. 계정은 `uv run nara user add`로 사람마다 만든다.
 
 서버가 켜져 있으면 `.venv`가 잠겨 `uv sync`가 실패한다. 의존성이 바뀐 코드를 받을 때는 먼저
 끄고, `uv sync` 뒤 다시 켠다.

@@ -169,8 +169,16 @@ def serve(
         settings=settings,
     )
     if production:
-        typer.echo(f"서버 모드: 127.0.0.1:{port} (밖은 Caddy가 https로 잇는다)")
-        waitress_serve(web, host="127.0.0.1", port=port, threads=8)
+        typer.echo(f"서버 모드: 127.0.0.1:{port} (밖은 Caddy·Tailscale Funnel이 https로 잇는다)")
+        # waitress는 믿는 프록시가 없으면 X-Forwarded-Proto를 지운다. 이 컴퓨터의 프록시만 믿는다.
+        waitress_serve(
+            web,
+            host="127.0.0.1",
+            port=port,
+            threads=8,
+            trusted_proxy="127.0.0.1",
+            trusted_proxy_headers={"x-forwarded-proto"},
+        )
         return
     typer.echo(f"조회 화면: http://127.0.0.1:{port}  (끄려면 Ctrl+C)")
     # debug=True는 브라우저에서 코드를 실행하는 디버거를 연다. 로컬이어도 켜지 않는다.

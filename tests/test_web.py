@@ -1248,6 +1248,44 @@ def test_serve_production_uses_waitress_on_this_computer_only(world, tmp_path, m
     assert (seen["host"], seen["port"]) == ("127.0.0.1", 8000)
 
 
+def test_production_server_keeps_the_https_the_proxy_reports(world, tmp_path, monkeypatch):
+    """waitress는 믿는 프록시가 없으면 X-Forwarded-Proto를 지운다. 그러면 앱이 요청을 http로 보고
+    https Origin과 달라 프록시(Tailscale Funnel·Caddy) 너머의 모든 저장을 403으로 막는다."""
+    import http.client
+    import threading
+
+    from waitress import create_server
+
+    seen = {}
+    monkeypatch.setattr("nara.cli.waitress_serve", lambda app, **kw: seen.update(kw, app=app))
+    env = _env_file(tmp_path, NARA_HOST="nara.example.org")
+    result = CliRunner().invoke(
+        cli_app, ["serve", "--db", str(world[0]), "--env", str(env), "--production"]
+    )
+    assert result.exit_code == 0, result.output
+    options = {k: v for k, v in seen.items() if k not in ("app", "port")}
+    server = create_server(seen["app"], **options, port=0)
+    threading.Thread(target=server.run, daemon=True).start()
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", server.effective_port, timeout=10)
+        conn.request(
+            "POST",
+            "/login",
+            body="email=nobody%40example.invalid&password=x",
+            headers={
+                "Host": "nara.example.org",
+                "Origin": "https://nara.example.org",
+                "X-Forwarded-Proto": "https",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
+        status = conn.getresponse().status
+    finally:
+        server.close()
+    # 403이면 같은 출처 확인에서 막힌 것이다. 없는 계정이라 로그인 실패(401)가 나와야 맞다.
+    assert status == 401
+
+
 def test_deploy_files_hold_no_secret_values():
     """저장소는 공개다. 배포 파일에는 이름만 있고 값은 없다."""
     root = Path(__file__).resolve().parents[1] / "deploy"
